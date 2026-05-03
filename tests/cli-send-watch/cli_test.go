@@ -101,13 +101,34 @@ func TestAC1_CliSendWatch_SendWritesPayloadAsTextFrameAndExitsZero(t *testing.T)
 	}
 }
 
+// syncBuf is a goroutine-safe wrapper around bytes.Buffer. cmd.Watch writes
+// from its read goroutine while the test polls Bytes() / String() — bare
+// bytes.Buffer is not safe for concurrent use, so unprotected sharing trips
+// the race detector even when the visible behavior is correct.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 func TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine(t *testing.T) {
 	rec := &recordingHandler{
 		emit: [][]byte{[]byte("one"), []byte("two"), []byte("three")},
 	}
 	url := newFakeWS(t, rec)
 
-	var out bytes.Buffer
+	var out syncBuf
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
