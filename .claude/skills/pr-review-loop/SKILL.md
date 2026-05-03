@@ -49,11 +49,13 @@ Drop the supervisor's own user from review candidates if their author login is t
 A PR is eligible iff all are true:
 
 1. `state == "open"` and not draft.
-2. No `in-review` label (lock not held).
+2. **No `in-review` label** — STRICT. The label is a cross-process lock that another reviewer (this loop on a different machine, a human reviewer, a different agent) may hold. **Never strip an `in-review` label you didn't set in this same tick.** If the label is on, assume someone else is reviewing it; skip and move on.
 3. `mergeable` is `"MERGEABLE"` or `"UNKNOWN"` (skip `"CONFLICTING"` until the author resolves).
-4. Not currently the head of any in-flight `pr-reviewer` subagent (cross-reference active task list).
+4. Not currently the head of any in-flight `pr-reviewer` subagent that THIS supervisor dispatched (cross-reference active task list).
 
 If empty, **idle** — emit `references/idle-banner.md` (small, varied, mood-appropriate) and skip to step 9.
+
+**Stale-label paranoia.** If you suspect a PR's `in-review` label is stale (no activity in >24h, or you can prove a sibling tick set it but crashed), DO NOT strip it autonomously — surface to the user with the PR number and the evidence, and let them decide. Stripping silently risks two reviewers stepping on each other across machines.
 
 ### 4. Plan the batch
 
