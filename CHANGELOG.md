@@ -1,34 +1,44 @@
 # Changelog
 
-All notable changes to Discord Lite are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
+All notable changes to Discord Lite are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) (with timestamped sections instead of `[Unreleased]`) and the project uses [Semantic Versioning](https://semver.org/).
 
-This changelog is intentionally **high-level**: meaningful product, architectural, or operational changes only — not every commit.
+This changelog is intentionally **high-level**: meaningful product, architectural, or operational changes only — not every commit. Each merged PR with user-visible or operational impact gets its own timestamped section, newest first.
 
-## [Unreleased]
+## Planned (next)
+- Phase 0 — walking skeleton: server + two CLI clients exchanging real-time messages, validated by `scripts/smoke.sh`.
+- Phase 1 — persistence, auth, full message envelope.
+- Phase 2 — TUI and Web UI.
+- Phase 3 — polish, requirement-coverage report, demo build.
+
+## 2026-05-03 11:59Z — Single-root Go module (#8)
+
+### Changed
+- Go module layout collapsed from `go.work` + per-app `go.mod` to a single root `go.mod` with module name `hackathon`. Imports use `hackathon/<path>`. The module name is intentionally decoupled from the GitHub coordinate so it survives org renames; the trade-off is that the module is not `go get`-able from outside the repo.
+
+## 2026-05-03 11:45Z — Server WebSocket endpoint with in-memory hub (#6) — *later rolled back*
+
+### Added
+- `/ws` handler backed by a per-channel subscriber registry on `#general`, environment-driven config (`SERVER_PORT`, validated 1–65535), explicit `*http.Server` with `ReadHeaderTimeout` and `IdleTimeout` (Slowloris mitigation), clean WebSocket close (`StatusNormalClosure`).
+
+### Removed
+- The above merge was force-pushed off `main` shortly after landing; `apps/server/` reverted to its phase-0 stub. Functionality will land again as part of the next CLI/server PR.
+
+## 2026-05-03 11:36Z — Monorepo scaffold (#5)
+
+### Added
+- `go.work` + `pnpm-workspace.yaml` + root `package.json` with `dev`/`build`/`test` fan-out scripts.
+- GitHub Actions CI: per-module Go build/test, pnpm install/build/test, workflow-level concurrency group, least-privilege `contents: read` permissions.
+
+## 2026-05-03 — Initial repository
 
 ### Added
 - Initial Product Requirements Document at `specs/PRD.md`.
 - Specifications live in a top-level `specs/` directory.
-- Architectural decision: monorepo via pnpm workspaces (JS/TS) + `go.work` (Go modules).
+- Architectural decision: monorepo via pnpm workspaces (JS/TS) + a single root `go.mod` (Go).
 - Architectural decision: web UI on Vite + React + TypeScript, chosen for first-class WebRTC support via LiveKit's React SDK.
 - Architectural decision: SQLite for MVP with a documented PostgreSQL upgrade path (mirrored migrations, repository interfaces, dialect-portable SQL).
 - Architectural decision: hub abstraction (in-proc today, NATS/Redis future) and `origin_server_id` on every message to prepare for federation.
 - Architectural decision: opaque-payload message envelope (`payload`, `nonce`, `sender_key_id`, `recipient_wraps`) so the server cannot read message contents, enabling future E2E encryption without a server-side change.
 - Architectural decision: ULIDs for all entity IDs.
 - Testing stance: coverage is measured against requirements (user stories and functional requirements), not lines of code. Tests are tagged with requirement IDs.
-- Phase 0 monorepo scaffold (#5): `go.work` + `pnpm-workspace.yaml` + root `package.json` with `dev`/`build`/`test` fan-out, GitHub Actions CI (per-module Go build/test, pnpm install/build/test) with workflow-level concurrency group and least-privilege `contents: read` permissions.
-- Phase 0 server WebSocket endpoint with in-memory hub (#6): `/ws` handler backed by a per-channel subscriber registry on `#general`, environment-driven config (`SERVER_PORT`, validated 1–65535), explicit `*http.Server` with `ReadHeaderTimeout` and `IdleTimeout` (Slowloris mitigation), clean WebSocket close (`StatusNormalClosure`).
-
-### Changed
-- Go module layout collapsed from `go.work` + per-app `go.mod` to a single root `go.mod` with module name `hackathon` (#8). Imports use `hackathon/<path>`. The module name is intentionally decoupled from the GitHub coordinate so it survives org renames; the trade-off is that the module is not `go get`-able from outside the repo.
-
-### Planned (next)
-- Phase 0 — walking skeleton: server + two CLI clients exchanging real-time messages, validated by `scripts/smoke.sh`.
-- Phase 1 — persistence, auth, full message envelope.
-- Phase 2 — TUI and Web UI.
-- Phase 3 — polish, requirement-coverage report, demo build.
-
-## [0.0.0] - 2026-05-03
-
-### Added
 - Repository initialized.
