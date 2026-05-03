@@ -29,9 +29,9 @@ func init() {
 		// continue with a predictable seed.
 		panic(fmt.Errorf("ids: seed entropy: %w", err))
 	}
-	src := mathrand.NewSource(int64(binary.LittleEndian.Uint64(seed[:])))
+	src := mathrand.NewSource(int64(binary.LittleEndian.Uint64(seed[:]))) //nolint:gosec // G115: intentional reinterpret of crypto/rand bytes as a math/rand seed.
 	entropy = &ulid.LockedMonotonicReader{
-		MonotonicReader: ulid.Monotonic(mathrand.New(src), 0),
+		MonotonicReader: ulid.Monotonic(mathrand.New(src), 0), //nolint:gosec // G404: ULID entropy is a sortable id, NOT a session token; doc above explains.
 	}
 }
 

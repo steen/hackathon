@@ -28,7 +28,7 @@ func (r *Repo) ListChannels(ctx context.Context) ([]Channel, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]Channel, 0)
 	for rows.Next() {
 		var c Channel

@@ -17,22 +17,24 @@ import (
 const (
 	defaultChannel = "#general"
 	sendBuffer     = 64
+)
 
-	// ReadLimitBytes caps a single inbound WS frame (PRD §9, SEC-6).
-	// Hitting this causes the library to close with StatusMessageTooBig (1009).
-	ReadLimitBytes int64 = 64 * 1024
+// ReadLimitBytes caps a single inbound WS frame (PRD §9, SEC-6).
+// Hitting this causes the library to close with StatusMessageTooBig (1009).
+const ReadLimitBytes int64 = 64 * 1024
 
-	// SendRateBurst / SendRatePerSec implement the per-connection send
-	// rate limit from PRD §9: 10 msg/s, burst 30. Excess inbound frames
-	// drop the connection with StatusPolicyViolation (1008).
+// SendRateBurst / SendRatePerSec implement the per-connection send rate
+// limit from PRD §9: 10 msg/s, burst 30. Excess inbound frames drop the
+// connection with StatusPolicyViolation (1008).
+const (
 	SendRateBurst  = 30
 	SendRatePerSec = 10.0
-
-	// MessageBodyLimit caps the decoded chat-message body (PRD §9, SEC-8).
-	// Mirrors httpx.MessageBodyLimit; the WS path enforces it independently
-	// so wsapi has no HTTP-side dependency.
-	MessageBodyLimit = 4 * 1024
 )
+
+// MessageBodyLimit caps the decoded chat-message body (PRD §9, SEC-8).
+// Mirrors internal/http.MessageBodyLimit; the WS path enforces it
+// independently so wsapi has no HTTP-side dependency.
+const MessageBodyLimit = 4 * 1024
 
 // Config carries the per-handler dependencies that vary between
 // production wiring and tests. OriginPatterns is forwarded to
@@ -57,6 +59,8 @@ func newConnSubscriber() *connSubscriber {
 	}
 }
 
+// Send queues msg for delivery to this subscriber. Drops on overflow rather
+// than blocking the hub.
 func (c *connSubscriber) Send(msg []byte) {
 	select {
 	case c.send <- msg:
@@ -93,9 +97,9 @@ func (c *connSubscriber) close() {
 //
 // Each connection subscribes to one channel for its lifetime:
 // defaultChannel by default, or the value of the ?channel= query
-// parameter when present (channels-and-messages feature). A richer
-// frame-based subscribe protocol can layer on top later without
-// breaking this contract.
+// parameter when present (channels-and-messages feature). The PRD's
+// typed {type:subscribe,...} frame protocol can layer on top later
+// without breaking this contract.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
@@ -135,7 +139,9 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		if err != nil {
 			return
 		}
-		defer conn.CloseNow()
+		// CloseNow's error is non-actionable in defer: by the time it returns,
+		// the underlying TCP connection is gone either way.
+		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(ReadLimitBytes)
 
 		// TODO(channels-and-messages): bind userID onto a per-connection
