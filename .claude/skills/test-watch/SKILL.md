@@ -16,6 +16,7 @@ All git work happens in a dedicated worktree at `.claude/worktrees/test-agent` s
 - `REPO_ROOT`: the main working directory (cwd when this skill is invoked).
 - `WORKTREE`: `$REPO_ROOT/.claude/worktrees/test-agent`
 - `STATE_FILE`: `$REPO_ROOT/.claude/test-agent/state.json`
+- `REST_BRANCH`: `test-agent` — the worktree's idle branch. `main` is owned by the primary tree and cannot be checked out twice; `test-agent` is a local branch that tracks `origin/main` and is what the worktree returns to between runs (so a user who `cd`s into the worktree sees a real branch, not detached HEAD).
 - `STALE_LOCK_MINUTES`: 30
 
 ## Tick procedure
@@ -44,7 +45,8 @@ If `in_progress` is `true`:
 ### 3. Pre-flight
 
 - `gh auth status` must succeed. If not, write a one-line error to chat ("test-watch: gh CLI not authenticated; skipping") and exit. Do NOT attempt to fix auth.
-- If `WORKTREE` does not exist, create it: `git -C "$REPO_ROOT" worktree add "$WORKTREE" main`. If creation fails, log the error and exit.
+- If `WORKTREE` does not exist, create it on the rest branch: `git -C "$REPO_ROOT" worktree add -b test-agent "$WORKTREE" origin/main`. If `test-agent` already exists locally (legacy worktree), drop the `-b` flag and just check it out: `git -C "$REPO_ROOT" worktree add "$WORKTREE" test-agent`. If creation fails for any other reason, log the error and exit.
+- If `WORKTREE` exists but is not on `test-agent` (e.g. left detached or on a stale feature branch by a prior crashed run), normalize it: `git -C "$WORKTREE" checkout -B test-agent origin/main` (the `-B` form creates or resets the branch in one step). Doing this before step 4 keeps every later step starting from a known shape.
 
 ### 4. Detect work
 
@@ -63,10 +65,12 @@ From this point on, EVERY exit path (success or error) MUST clear `in_progress` 
 ### 6. Reset worktree to fresh main
 
 ```
-git -C "$WORKTREE" checkout main
+git -C "$WORKTREE" checkout test-agent
 git -C "$WORKTREE" reset --hard origin/main
 git -C "$WORKTREE" clean -fd
 ```
+
+`test-agent` is the rest branch (see Constants). It exists for the lifetime of the worktree and is reset to `origin/main` on every tick.
 
 ### 7. Create feature branch
 
@@ -89,7 +93,7 @@ It must return a structured summary back, conceptually:
 - `findings_paths` (list of relative paths)
 
 If `total_missing_acs == 0`:
-- `git -C "$WORKTREE" checkout main` (abandon the empty branch; it has no commits, so just leaving it unchecked-out is fine)
+- `git -C "$WORKTREE" checkout test-agent` (abandon the empty branch; it has no commits, so just leaving it unchecked-out is fine)
 - `git -C "$WORKTREE" branch -D "$BRANCH"`
 - Update state: `last_analyzed_commit = ORIGIN_SHA`, `in_progress=false`, `started_at=null`. Persist.
 - Exit silently. (No PR when there's nothing to add.)
@@ -127,8 +131,10 @@ Invoke the `test-pr` skill with args: worktree path, branch name, findings paths
 ### 12. Cleanup and persist state
 
 ```
-git -C "$WORKTREE" checkout main
+git -C "$WORKTREE" checkout test-agent
 ```
+
+This returns the worktree to its rest branch (which tracks `origin/main`) so a user who later `cd`s into the worktree sees a real branch instead of the just-pushed feature branch or a detached HEAD. The local feature branch can be left alone — git's automatic pruning and the per-tick `reset --hard origin/main` in step 6 will keep things tidy.
 
 Update state:
 - `in_progress=false`
@@ -143,7 +149,7 @@ Emit a single one-line chat message: `test-watch: opened <URL> (<N> new tests ac
 ## Failure handling
 
 Any unexpected error during steps 5–11:
-1. Try to leave the worktree in a clean state: `git -C "$WORKTREE" checkout main`.
+1. Try to leave the worktree in a clean state: `git -C "$WORKTREE" checkout -B test-agent origin/main` (force-resets the rest branch even if it didn't exist or was on something else).
 2. Clear the lock: write `in_progress=false`, `started_at=null` to `STATE_FILE`. Do NOT update `last_analyzed_commit` — we want to retry on the next tick.
 3. Emit one chat line: `test-watch: error in step <N>: <short message>`. Do not paste long stack traces — most ticks are unattended.
 
