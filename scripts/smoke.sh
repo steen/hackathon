@@ -23,15 +23,22 @@ WATCH2_PID=""
 cleanup() {
   local rc=$?
   set +e
+  # Bounded TERM-then-KILL: a wedged child that ignores SIGTERM (deadlock,
+  # blocked syscall, masked signal) would otherwise let `wait` block until
+  # the workflow-level timeout. Pure bash so we don't depend on coreutils
+  # `timeout` (BSD `wait` lacks `-t`; macOS `coreutils` is not standard).
   for pid in "$WATCH1_PID" "$WATCH2_PID" "$SERVER_PID"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null
+    [[ -z "$pid" ]] && continue
+    kill -0 "$pid" 2>/dev/null || continue
+    kill "$pid" 2>/dev/null
+    for _ in $(seq 1 50); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null
     fi
-  done
-  for pid in "$WATCH1_PID" "$WATCH2_PID" "$SERVER_PID"; do
-    if [[ -n "$pid" ]]; then
-      wait "$pid" 2>/dev/null
-    fi
+    wait "$pid" 2>/dev/null
   done
   if [[ $rc -ne 0 ]]; then
     echo "--- server.log ---" >&2
