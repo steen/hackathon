@@ -1,7 +1,7 @@
 # Feature: Channels and messages endpoints (REST + WS)
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - US-3 — As a user, I want to see the list of channels, so I can pick where to talk.

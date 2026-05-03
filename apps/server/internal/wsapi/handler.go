@@ -51,10 +51,18 @@ func (c *connSubscriber) close() {
 }
 
 // Handler returns an http.HandlerFunc serving the /ws endpoint. Every
-// accepted connection subscribes to defaultChannel for the duration of
-// its lifetime.
+// accepted connection subscribes to one channel for the duration of
+// its lifetime: defaultChannel by default, or the value of the
+// ?channel= query parameter when present. The query-param path is the
+// minimum needed by the channels-and-messages feature; a richer
+// frame-based subscribe protocol can layer on top later without
+// breaking this contract.
 func Handler(h *hub.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		channel := defaultChannel
+		if c := r.URL.Query().Get("channel"); c != "" {
+			channel = c
+		}
 		// Default Accept rejects mismatched Origin (CSWSH defense). For
 		// non-default origins, use OriginPatterns with an explicit
 		// allowlist — never InsecureSkipVerify in this code path.
@@ -65,15 +73,15 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 		defer conn.CloseNow()
 
 		sub := newConnSubscriber()
-		h.Subscribe(defaultChannel, sub)
-		defer h.Unsubscribe(defaultChannel, sub)
+		h.Subscribe(channel, sub)
+		defer h.Unsubscribe(channel, sub)
 		defer sub.close()
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
 		go writeLoop(ctx, conn, sub)
-		readLoop(ctx, conn, h, defaultChannel)
+		readLoop(ctx, conn, h, channel)
 	}
 }
 

@@ -10,7 +10,23 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 17:30Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1)
+## 2026-05-03 18:30Z — Channels and messages endpoints (REST + WS) (phase 1)
+
+### Added
+- `apps/server/internal/repo/channels.go` — `Channel` row type plus `ListChannels`, `GetChannel`, `CreateChannel`. `CreateChannel` maps SQLite's UNIQUE-constraint error on `channels.name` to a typed `ErrChannelNameTaken` so handlers can return a 409 without inspecting driver-specific error text.
+- `apps/server/internal/repo/messages.go` — `Message` row type plus `InsertMessage` and `ListMessages`. Pagination uses the message ULID as a cursor (ULIDs are lex-sortable, so `id < ?` paired with `ORDER BY id DESC` returns the next-older page without a separate `created_at` index round-trip). `MaxMessagesLimit = 200`, `DefaultMessagesLimit = 50`; the repo caps absurd `limit` values rather than letting them through.
+- `apps/server/internal/http/channels_handlers.go` — `GET /api/channels` (list) and `POST /api/channels` (create). Channel name validation is `^[a-z0-9][a-z0-9-]{0,39}$` — lowercase only avoids the Slack-style "is `#General` the same as `#general`?" foot-gun. The handler uses Go 1.22+ ServeMux pattern matching (`{id}`); a tight `channelIDFromPath` validator rejects any non-26-char or non-Crockford-base32 path segment before it reaches the DB.
+- `apps/server/internal/http/messages_handlers.go` — `GET /api/channels/{id}/messages?before=&limit=` (paginated history, newest-first) and `POST /api/channels/{id}/messages` (persist + broadcast). The POST path inserts the row first, then broadcasts the persisted record so a client can never see a WS message that a subsequent history fetch would not return. Body cap is 4 KiB (PRD §9); empty/whitespace bodies return 400.
+- `apps/server/internal/wsapi/handler.go` — `/ws` now honors a `?channel=<id>` query parameter and subscribes the upgraded connection to that hub channel. Default stays `#general` so the phase-0 smoke flow keeps round-tripping. The PRD's `{type:subscribe,...}` frame protocol is intentionally not implemented yet — query-param subscription is the minimum the channels feature needs and a frame protocol can layer on top without breaking the wire.
+- `apps/server/main.go` wires `ChannelsHandlers` + `MessagesHandlers` against the existing repository and hub when `CHAT_DB_PATH` is set, behind the same `auth.RequireJWT` middleware as the rest of the `/api/*` surface.
+- New error code `not_found` in the envelope helper, used by the messages handlers when a channel id does not resolve.
+- Tests carrying US-3, US-4, US-5, US-6 IDs across `apps/server/internal/repo/*_test.go` and `apps/server/internal/http/*_test.go`. End-to-end coverage in `ws_broadcast_test.go` stands up a real `httptest.Server` with `/api/*` and `/ws` on the same hub and asserts a POSTed message arrives at a connected WS subscriber as a `{"type":"message","data":<Message>}` frame.
+
+### Notes / known gaps
+- PRD §10 sketches a richer WS protocol (`{type:subscribe|unsubscribe|send,channel_id}`); this PR ships only the query-param subscription form. `POST /api/channels/{id}/messages` is the only producer of WS broadcasts. A future feature can layer the frame protocol on top without changing the handler signatures.
+- Per the previous changelog entry, auth endpoints live at `/api/...` rather than `/api/auth/...`; the new channels/messages endpoints follow the same convention. PRD §10 names them under `/api/channels` (no `/auth/` prefix), so this PR matches the PRD for its own surface.
+
+
 
 ### Added
 - `apps/server/internal/http` — new package owning the JSON envelope helpers and the auth HTTP handlers (the package shadows `net/http` deliberately; call sites import it as `httpapi`):
