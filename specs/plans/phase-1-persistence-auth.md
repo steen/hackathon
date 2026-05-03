@@ -13,7 +13,7 @@ Phase 0
 ## Deliverables
 - [x] SQLite schema (`migrations/0001_init.sql`) including `users.token_version` and `auth_events` table.
 - [x] ULID generation.
-- [ ] `internal/auth`: bcrypt + JWT with `tv` claim; constant-time login path; password length policy.
+- [x] `internal/auth`: bcrypt + JWT with `tv` claim; constant-time login path; password length policy.
 - [ ] Auth endpoints: register (invite-code gated) / login / me / logout / ws-ticket.
 - [ ] Channels endpoints; messages endpoints (REST + WS).
 - [ ] Hardening that must land in Phase 1 (not Phase 3):
