@@ -18,6 +18,10 @@ const (
 	EnvInviteCode      = "CHAT_INVITE_CODE"
 	EnvListenAddr      = "CHAT_LISTEN_ADDR"
 	EnvAllowPublicBind = "CHAT_ALLOW_PUBLIC_BIND"
+	// EnvTrustedProxy names the deferred PRD §9 trusted-proxy parser env
+	// var. Anchored as a constant so the startup warn in main.go and any
+	// future parser implementation refer to the same name.
+	EnvTrustedProxy = "CHAT_TRUSTED_PROXY"
 
 	DefaultListenAddr = "127.0.0.1:8080"
 
