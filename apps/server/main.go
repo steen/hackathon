@@ -19,6 +19,7 @@ import (
 	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
 	httpapi "hackathon/apps/server/internal/http"
+	"hackathon/apps/server/internal/ratelimit"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
 )
@@ -85,19 +86,25 @@ func main() {
 			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
 		tickets := auth.NewTicketStore()
+		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
+		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfig())
+		userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
 		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
-			DB:         repository.DB(),
-			Tickets:    tickets,
-			SigningKey: jwtSecret,
-			InviteCode: os.Getenv(inviteCodeEnv),
+			DB:          repository.DB(),
+			Tickets:     tickets,
+			SigningKey:  jwtSecret,
+			InviteCode:  os.Getenv(inviteCodeEnv),
+			UserLimiter: userLimiter,
 		})
 		require := auth.RequireJWT(auth.MiddlewareConfig{
 			SigningKey:        jwtSecret,
 			Lookup:            ah.LookupUserInfo,
 			WriteUnauthorized: httpapi.WriteUnauthorized,
 		})
-		mux.HandleFunc("/api/register", ah.Register)
-		mux.HandleFunc("/api/login", ah.Login)
+		loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
+		registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())
+		mux.Handle("/api/register", registerRL(http.HandlerFunc(ah.Register)))
+		mux.Handle("/api/login", loginRL(http.HandlerFunc(ah.Login)))
 		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
 		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
 		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	stdhttp "net/http"
 	"time"
 
 	"hackathon/apps/server/internal/auth"
@@ -93,6 +94,16 @@ func (s *authStore) IncrementTokenVersion(ctx context.Context, userID string) (i
 		return 0, err
 	}
 	return tv, nil
+}
+
+// LogRateLimited records one rate-limit rejection in auth_events so
+// the spec AC ("Limits are observable in auth_events") holds. The
+// signature matches RateLimitAuditSink so the middleware can call it
+// without importing the concrete store. Errors are swallowed for the
+// same reason LogAuthEvent's callers ignore its error: an audit-log
+// failure must not turn a 429 into a 500.
+func (s *authStore) LogRateLimited(r *stdhttp.Request, userID, ip string) {
+	_ = s.LogAuthEvent(r.Context(), userID, AuthEventRateLimited, ip, r.UserAgent())
 }
 
 // LogAuthEvent appends one auth_events row. Per the migration's column
