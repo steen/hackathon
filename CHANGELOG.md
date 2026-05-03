@@ -23,7 +23,7 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Tests carrying US-3, US-4, US-5, US-6 IDs across `apps/server/internal/repo/*_test.go` and `apps/server/internal/http/*_test.go`. End-to-end coverage in `ws_broadcast_test.go` stands up a real `httptest.Server` with `/api/*` and `/ws` on the same hub and asserts a POSTed message arrives at a connected WS subscriber as a `{"type":"message","data":<Message>}` frame.
 
 ### Notes / known gaps
-- PRD §10 sketches a richer WS protocol (`{type:subscribe|unsubscribe|send,channel_id}`); this PR ships only the query-param subscription form. `POST /api/channels/{id}/messages` is the only producer of WS broadcasts. A future feature can layer the frame protocol on top without changing the handler signatures.
+- PRD §10 sketches a richer WS protocol (`{type:subscribe|unsubscribe|send,channel_id}`); this PR ships only the query-param subscription form. `POST /api/channels/{id}/messages` is the canonical producer for new messages (persists + emits a `{"type":"message","data":<Message>}` JSON envelope). Inbound WS text frames are still rebroadcast verbatim per the phase-0 AC-3 contract — so subscribers may see two on-the-wire shapes today. A future feature will converge them by parsing WS frames through the same envelope and dropping the raw rebroadcast.
 - Per the previous changelog entry, auth endpoints live at `/api/...` rather than `/api/auth/...`; the new channels/messages endpoints follow the same convention. PRD §10 names them under `/api/channels` (no `/auth/` prefix), so this PR matches the PRD for its own surface.
 
 ## 2026-05-03 17:50Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)

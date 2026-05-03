@@ -76,6 +76,16 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channel := defaultChannel
 		if c := r.URL.Query().Get("channel"); c != "" {
+			// Cap the channel-key length — a 1 MB query string would
+			// otherwise sit in the subscriber map for the lifetime of
+			// the connection. 64 chars covers a 26-char ULID plus
+			// padding for `#general`-style legacy names. Rejected
+			// before the WS upgrade with a 400 so the client sees a
+			// regular HTTP failure rather than an opaque close code.
+			if len(c) > 64 {
+				http.Error(w, "channel parameter too long", http.StatusBadRequest)
+				return
+			}
 			channel = c
 		}
 		// Default Accept rejects mismatched Origin (CSWSH defense). For
@@ -120,6 +130,14 @@ func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel str
 			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
 			return
 		}
+		// Phase-0 AC-3 contract: inbound WS frames are rebroadcast to
+		// every subscriber of the same channel. Phase-1 added a parallel
+		// REST producer (`POST /api/channels/{id}/messages`) which emits
+		// a `{"type":"message","data":<Message>}` envelope; the two
+		// shapes coexist on the wire today. A future feature will
+		// converge them by parsing inbound frames through the same
+		// envelope, but removing this raw rebroadcast now would regress
+		// the phase-0 AC.
 		h.Broadcast(channel, data)
 	}
 }
