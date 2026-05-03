@@ -32,9 +32,13 @@ nodes:
       fi
       BRANCH="feat/$SLUG"
 
-      if [ -n "$(git status --porcelain)" ]; then
-        echo "ERROR: working tree is dirty — commit or stash before running this workflow" >&2
-        git status --short >&2
+      # Ignore .archon/** in dirty check: archon injects the latest workflow/command
+      # files into the worktree filesystem regardless of the branch's HEAD, so they
+      # always appear modified relative to a stale base branch.
+      DIRTY=$(git status --porcelain -- ':(exclude).archon')
+      if [ -n "$DIRTY" ]; then
+        echo "ERROR: working tree has non-.archon dirty files — commit or stash" >&2
+        echo "$DIRTY" >&2
         exit 1
       fi
 
