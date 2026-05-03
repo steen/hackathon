@@ -402,6 +402,35 @@ func TestHandlerUnknownChannelDoesNotConsumeTicket(t *testing.T) {
 	}
 }
 
+// Audit #78 (low): with the channel-check-first ordering, an unknown
+// channel + missing ticket must return 404 (channel arm), NOT 401
+// (ticket arm). Locks in the ordering as a contract — a future swap
+// back to ticket-first would silently change the response and pass
+// the rest of the suite.
+func TestHandlerUnknownChannelWithoutTicketReturns404(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, ts, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws?channel=missing-channel-id")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404 (channel arm runs before ticket arm)", resp.StatusCode)
+	}
+}
+
 // Audit #78 (low): the legacy defaultChannel sentinel still skips the
 // lookup, so a request without ?channel= and with a valid ticket must
 // upgrade successfully even when ChannelLookup would otherwise reject.
