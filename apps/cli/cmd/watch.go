@@ -2,51 +2,89 @@ package cmd
 
 import (
 	"context"
-	"errors"
+	"flag"
 	"fmt"
-	"io"
+	"time"
 
-	"github.com/coder/websocket"
+	goclient "hackathon/packages/go-client"
 )
 
-// Watch dials url, then writes one line per inbound text frame to out until
-// ctx is cancelled or the connection closes.
-func Watch(ctx context.Context, url string, out io.Writer) error {
-	c, resp, err := websocket.Dial(ctx, url, nil)
+// initialWatchBackoff and maxWatchBackoff bound the reconnect delay.
+// The cap of 30s matches the server's WS ticket TTL — past that point
+// a retry has to mint a fresh ticket anyway, so a longer wait buys
+// nothing.
+const (
+	initialWatchBackoff = 500 * time.Millisecond
+	maxWatchBackoff     = 30 * time.Second
+)
+
+// Watch implements `chatd watch <channel>`. Streams each new message
+// as `<rfc3339>\t<sender>\t<body>\n`. On disconnect the function
+// reconnects with exponential backoff capped at maxWatchBackoff until
+// ctx is cancelled.
+func Watch(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	once := fs.Bool("once", false, "exit after the first stream closes (skip reconnect)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		return fmt.Errorf("usage: chatd watch <channel>")
+	}
+	channel := rest[0]
+
+	client, _, err := newClient(env, true)
 	if err != nil {
 		return err
 	}
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	defer func() { _ = c.CloseNow() }()
 
-	// Initiate the close handshake when the parent context is cancelled.
-	// Using a derived context bound to Watch's lifetime ensures this
-	// goroutine exits when Watch returns for any reason.
-	closeCtx, closeCancel := context.WithCancel(ctx)
-	defer closeCancel()
-	go func() {
-		<-closeCtx.Done()
-		_ = c.Close(websocket.StatusNormalClosure, "")
-	}()
-
+	backoff := initialWatchBackoff
 	for {
-		// Use Background here: passing the cancellable ctx would abort the
-		// connection abruptly on cancel, preventing the close handshake.
-		_, data, err := c.Read(context.Background())
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
-			}
-			var ce websocket.CloseError
-			if errors.As(err, &ce) && ce.Code == websocket.StatusNormalClosure {
-				return nil
-			}
-			return err
+		streamErr := streamOnce(ctx, env, client, channel)
+		if ctx.Err() != nil {
+			// Context cancellation is treated as a clean exit; the
+			// underlying read error is a side-effect of the cancel.
+			return nil //nolint:nilerr // intentional: ctx.Err shadows streamErr on cancel
 		}
-		if _, err := fmt.Fprintln(out, string(data)); err != nil {
+		if *once {
+			return streamErr
+		}
+		if streamErr != nil {
+			_, _ = fmt.Fprintf(env.Stderr, "watch: %v (reconnecting in %s)\n", streamErr, backoff)
+		} else {
+			_, _ = fmt.Fprintf(env.Stderr, "watch: stream closed (reconnecting in %s)\n", backoff)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(backoff):
+		}
+		backoff *= 2
+		if backoff > maxWatchBackoff {
+			backoff = maxWatchBackoff
+		}
+	}
+}
+
+// streamOnce opens a single watch session and prints messages until
+// the events channel closes. Returns nil on a clean close and the
+// underlying error when the upgrade fails.
+func streamOnce(ctx context.Context, env *Env, client *goclient.Client, channel string) error {
+	events, err := client.Watch(ctx, goclient.WatchOptions{ChannelID: channel})
+	if err != nil {
+		return err
+	}
+	for ev := range events {
+		if ev.Message == nil {
+			continue
+		}
+		m := ev.Message
+		if _, err := fmt.Fprintf(env.Stdout, "%s\t%s\t%s\n",
+			m.CreatedAt.UTC().Format(time.RFC3339Nano), m.SenderUserID, m.Body); err != nil {
 			return err
 		}
 	}
+	return nil
 }

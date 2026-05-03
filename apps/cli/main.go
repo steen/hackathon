@@ -1,13 +1,23 @@
-// Command chatd is a minimal phase-0 CLI for the chat server.
+// Command chatd is the Phase-2 CLI for the chat server. It targets a
+// single base URL (--server / $CHAT_SERVER, default http://localhost:8080),
+// reuses packages/go-client for every server interaction, and persists
+// its bearer token under $XDG_CONFIG_HOME/chatd/config.json.
 //
 // Usage:
 //
-//	chatd [--url ws://host:port/ws] [--ws-ticket TICKET] send <message...>
-//	chatd [--url ws://host:port/ws] [--ws-ticket TICKET] watch
+//	chatd [--server URL] register <username>
+//	chatd [--server URL] login [<username>]
+//	chatd [--server URL] whoami
+//	chatd [--server URL] logout
+//	chatd [--server URL] channels
+//	chatd [--server URL] history <channel> [--limit N] [--before ID]
+//	chatd [--server URL] send <channel> <message|->
+//	chatd [--server URL] watch <channel>
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,51 +28,76 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "chatd:", err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
-	url := ""
-	ticket := ""
-	for len(args) > 0 && strings.HasPrefix(args[0], "--") {
-		switch args[0] {
-		case "--url":
-			if len(args) < 2 {
-				return fmt.Errorf("--url requires a value")
-			}
-			url = args[1]
-			args = args[2:]
-		case "--ws-ticket":
-			if len(args) < 2 {
-				return fmt.Errorf("--ws-ticket requires a value")
-			}
-			ticket = args[1]
-			args = args[2:]
-		default:
-			return fmt.Errorf("unknown flag %q", args[0])
-		}
+func run(ctx context.Context, args []string) error {
+	server, rest, err := stripServerFlag(args)
+	if err != nil {
+		return err
 	}
-	if len(args) == 0 {
-		return fmt.Errorf("usage: chatd [--url URL] [--ws-ticket TICKET] {send <msg...>|watch}")
+	if len(rest) == 0 {
+		return errors.New("usage: chatd [--server URL] {register|login|whoami|logout|channels|history|send|watch} args")
 	}
 
-	resolved := cmd.AppendTicket(cmd.ResolveURL(url), ticket)
-	sub, rest := args[0], args[1:]
+	env := cmd.DefaultEnv()
+	env.Server = cmd.ResolveServer(server)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	switch sub {
-	case "send":
-		if len(rest) == 0 {
-			return fmt.Errorf("send: missing message")
+	return Dispatch(ctx, env, rest)
+}
+
+// stripServerFlag pulls --server / --server=URL out of args before
+// reaching the subcommand. Each subcommand owns its own flag set, so a
+// global is parsed by hand here.
+func stripServerFlag(args []string) (string, []string, error) {
+	const eqPrefix = "--server="
+	server := ""
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--server":
+			if i+1 >= len(args) {
+				return "", nil, fmt.Errorf("--server requires a value")
+			}
+			server = args[i+1] //nolint:gosec // bounds checked above
+			i++
+		case strings.HasPrefix(a, eqPrefix):
+			server = a[len(eqPrefix):]
+		default:
+			out = append(out, a)
 		}
-		return cmd.Send(ctx, resolved, rest)
+	}
+	return server, out, nil
+}
+
+// Dispatch routes the parsed subcommand. Exposed so the test suite can
+// drive each command via the same path the binary entrypoint uses.
+func Dispatch(ctx context.Context, env *cmd.Env, args []string) error {
+	sub, rest := args[0], args[1:]
+	switch sub {
+	case "register":
+		return cmd.Register(ctx, env, rest)
+	case "login":
+		return cmd.Login(ctx, env, rest)
+	case "whoami":
+		return cmd.Whoami(ctx, env, rest)
+	case "logout":
+		return cmd.Logout(ctx, env, rest)
+	case "channels":
+		return cmd.Channels(ctx, env, rest)
+	case "history":
+		return cmd.History(ctx, env, rest)
+	case "send":
+		return cmd.Send(ctx, env, rest)
 	case "watch":
-		return cmd.Watch(ctx, resolved, os.Stdout)
+		return cmd.Watch(ctx, env, rest)
 	default:
 		return fmt.Errorf("unknown subcommand %q", sub)
 	}
