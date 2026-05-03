@@ -167,9 +167,7 @@ describe("HttpClient", () => {
         body: {
           ok: true,
           data: {
-            channels: [
-              { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
-            ],
+            channels: [{ id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" }],
           },
           error: null,
         },
@@ -209,9 +207,7 @@ describe("HttpClient", () => {
     ]);
     const c = new HttpClient({ baseUrl: "http://srv", fetch });
     await c.listMessages("CHAN1", { before: "M99", limit: 25 });
-    expect(calls[0]?.url).toBe(
-      "http://srv/api/channels/CHAN1/messages?before=M99&limit=25",
-    );
+    expect(calls[0]?.url).toBe("http://srv/api/channels/CHAN1/messages?before=M99&limit=25");
   });
 
   it("postMessage posts {body} and returns the message", async () => {
@@ -250,9 +246,7 @@ describe("HttpClient", () => {
       },
     ]);
     const c = new HttpClient({ baseUrl: "http://srv", fetch });
-    await expect(
-      c.login("alice", "wrong-password-placeholder"),
-    ).rejects.toMatchObject({
+    await expect(c.login("alice", "wrong-password-placeholder")).rejects.toMatchObject({
       code: "unauthorized",
       status: 401,
       message: "invalid credentials",

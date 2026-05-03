@@ -1,9 +1,5 @@
 import { HttpClient, type FetchLike } from "./http.js";
-import {
-  WebSocketClient,
-  watch as watchGen,
-  type WebSocketCtor,
-} from "./ws.js";
+import { WebSocketClient, watch as watchGen, type WebSocketCtor } from "./ws.js";
 import type {
   AuthResponse,
   Channel,
@@ -50,11 +46,7 @@ export class Client {
     return out;
   }
 
-  async register(
-    username: string,
-    password: string,
-    inviteCode: string,
-  ): Promise<AuthResponse> {
+  async register(username: string, password: string, inviteCode: string): Promise<AuthResponse> {
     const out = await this.http.register(username, password, inviteCode);
     this.setTokenFn(out.token);
     return out;
@@ -81,10 +73,7 @@ export class Client {
     return this.http.createChannel(name);
   }
 
-  async listMessages(
-    channelId: string,
-    opts?: ListMessagesOptions,
-  ): Promise<Message[]> {
+  async listMessages(channelId: string, opts?: ListMessagesOptions): Promise<Message[]> {
     return this.http.listMessages(channelId, opts);
   }
 

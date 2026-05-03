@@ -73,10 +73,9 @@ describe("Client", () => {
         );
       }
       return Promise.resolve(
-        new Response(
-          JSON.stringify({ ok: true, data: { channels: [] }, error: null }),
-          { status: 200 },
-        ),
+        new Response(JSON.stringify({ ok: true, data: { channels: [] }, error: null }), {
+          status: 200,
+        }),
       );
     };
     const c = createClient({
@@ -98,8 +97,7 @@ describe("Client", () => {
   });
 
   it("watch is exposed on the Client", () => {
-    const fetchImpl: FetchLike = () =>
-      Promise.resolve(new Response("{}", { status: 200 }));
+    const fetchImpl: FetchLike = () => Promise.resolve(new Response("{}", { status: 200 }));
     const c = createClient({ baseUrl: "http://srv", fetch: fetchImpl });
     expect(typeof c.watch).toBe("function");
   });

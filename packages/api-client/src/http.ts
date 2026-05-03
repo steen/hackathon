@@ -39,11 +39,7 @@ export class HttpClient {
     });
   }
 
-  async register(
-    username: string,
-    password: string,
-    inviteCode: string,
-  ): Promise<AuthResponse> {
+  async register(username: string, password: string, inviteCode: string): Promise<AuthResponse> {
     return this.request<AuthResponse>("POST", "/api/auth/register", {
       username,
       password,
@@ -65,10 +61,7 @@ export class HttpClient {
   }
 
   async listChannels(): Promise<Channel[]> {
-    const data = await this.request<{ channels: Channel[] }>(
-      "GET",
-      "/api/channels",
-    );
+    const data = await this.request<{ channels: Channel[] }>("GET", "/api/channels");
     return data.channels;
   }
 
@@ -76,10 +69,7 @@ export class HttpClient {
     return this.request<Channel>("POST", "/api/channels", { name });
   }
 
-  async listMessages(
-    channelId: string,
-    opts: ListMessagesOptions = {},
-  ): Promise<Message[]> {
+  async listMessages(channelId: string, opts: ListMessagesOptions = {}): Promise<Message[]> {
     const qs = new URLSearchParams();
     if (opts.before) qs.set("before", opts.before);
     if (opts.limit !== undefined && opts.limit > 0) {
@@ -98,11 +88,7 @@ export class HttpClient {
 
   // Public so callers can hit endpoints not (yet) wrapped with a typed
   // method. Kept thin: encodes/decodes the envelope, nothing else.
-  async request<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-  ): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
@@ -140,11 +126,7 @@ async function decodeEnvelope<T>(res: Response): Promise<T> {
   }
   if (!parsed.ok) {
     const err = parsed.error;
-    throw new ApiError(
-      res.status,
-      err?.code ?? "unknown",
-      err?.message ?? "error",
-    );
+    throw new ApiError(res.status, err?.code ?? "unknown", err?.message ?? "error");
   }
   return parsed.data as T;
 }

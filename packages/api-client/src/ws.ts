@@ -68,9 +68,7 @@ export class WebSocketClient {
         this.listeners.open.push(fn as Listener<void>);
         return;
       case "close":
-        this.listeners.close.push(
-          fn as Listener<{ code: number; reason: string }>,
-        );
+        this.listeners.close.push(fn as Listener<{ code: number; reason: string }>);
         return;
       case "message":
         this.listeners.message.push(fn as Listener<WsEvent>);
@@ -114,11 +112,7 @@ export class WebSocketClient {
 
   private async open(): Promise<void> {
     const ticket: WSTicket = await this.opts.http.wsTicket();
-    const url = buildWsUrl(
-      this.opts.http.getBaseUrl(),
-      ticket.ticket,
-      this.opts.channelId,
-    );
+    const url = buildWsUrl(this.opts.http.getBaseUrl(), ticket.ticket, this.opts.channelId);
     const Ctor = this.opts.WebSocket ?? getGlobalWebSocket();
     const ws = new Ctor(url);
     this.ws = ws;
@@ -159,11 +153,7 @@ export class WebSocketClient {
   }
 }
 
-export function buildWsUrl(
-  base: string,
-  ticket: string,
-  channelId?: string,
-): string {
+export function buildWsUrl(base: string, ticket: string, channelId?: string): string {
   const u = new URL(base);
   if (u.protocol === "http:") u.protocol = "ws:";
   else if (u.protocol === "https:") u.protocol = "wss:";
@@ -198,9 +188,7 @@ export function decodeFrame(raw: unknown): WsEvent {
 function getGlobalWebSocket(): WebSocketCtor {
   const g = globalThis as { WebSocket?: WebSocketCtor };
   if (!g.WebSocket) {
-    throw new Error(
-      "global WebSocket not available; pass opts.WebSocket explicitly",
-    );
+    throw new Error("global WebSocket not available; pass opts.WebSocket explicitly");
   }
   return g.WebSocket;
 }

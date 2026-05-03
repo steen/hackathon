@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  WebSocketClient,
-  buildWsUrl,
-  decodeFrame,
-  watch,
-  type WebSocketLike,
-} from "./ws.js";
+import { WebSocketClient, buildWsUrl, decodeFrame, watch, type WebSocketLike } from "./ws.js";
 import type { Event as WsEvent } from "./types.js";
 
 class FakeSocket implements WebSocketLike {
@@ -58,9 +52,7 @@ function fakeHttp(ticket = "tkt-fake-deadbeef"): {
 
 describe("buildWsUrl", () => {
   it("rewrites http→ws and appends ticket+channel", () => {
-    expect(buildWsUrl("http://srv", "abc", "C1")).toBe(
-      "ws://srv/ws?ticket=abc&channel=C1",
-    );
+    expect(buildWsUrl("http://srv", "abc", "C1")).toBe("ws://srv/ws?ticket=abc&channel=C1");
   });
   it("rewrites https→wss and tolerates trailing slash", () => {
     expect(buildWsUrl("https://srv/", "x")).toBe("wss://srv/ws?ticket=x");
@@ -69,9 +61,7 @@ describe("buildWsUrl", () => {
 
 describe("decodeFrame", () => {
   it("decodes a typed message frame", () => {
-    const f = decodeFrame(
-      JSON.stringify({ type: "message", data: { id: "M1" } }),
-    );
+    const f = decodeFrame(JSON.stringify({ type: "message", data: { id: "M1" } }));
     expect(f.type).toBe("message");
     expect((f.data as { id: string }).id).toBe("M1");
   });
@@ -98,9 +88,7 @@ describe("WebSocketClient", () => {
     });
     await c.connect();
     expect(FakeSocket.instances).toHaveLength(1);
-    expect(FakeSocket.instances[0]?.url).toBe(
-      "ws://srv/ws?ticket=ticket-hex-fake&channel=C1",
-    );
+    expect(FakeSocket.instances[0]?.url).toBe("ws://srv/ws?ticket=ticket-hex-fake&channel=C1");
   });
 
   it("emits typed message events to listeners", async () => {
@@ -214,9 +202,7 @@ describe("watch async iterable", () => {
     const sock = FakeSocket.instances[0];
     expect(sock).toBeDefined();
     sock?.open();
-    sock?.message(
-      JSON.stringify({ type: "message", data: { id: "M1" } }),
-    );
+    sock?.message(JSON.stringify({ type: "message", data: { id: "M1" } }));
     const r1 = await next1;
     expect(r1.done).toBe(false);
     expect((r1.value as WsEvent).type).toBe("message");
