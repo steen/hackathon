@@ -77,11 +77,13 @@ Exit. Subagent completion notifications arrive as `task-notification` system rem
 
 ### 7. On completion
 
+The agent's contract is "review posted + CI green, awaiting human merge" — `MERGED: no` is the expected report value, NOT a failure.
+
 For each notification:
 
-1. **`MERGED: yes`** — verify the PR is closed (`rtk gh pr view <pr> --json state,mergedAt`), mark task `completed`. The auto-removed `in-review` label confirms cleanup.
-2. **`MERGED: no` with `BLOCKED:` set** — the PR needs human attention. Leave the `in-review` label as the signal, mark task `completed` with a note recording the blocker (CI red, can't reconcile, etc.). Surface to the user.
-3. **Truncated report** — look up the PR directly: `rtk gh pr view <pr> --json state,mergedAt,reviewDecision`. If `MERGED`, treat as (1). If `OPEN` and a recent review exists (`rtk gh api repos/steen/Hackathon/pulls/<pr>/reviews --jq '.[-1].submitted_at'`), the agent did its job but didn't merge — surface and treat as (2).
+1. **`REVIEW_POSTED: yes`, `CI_STATE: green`** — verify the review actually exists on GitHub (`rtk gh api repos/steen/Hackathon/pulls/<pr>/reviews --jq '.[-1].submitted_at'` should return a recent timestamp). Mark task `completed`. The `in-review` label stays as the "awaiting human merge" signal; the user's eventual merge auto-removes it.
+2. **`REVIEW_POSTED: no` with `BLOCKED:` set** — agent failed to post a review. Mark task `completed` with the blocker noted; surface to the user. Drop the `in-review` label so the next tick can retry.
+3. **Truncated report** — look up the PR directly: `rtk gh pr view <pr> --json state,mergedAt`, plus `rtk gh api repos/steen/Hackathon/pulls/<pr>/reviews --jq '.[-1].submitted_at'`. If `mergedAt` is non-null, the user merged in the gap; mark completed. If a review exists with a recent timestamp from the agent, treat as (1). Otherwise treat as (2).
 4. **Stalled / no notification** — see step 8's failed-agent path.
 
 Worktree cleanup for the subagent's `.claude/worktrees/agent-<id>` is automatic when the harness's `isolation: "worktree"` task completes. If the worktree is still locked after a successful merge, run `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` to reclaim it.

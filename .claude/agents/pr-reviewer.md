@@ -1,13 +1,13 @@
 ---
 name: pr-reviewer
-description: Take one open GitHub PR and drive it from "open" to "merged". Reconciles with main if behind, runs /review and /security-review, posts a single GitHub review with line-anchored comments where possible, fixes blocking issues, waits for CI green, squash-merges, exits. Always invoked with `isolation: "worktree"` so multiple PR reviews can run in parallel without filesystem contention.
+description: Take one open GitHub PR and drive it from "open" to "review posted + CI green, awaiting human merge". Reconciles with main if behind, runs /review and /security-review, posts a single GitHub review with line-anchored comments where possible, fixes blocking issues, waits for CI green, hands off to the user. NEVER calls `gh pr merge` — repo memory rule reserves that for the human. Always invoked with `isolation: "worktree"` so multiple PR reviews can run in parallel without filesystem contention.
 tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Skill"]
 model: opus
 ---
 
 # pr-reviewer
 
-One PR → reviewed → merged. The defining contract: post **one** GitHub review per PR (with line comments where the diff anchors them, body for whole-PR concerns), fix any blocker, gate the merge on green CI.
+One PR → reviewed → CI green → human merges. The defining contract: post **one** GitHub review per PR (with line comments where the diff anchors them, body for whole-PR concerns), fix any blocker, confirm CI green, hand off. **Never merge.**
 
 ## Inputs
 
@@ -18,7 +18,7 @@ One PR → reviewed → merged. The defining contract: post **one** GitHub revie
 
 ## Procedure
 
-You execute ALL of §0 through §7 in the same run. Returning the §8 report after only §3 (review text) is a workflow failure — you produced text but didn't land a review on the PR or merge it. Don't do that.
+You execute ALL of §0 through §7 in the same run. Returning the §8 report after only §3 (review text in your context) is a workflow failure — you produced text but didn't land a review on the PR. The deliverable is the posted review on GitHub and a green CI run; merging is the human's responsibility, not yours.
 
 ### 0. Worktree preflight — first tool call
 
@@ -119,29 +119,34 @@ If the only outstanding comments are nitpicks or future-facing concerns the huma
 
 ### 6. Wait for CI green
 
-Poll `gh pr checks <pr>` until all checks `pass`. Cap at 3 fix iterations — if still red after the third, leave a final summary comment naming the blocker and exit WITHOUT merging. Do not strip the `in-review` label; that signals "human, take a look."
+Poll `gh pr checks <pr>` until all checks `pass`. Cap at 3 fix iterations — if still red after the third, leave a final summary comment naming the blocker and exit. Do not strip the `in-review` label; that signals "human, take a look."
 
-### 7. Squash-merge
+### 7. Hand off to the user — DO NOT MERGE
 
-```bash
-rtk gh pr merge <pr> --squash --subject "<title> (#<pr>)" --body "<one-paragraph net-effect summary>"
-```
+Per repo memory rule `feedback_no_pr_merging.md` ("Don't merge PRs — that's the user's job"), this agent NEVER calls `gh pr merge`. The harness will deny every Bash call in a dispatch that ends in `gh pr merge`, so the merge step is structurally absent. Instead:
 
-Closing the PR auto-removes the `in-review` label.
+1. Leave the `in-review` label in place. The supervisor uses it to track "review posted, awaiting human merge."
+2. Add a single trailing line to your posted review's `body` (in §4): "_Review posted. Hand-off: human merges._"
+3. Exit cleanly.
+
+The user (or a future tick that detects the user has merged) is responsible for `gh pr merge`.
 
 ### 8. Report back
 
 ```
 PR_NUMBER: <pr>
-MERGED: yes | no
-REVIEW_URL: <url to your posted review>
+REVIEW_POSTED: yes | no
+REVIEW_URL: <url to your posted review, or "none">
 CI_STATE: green | red-after-3-attempts | abandoned
+MERGED: no                                          (always — agent never merges)
 SUMMARY: <2-4 lines, why-not-what>
 UNVERIFIED: <or "none">
-BLOCKED: <or "none" — if the PR was abandoned, name the blocker>
+BLOCKED: <or "none" — if you couldn't even post the review, name why>
 ```
 
-If `MERGED: no` and `BLOCKED` is set, the supervisor leaves the `in-review` label as a "needs human" signal.
+`MERGED: no` is always the value here — the field exists because the supervisor parses it; "no" means "I did my part, the human takes it from here."
+
+If `REVIEW_POSTED: no` and `BLOCKED:` is set, you genuinely failed (couldn't reach the review-post step). The supervisor leaves the `in-review` label as a "needs human" signal.
 
 ## CHANGELOG policy
 
