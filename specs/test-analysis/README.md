@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T15:29:59Z
-**Analyzed commit:** `6bfb65d`
+**Last updated:** 2026-05-03T16:08:49Z
+**Analyzed commit:** `ec3e7a1`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -51,20 +51,20 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [auth-internals](phase-1/auth-internals.md) | implemented | 4/5 | 1 | 0 | 0 |
 | phase-1 | [security-headers-and-sqlite-ensure-wiring](phase-1/security-headers-and-sqlite-ensure-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
 | phase-1 | [startup-config-checks](phase-1/startup-config-checks.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [auth-endpoint-paths-align-with-prd](phase-1/auth-endpoint-paths-align-with-prd.md) | stub | 0/4 | 0 | 0 | 4 |
 
-**Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred. PR #25 added a 6th AC to `server-ws-hub` (the new `/debug/subs` endpoint), fully covered by `apps/server/internal/wsapi/debug_handler_test.go`.
+**Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
-**Phase-1 totals (so far):** 6 features analyzed of 12 spec'd · 27 ACs · 20 covered · 3 partial · 0 missing · 4 deferred.
+**Phase-1 totals (so far):** 7 features analyzed of 13 spec'd · 31 ACs · 20 covered · 3 partial · 0 missing · 8 deferred.
 
 Notable phase-1 gaps:
 - `auth-internals` AC-5 partial: signing-key-from-config wiring belongs to `feature-startup-config-checks` — that feature is now in the table at 5/5; next tick will reanalyze and promote AC-5 to covered.
-- `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field (production-code fix; PR #32 findings flag it).
+- `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field (will be closed by `feature-access-log-fields-and-wiring` follow-up spec).
 - `sqlite-schema-and-ulid` AC-4 partial: schema permits ULIDs and `ids.NewULID()` is solid, but no shipped INSERT code path used it at the analyzed SHA — closed once `feature-channels-and-messages` (#42) lands.
-- `security-headers-and-sqlite-ensure-wiring`: spec landed as `planned` to track gaps the agent flagged earlier; impl not started.
+- `security-headers-and-sqlite-ensure-wiring`: planned-only stub spec to track wiring gap the agent flagged.
+- `auth-endpoint-paths-align-with-prd` (new this run): planned-only stub spec to track that `apps/server/main.go` registers `/api/<verb>` instead of the PRD §10–pinned `/api/auth/<verb>`. Path-only realignment; `feature-auth-endpoints` ACs stay covered against the implemented paths.
 
-`feature-body-and-ws-caps` (PR #27) ships clean: WS read limit (64 KiB → close 1009), body cap (4 KiB), per-conn token bucket (close 1008), and REST 16 KiB cap (413). All four ACs covered by package-level tests with explicit library-constant guards.
-
-**Phase-1 sibling PRs in flight (not yet on main):** PR #37 tracks `file-perms-and-headers` (1/3, SecurityHeaders not wired — superseded by the new wiring spec).
+**Phase-1 sibling test-agent PRs in flight (not yet on main):** PR #37 (`file-perms-and-headers`), PR #43 (`body-and-ws-caps`), PR #50 (`auth-endpoints`), PR #52 (`access-log-fields-and-wiring` stub), PR #53 (`rate-limits`), PR #55 (`channels-and-messages`).
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
