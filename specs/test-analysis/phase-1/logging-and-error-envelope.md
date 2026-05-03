@@ -29,7 +29,7 @@ deferred: 0
 
 ### Partial — AC-1 is missing IP
 
-The middleware's `log.Printf` call (`apps/server/internal/http/middleware.go:83`) emits `method`, `path`, `status`, `latency_ms`, `request_id` — five of the seven fields the AC names. Missing:
+The middleware's `log.Printf` call (`apps/server/internal/http/middleware.go:83`) emits `method`, `path`, `status`, `latency_ms` (plus the impl's added `request_id`) — four of the six fields AC-1 names. Missing:
 
 - **IP** — no `remote_addr` / `ip=` field. `r.RemoteAddr` is always observable; the gap is purely in the format string. This matters: an access log without source IP can't support per-IP rate-limit tracing or abuse forensics.
 - **user_id (if known)** — also absent. The spec hedges with "if known", and there's no auth feature shipped yet at this SHA, so user_id is never known today. This becomes a real gap once `feature-auth-endpoints` lands and the request context can carry a user ID.
