@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 
 	"hackathon/apps/server/internal/auth"
+	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/hub"
 )
 
@@ -98,12 +99,14 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		if ts != nil {
 			ticket := r.URL.Query().Get("ticket")
 			if ticket == "" {
-				http.Error(w, "missing ws ticket", http.StatusUnauthorized)
+				// Same body + code for missing-vs-invalid so a probing
+				// client cannot distinguish the two arms (SEC-12).
+				httpapi.WriteError(w, httpapi.CodeUnauthorized, "invalid ws ticket", http.StatusUnauthorized)
 				return
 			}
 			uid, ok := ts.Redeem(ticket)
 			if !ok {
-				http.Error(w, "invalid or expired ws ticket", http.StatusUnauthorized)
+				httpapi.WriteError(w, httpapi.CodeUnauthorized, "invalid ws ticket", http.StatusUnauthorized)
 				return
 			}
 			userID = uid
@@ -116,7 +119,11 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		defer conn.CloseNow()
 		conn.SetReadLimit(ReadLimitBytes)
 
-		_ = userID // userID will land on the per-connection state once channels-and-messages merges; SEC requires the redemption itself, which has already happened.
+		// TODO(channels-and-messages): bind userID onto a per-connection
+		// state struct so messages.user_id writes can attribute the
+		// sender. The redemption above already satisfies SEC-12; this
+		// TODO is the seam for the next feature, not a security gap.
+		_ = userID
 
 		sub := newConnSubscriber()
 		h.Subscribe(defaultChannel, sub)

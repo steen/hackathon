@@ -78,7 +78,9 @@ func main() {
 
 	h := hub.New()
 	mux := http.NewServeMux()
-	wsCfg := wsapi.Config{OriginPatterns: parseAllowedOrigins(os.Getenv(allowedOriginsEnv))}
+	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
+	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
+	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
 	var tickets *auth.TicketStore
 
 	if repository != nil {
