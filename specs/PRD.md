@@ -1,6 +1,6 @@
 # Discord Lite — Product Requirements Document
 
-**Revision:** `2b0d6ab` (post-Phase-2 alignment per #126; supersedes `7e33be3`)
+**Revision:** PR #128 (post-Phase-2 alignment per #126; supersedes commit `7e33be3`)
 
 ## 1. Executive Summary
 
