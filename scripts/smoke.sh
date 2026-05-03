@@ -108,18 +108,19 @@ WATCH2_PID=$!
 # the race where a slow CI runner's WebSocket dial takes longer than a fixed
 # sleep and the publish below misses one or both subscribers. The %23 is a
 # URL-encoded '#' so curl doesn't truncate the query at a fragment.
+EXPECTED_SUBS=2
 SUBS_URL="http://127.0.0.1:${PORT}/debug/subs?channel=%23general"
 subs_ready=0
 for _ in $(seq 1 50); do
   count=$(curl -fsS "$SUBS_URL" 2>/dev/null || echo "")
-  if [[ "$count" == "2" ]]; then
+  if [[ "$count" == "$EXPECTED_SUBS" ]]; then
     subs_ready=1
     break
   fi
   sleep 0.1
 done
 if [[ $subs_ready -ne 1 ]]; then
-  echo "[smoke] both watchers did not subscribe within 5s (last count: ${count:-<none>})" >&2
+  echo "[smoke] expected ${EXPECTED_SUBS} subscribers within 5s (last count: ${count:-<none>})" >&2
   exit 1
 fi
 
