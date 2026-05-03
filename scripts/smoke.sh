@@ -85,9 +85,13 @@ export CHAT_SERVER="$WS_URL"
 echo "[smoke] starting server on :${PORT}"
 # PR #28 startup config validation requires a strong JWT secret and an invite
 # code. Loopback default for CHAT_LISTEN_ADDR is fine — no public-bind override.
+# Both values are generated per-run from /dev/urandom so no fake-secret literal
+# is committed to git; the values live only for the duration of this smoke run.
+SMOKE_JWT_SECRET="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40)"
+SMOKE_INVITE_CODE="$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16)"
 CHAT_SERVER_PORT="$PORT" \
-  CHAT_JWT_SECRET="smoke-jwt-secret-A1b2C3d4E5f6G7h8I9J0kLmNoPqR" \
-  CHAT_INVITE_CODE="smoke-invite" \
+  CHAT_JWT_SECRET="$SMOKE_JWT_SECRET" \
+  CHAT_INVITE_CODE="$SMOKE_INVITE_CODE" \
   "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
