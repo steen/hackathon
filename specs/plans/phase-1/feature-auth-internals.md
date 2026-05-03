@@ -1,7 +1,7 @@
 # Feature: Auth internals (bcrypt + JWT + password policy)
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - (internal building blocks; user-facing endpoints in `feature-auth-endpoints.md` cover US-1, US-2, US-11, US-12)
