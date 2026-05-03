@@ -30,6 +30,8 @@ type statusRecorder struct {
 	wrote  bool
 }
 
+// WriteHeader captures the response status before forwarding to the wrapped
+// ResponseWriter. Repeated calls are idempotent.
 func (s *statusRecorder) WriteHeader(code int) {
 	if s.wrote {
 		return

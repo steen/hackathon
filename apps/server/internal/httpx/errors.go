@@ -15,6 +15,7 @@ type Envelope struct {
 	Error *ErrorBody  `json:"error"`
 }
 
+// ErrorBody is the user-safe error payload nested in Envelope.Error.
 type ErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

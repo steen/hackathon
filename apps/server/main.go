@@ -36,18 +36,24 @@ const (
 	idleTimeout       = 120 * time.Second
 )
 
-// repository is a process-wide handle that later phase-1 features (auth,
-// channels, messages) will use to reach SQLite. Kept package-level so the
-// startup wiring lives in one place; nil when CHAT_DB_PATH is unset (phase-0
-// boot path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
+func main() {
+	if err := run(); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
+// repository is the process-wide SQLite handle for later phase-1 features
+// (auth, channels, messages). Nil when CHAT_DB_PATH is unset (phase-0 boot
+// path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
+//
+//nolint:unused // wired into run() once phase-1 handlers land.
 var repository *repo.Repo
 
-func main() {
+func run() error {
 	cfg := config.Load()
 	checks, err := cfg.Validate()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("config: %w", err)
 	}
 	for _, ch := range checks {
 		log.Printf("config check ok: %s", ch.Name)
@@ -55,26 +61,26 @@ func main() {
 
 	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 
 	if dbPath := os.Getenv(dbPathEnv); dbPath != "" {
 		sqlDB, err := appdb.Open(dbPath)
 		if err != nil {
-			log.Fatalf("db open: %v", err)
+			return fmt.Errorf("db open: %w", err)
 		}
 		defer func() { _ = sqlDB.Close() }()
 		migCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := appdb.Apply(migCtx, sqlDB); err != nil {
 			cancel()
-			log.Fatalf("db migrate: %v", err)
+			return fmt.Errorf("db migrate: %w", err)
 		}
 		cancel()
 		repository, err = repo.New(sqlDB)
 		if err != nil {
-			log.Fatalf("repo init: %v", err)
+			return fmt.Errorf("repo init: %w", err)
 		}
-		log.Printf("db ready at %s", dbPath)
+		log.Printf("db ready at %q", dbPath)
 	}
 
 	h := hub.New()
@@ -153,6 +159,7 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+	return nil
 }
 
 // parseAllowedOrigins splits a comma-separated CHAT_ALLOWED_ORIGINS

@@ -27,7 +27,7 @@ func EnsureFile(path string) error {
 	prev := syscall.Umask(0o077)
 	defer syscall.Umask(prev)
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, FileMode)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, FileMode) //nolint:gosec // G304: path is the configured DB location (CHAT_DB_PATH); operator-controlled by design.
 	if err != nil {
 		return fmt.Errorf("db: open %q: %w", path, err)
 	}
