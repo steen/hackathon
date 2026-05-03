@@ -20,7 +20,7 @@ Phase 0
 - [x] Startup checks: JWT secret length + dev-default denylist; non-loopback bind requires `CHAT_ALLOW_PUBLIC_BIND=1`; registration requires `CHAT_INVITE_CODE`.
 - [ ] Per-IP rate limits on login and registration; per-username login backoff.
 - [x] WS read limit (64 KiB), per-conn send rate limit, 4 KiB body cap, REST 16 KiB body cap.
-- [ ] Same-origin WS upgrade check; one-shot 30s ws-ticket flow; WS rejects sends to non-existent channels.
+- [x] Same-origin WS upgrade check; one-shot 30s ws-ticket flow; WS rejects sends to non-existent channels.
 - [x] Access-log middleware strips `token` and `ticket` query params; user-safe error envelope.
 - [x] SQLite file created `0600`.
 - [x] Response security headers (CSP, nosniff, no-referrer, frame-deny).

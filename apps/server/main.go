@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ const (
 	dbPathEnv         = "CHAT_DB_PATH"
 	jwtSecretEnv      = "CHAT_JWT_SECRET"
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
+	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
@@ -75,15 +77,16 @@ func main() {
 
 	h := hub.New()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", wsapi.Handler(h))
 	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
+	wsCfg := wsapi.Config{OriginPatterns: parseAllowedOrigins(os.Getenv(allowedOriginsEnv))}
+	var tickets *auth.TicketStore
 
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
 		if len(jwtSecret) == 0 {
 			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
-		tickets := auth.NewTicketStore()
+		tickets = auth.NewTicketStore()
 		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
 			DB:         repository.DB(),
 			Tickets:    tickets,
@@ -101,6 +104,8 @@ func main() {
 		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
 		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
 	}
+
+	mux.HandleFunc("/ws", wsapi.Handler(h, tickets, wsCfg))
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
@@ -128,6 +133,24 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// parseAllowedOrigins splits a comma-separated CHAT_ALLOWED_ORIGINS
+// value into the OriginPatterns shape coder/websocket expects. Empty
+// or whitespace-only entries are dropped so a stray trailing comma is
+// not treated as a wildcard.
+func parseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveListenAddr returns the address the HTTP server should bind. cfg is

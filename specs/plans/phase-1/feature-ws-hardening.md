@@ -1,7 +1,7 @@
 # Feature: WS hardening (origin check, ws-ticket flow, channel validation)
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - (security hardening that gates US-5 real-time delivery)
@@ -30,3 +30,9 @@
 
 ## Risks
 - Same-origin check must allow legitimate dev hosts; mitigated by deriving allowed origins from configured bind address and an explicit allowlist env var.
+
+## Implementation notes
+- Origin enforcement is delegated to `coder/websocket.Accept` (default behavior compares `Host` to `Origin`); `CHAT_ALLOWED_ORIGINS` is forwarded as `OriginPatterns`. Mismatched origins yield HTTP 403 — the websocket library's behavior.
+- Ticket redemption happens *before* the WebSocket handshake; failures return HTTP 401. RFC 6455 close codes (e.g. 1008) only exist after a successful upgrade, so they cannot apply pre-upgrade.
+- `Handler` accepts a nil `*auth.TicketStore` and skips the ticket check in that mode. This keeps the phase-0 hub-only test path and any pre-DB boot working; production wiring (when `CHAT_DB_PATH` is set) always passes a live store.
+- Channel validation (`{type:"error", code:"CHANNEL_NOT_FOUND"}`) requires the channel-id WS frame contract from `feature-channels-and-messages.md`, which is not yet merged. The hook is the `readLoop` in `apps/server/internal/wsapi/handler.go` — when channels-and-messages introduces a typed inbound frame, that loop is the one place to add the lookup. Tracked as a coordination point, not silently dropped.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/hub"
 )
 
@@ -32,6 +33,14 @@ const (
 	// independently so wsapi has no HTTP-side dependency.
 	MessageBodyLimit = 4 * 1024
 )
+
+// Config carries the per-handler dependencies that vary between
+// production wiring and tests. OriginPatterns is forwarded to
+// coder/websocket.AcceptOptions; same-origin (Host == Origin) is
+// always allowed by the library and does not need to be listed.
+type Config struct {
+	OriginPatterns []string
+}
 
 // connSubscriber bridges hub.Subscriber to a websocket.Conn via a buffered
 // queue so a slow client cannot stall the hub. When the queue is full the
@@ -65,20 +74,49 @@ func (c *connSubscriber) close() {
 	}
 }
 
-// Handler returns an http.HandlerFunc serving the /ws endpoint. Every
-// accepted connection subscribes to defaultChannel for the duration of
-// its lifetime.
-func Handler(h *hub.Hub) http.HandlerFunc {
+// Handler returns an http.HandlerFunc serving the /ws endpoint.
+//
+// When ts is non-nil, the handler enforces SEC-12: every upgrade must
+// present a ?ticket=<hex> query parameter that TicketStore.Redeem
+// accepts. The redemption happens before the WebSocket handshake so a
+// rejection is a plain HTTP 401 (RFC 6455 only defines close codes
+// after a successful upgrade — pre-upgrade failures cannot use 1008).
+//
+// When ts is nil, ticket enforcement is skipped. This branch exists
+// for the phase-0 smoke wiring and for tests that exercise the hub
+// fan-out without standing up the auth stack.
+//
+// Same-origin enforcement is delegated to coder/websocket.Accept,
+// which compares Host to Origin by default and additionally honors
+// any patterns in cfg.OriginPatterns. A mismatch yields HTTP 403.
+func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
+	acceptOpts := &websocket.AcceptOptions{
+		OriginPatterns: cfg.OriginPatterns,
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Default Accept rejects mismatched Origin (CSWSH defense). For
-		// non-default origins, use OriginPatterns with an explicit
-		// allowlist — never InsecureSkipVerify in this code path.
-		conn, err := websocket.Accept(w, r, nil)
+		var userID string
+		if ts != nil {
+			ticket := r.URL.Query().Get("ticket")
+			if ticket == "" {
+				http.Error(w, "missing ws ticket", http.StatusUnauthorized)
+				return
+			}
+			uid, ok := ts.Redeem(ticket)
+			if !ok {
+				http.Error(w, "invalid or expired ws ticket", http.StatusUnauthorized)
+				return
+			}
+			userID = uid
+		}
+
+		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			return
 		}
 		defer conn.CloseNow()
 		conn.SetReadLimit(ReadLimitBytes)
+
+		_ = userID // userID will land on the per-connection state once channels-and-messages merges; SEC requires the redemption itself, which has already happened.
 
 		sub := newConnSubscriber()
 		h.Subscribe(defaultChannel, sub)

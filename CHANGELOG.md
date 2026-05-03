@@ -10,6 +10,20 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 17:40Z — WS hardening: origin check + ws-ticket redemption (phase 1) (#39)
+
+### Added
+- `apps/server/internal/wsapi/handler.go` — `Handler` signature changed to `Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config)`. When `ts` is non-nil, every `/ws` upgrade must present a `?ticket=<hex>` query parameter that `TicketStore.Redeem` accepts; failures return HTTP 401 *before* the WebSocket handshake (RFC 6455 close codes only exist post-upgrade). Same-origin enforcement is delegated to `coder/websocket.Accept`, which compares `Host` to `Origin` by default; `CHAT_ALLOWED_ORIGINS` (comma-separated) is forwarded as `OriginPatterns` for reverse-proxy deploys (PRD §9). Mismatched origins yield HTTP 403.
+- `apps/server/internal/wsapi/handler_test.go` — coverage for SEC-12 (`TestHandlerTicketSingleUse`: first redeem succeeds, second redeem rejects with 401), missing-ticket and invalid-ticket rejection (both 401, identical envelope so probing cannot distinguish), and the cross-origin/same-origin pair (`TestHandlerRejectsCrossOriginUpgrade` forges an `Origin: https://evil.example` against the httptest server's host and asserts 403; the same-origin counterpart guards against accidental over-restriction).
+- `apps/server/main.go` — wires the ticket store and origin patterns into `wsapi.Handler` after the auth-endpoints block runs (so `tickets` is populated when `CHAT_DB_PATH` is set). Adds `parseAllowedOrigins` to split `CHAT_ALLOWED_ORIGINS` and drop empty entries (a stray trailing comma must not become a wildcard).
+
+### Changed
+- `scripts/smoke.sh` — mints a fresh ws-ticket per WS dial (each watcher and the sender) instead of reusing one ticket three times. SEC-12 makes tickets single-use; the prior wiring would fail on the second redeem the moment the server started enforcing it.
+
+### Notes / known gaps
+- Channel-validation (`{type:"error", code:"CHANNEL_NOT_FOUND"}` per the spec) requires the typed inbound WS frame contract from `feature-channels-and-messages.md`, which has not merged yet. The hook is `readLoop` in `apps/server/internal/wsapi/handler.go` — when that feature introduces channel IDs on the wire, the lookup-and-error-frame goes there. Coordination point flagged in the feature spec rather than silently dropped.
+- `userID` from a successful redeem is not yet bound onto per-connection state (the hub does not carry per-conn metadata in phase-0). The same `readLoop` site will adopt it alongside the channel scoping.
+
 ## 2026-05-03 17:35Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
 
 ### Added
