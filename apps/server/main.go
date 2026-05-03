@@ -136,16 +136,19 @@ func run() error {
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
 	// Middleware order (outer → inner):
+	//   SecurityHeaders      → SEC-10 baseline headers on every response
 	//   RequestIDMiddleware  → assigns X-Request-Id, plumbs ctx
 	//   AccessLog            → emits one log line per request (uses ctx)
 	//   Recover              → catches panics, writes generic 500
 	//   BodyCap              → caps request body to RESTBodyLimit
 	//   mux                  → handler dispatch
+	// SecurityHeaders is outermost so even error responses written by inner
+	// middleware (Recover's 500, BodyCap's 413) carry the headers.
 	// statusRecorder.Hijack forwards the Hijacker interface so /ws upgrade
 	// still works through this chain.
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           httpapi.RequestIDMiddleware(httpapi.AccessLog(httpapi.Recover(httpapi.BodyCap(mux)))),
+		Handler:           httpapi.SecurityHeaders(httpapi.RequestIDMiddleware(httpapi.AccessLog(httpapi.Recover(httpapi.BodyCap(mux))))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
