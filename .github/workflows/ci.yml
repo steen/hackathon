@@ -19,28 +19,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: apps/server/go.mod
+          go-version-file: go.mod
           cache: true
-      - name: Verify go.work
-        run: go env GOWORK && test -f go.work
-      - name: Build (each module)
-        run: |
-          set -e
-          while read -r mod; do
-            [ -z "$mod" ] && continue
-            echo "::group::go build $mod"
-            (cd "$mod" && go build ./...)
-            echo "::endgroup::"
-          done < <(awk '/^use \(/,/^\)/' go.work | sed -n 's|^\s*\./||p')
-      - name: Test (each module)
-        run: |
-          set -e
-          while read -r mod; do
-            [ -z "$mod" ] && continue
-            echo "::group::go test $mod"
-            (cd "$mod" && go test ./...)
-            echo "::endgroup::"
-          done < <(awk '/^use \(/,/^\)/' go.work | sed -n 's|^\s*\./||p')
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test ./...
 
   pnpm:
     runs-on: ubuntu-latest
