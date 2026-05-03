@@ -1,27 +1,58 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 
+// Static-source assertions for specs/plans/phase-0/feature-smoke-test.md.
+// The script's runtime behavior (boot server, broadcast, teardown) is
+// verified by actually running it — `pnpm test` invokes
+// `bash scripts/smoke.sh` before this vitest workspace runs. These tests
+// guard against silent regressions in the script's structure (someone
+// removes the trap, drops `set -euo pipefail`, etc.) without needing to
+// re-run the full smoke flow.
+
 const repoRoot = resolve(__dirname, "..", "..");
 const smokePath = resolve(repoRoot, "scripts", "smoke.sh");
+const pkgPath = resolve(repoRoot, "package.json");
 
-describe("smoke-test: anchors for ACs in specs/plans/phase-0/feature-smoke-test.md", () => {
-  it.skip("AC-1 smoke-test: scripts/smoke.sh boots server, runs two watchers, sends a message, asserts both received it (deferred — script does not exist yet; runtime check belongs in CI once apps/server and apps/cli are implemented)", () => {});
+function smokeBody(): string {
+  return readFileSync(smokePath, "utf8");
+}
 
-  it.skip("AC-2 smoke-test: scripts/smoke.sh exits 0 on success and non-zero with a clear error on failure (deferred — script does not exist yet)", () => {});
+describe("smoke-test: wiring + script structure", () => {
+  it("TestAC1_smoke_test_script_executes_the_documented_flow", () => {
+    const body = smokeBody();
+    // Server build + binary invocation
+    expect(/go build .*\.\/apps\/server/.test(body), "must build apps/server").toBe(true);
+    expect(/go build .*\.\/apps\/cli/.test(body), "must build apps/cli (chatd)").toBe(true);
+    // Two `chatd watch` processes
+    const watchInvocations = body.match(/\bwatch\b/g) ?? [];
+    expect(watchInvocations.length, `expected at least 2 'watch' invocations in script, got ${watchInvocations.length}`).toBeGreaterThanOrEqual(2);
+    // One `chatd send`
+    expect(/\bsend\s+"\$MSG"/.test(body) || /\bsend\b/.test(body), "must invoke chatd send").toBe(true);
+    // Watcher-output assertion: greps the watcher output files for the message
+    expect(/grep -F.*\$MSG/.test(body), "must grep watcher output files for the sent message").toBe(true);
+  });
 
-  it.skip("AC-3 smoke-test: scripts/smoke.sh tears down all spawned processes on completion (deferred — script does not exist yet)", () => {});
+  it("TestAC2_smoke_test_script_uses_strict_mode_and_explicit_failure_output", () => {
+    const body = smokeBody();
+    expect(/^set -euo pipefail$/m.test(body), "must use 'set -euo pipefail' for non-zero on first error").toBe(true);
+    // The failure path must produce a clear stderr message — not just `exit 1`.
+    expect(/FAIL[^\n]*>&2/.test(body) || /echo[^\n]*FAIL[^\n]*>&2/.test(body), "must print a FAIL line to stderr on failure").toBe(true);
+  });
 
-  it("AC-4 smoke-test: scripts/smoke.sh exists and root package.json's test script either invokes it directly or fans out to a workspace whose test runs it (currently failing because the script and wiring are not yet implemented)", () => {
-    const exists = existsSync(smokePath);
-    if (!exists) {
-      // Deferred: the script has not been written. The skipped sibling tests
-      // anchor the runtime ACs; this assertion will turn green automatically
-      // when scripts/smoke.sh is added and wired into package.json.
-      return;
-    }
-    const pkgRaw = readFileSync(resolve(repoRoot, "package.json"), "utf8");
-    const pkg = JSON.parse(pkgRaw);
+  it("TestAC3_smoke_test_script_traps_exit_and_kills_spawned_pids", () => {
+    const body = smokeBody();
+    // The trap must cover normal exit AND signal-driven exit (interrupted CI).
+    expect(/trap\s+\w+\s+EXIT/.test(body), "must trap EXIT").toBe(true);
+    expect(/trap\s+\w+\s+[A-Z ]*INT/.test(body), "must trap INT (so Ctrl-C cleans up)").toBe(true);
+    // The cleanup function must kill the recorded PIDs.
+    expect(/SERVER_PID|WATCH1_PID|WATCH2_PID/.test(body), "must record PIDs to clean up").toBe(true);
+    expect(/\bkill\b/.test(body), "cleanup must invoke kill on the recorded PIDs").toBe(true);
+  });
+
+  it("TestAC4_smoke_test_script_is_wired_into_root_package_json_test_script", () => {
+    expect(existsSync(smokePath), "scripts/smoke.sh must exist").toBe(true);
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
     const testBody: string = pkg.scripts?.test ?? "";
     const directlyInvokes = /smoke\.sh\b/.test(testBody);
     const fansOut = /pnpm\s+(?:-r|--recursive)\b/.test(testBody);
@@ -31,5 +62,9 @@ describe("smoke-test: anchors for ACs in specs/plans/phase-0/feature-smoke-test.
     ).toBe(true);
   });
 
-  it.skip("AC-5 smoke-test: smoke remains green for the rest of the project (validation criterion, not a unit test — tracked by CI)", () => {});
+  it("TestAC5_smoke_test_script_is_executable_and_present", () => {
+    expect(existsSync(smokePath), "scripts/smoke.sh must exist").toBe(true);
+    const mode = statSync(smokePath).mode & 0o111;
+    expect(mode, "scripts/smoke.sh must have at least one execute bit set so 'bash scripts/smoke.sh' (or direct ./scripts/smoke.sh) works in CI").not.toBe(0);
+  });
 });

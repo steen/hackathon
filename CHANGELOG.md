@@ -10,12 +10,29 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 16:30Z — Body and WebSocket size/rate caps (phase 1)
+## 2026-05-03 16:45Z — Body and WebSocket size/rate caps (phase 1) (#27)
 
 ### Added
 - `apps/server/internal/httpx`: `Envelope` / `WriteError` matching the PRD §10 `{ok, data, error}` shape, plus a `BodyCap` middleware that caps every REST request at 16 KiB and writes a 413 `body_too_large` envelope on overflow (PRD §11 SEC-7). `WriteMessageTooLarge` provides the canonical 400 envelope for the REST chat-message path (SEC-8).
 - `apps/server/internal/wsapi`: per-connection `SetReadLimit(64 KiB)` so the library closes oversize frames with WebSocket close code `1009` (SEC-6); 4 KiB cap on decoded message bodies (SEC-8 WS path) closes with `1009`; per-connection token bucket (10 msg/s, burst 30) closes flooding clients with `1008` (PRD §9).
 - Tests assert the actual close codes observed by the client (`websocket.CloseStatus`), not just that the connection ended.
+
+## 2026-05-03 16:30Z — Smoke-test follow-ups: deterministic readiness + bounded teardown (#25)
+
+### Added
+- `GET /debug/subs?channel=<name>` on the server returns the current subscriber count for the given channel as plain text. Internal-only (the `/debug/` prefix marks it as not part of the product API and not on the `{ok,data,error}` envelope contract); intended for CI scripts and tests to avoid sleep-based readiness races. Wired under the same mux as `/ws` in `apps/server/main.go`. Unit-tested in `apps/server/internal/wsapi/debug_handler_test.go`.
+
+### Changed
+- `scripts/smoke.sh` now polls `/debug/subs?channel=#general` (5s budget) until both watchers have registered before publishing, instead of `sleep 0.5`. Removes a CI flake on slow runners where the WebSocket dial took longer than the fixed sleep and the publish missed one or both subscribers.
+- `scripts/smoke.sh` `cleanup()` escalates SIGTERM to SIGKILL after a ~5s poll per pid, then `wait`s. Previously a wedged child that ignored SIGTERM (deadlock, blocked syscall, masked signal) would leave `wait` blocked until the workflow-level timeout, masking the failure and burning runner minutes. Pure bash — no `coreutils timeout` dependency.
+
+## 2026-05-03 16:00Z — Access-log middleware + user-safe error envelope (phase 1) (#24)
+
+### Added
+- `apps/server/internal/http` package with the `{ok, data, error}` response envelope (`WriteOK`, `WriteError`) per PRD §10. All three keys are physically present on every response — `ok=true` ships `data` filled and `error: null`; `ok=false` ships `data: null` and `error: {code, message}`.
+- Access-log middleware emits one line per request with method, path, status, latency, and request ID. Sensitive query parameters `token` and `ticket` are redacted via `net/url` parsing (handles repeated keys and percent-encoded values), satisfying SEC-11.
+- Panic recovery middleware logs the panic value and stack server-side with the request ID, returns a generic 500 envelope, and never leaks the panic value to the client.
+- Request-ID middleware mints a 128-bit hex ID per request, plumbs it via `RequestID(ctx)`, and echoes it as the `X-Request-Id` response header for log correlation.
 
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 
