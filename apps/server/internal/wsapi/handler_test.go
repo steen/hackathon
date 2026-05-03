@@ -17,7 +17,13 @@ import (
 	"hackathon/apps/server/internal/hub"
 )
 
-func TestHandlerBroadcastsBetweenClients(t *testing.T) {
+// Audit #78 (medium): an authenticated peer must NOT be able to
+// rebroadcast a forged {type:"message",data:{sender_user_id:"<other>"}}
+// frame to other subscribers. The phase-0 raw rebroadcast was removed
+// because it bypassed persistence and let any peer impersonate any
+// sender. The inbound frame is still read (so the conn drains and the
+// size+rate limits still trip), but the bytes are dropped.
+func TestHandlerDoesNotRebroadcastInboundFrames(t *testing.T) {
 	h := hub.New()
 	srv := httptest.NewServer(Handler(h, nil, Config{}))
 	defer srv.Close()
@@ -43,16 +49,32 @@ func TestHandlerBroadcastsBetweenClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := sender.Write(ctx, websocket.MessageText, []byte("hi")); err != nil {
+	forged := []byte(`{"type":"message","data":{"id":"01HFAKEFAKEFAKEFAKEFAKEFAK",` +
+		`"channel_id":"#general","sender_user_id":"01HVICTIMVICTIMVICTIMVICTIM",` +
+		`"body":"impersonated text","created_at":"2026-05-03T00:00:00Z"}}`)
+	if err := sender.Write(ctx, websocket.MessageText, forged); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	_, data, err := receiver.Read(ctx)
+	// Independently confirm the broadcast path still works for the
+	// supported producer (hub.Broadcast invoked server-side, the way
+	// the REST POST handler does it). Use a sentinel marker so it can
+	// not be confused with the forged frame.
+	const sentinel = "server-emitted-sentinel"
+	// Give the server a brief moment to read the forged frame so any
+	// (mistaken) rebroadcast would land before our sentinel.
+	time.Sleep(50 * time.Millisecond)
+	h.Broadcast("#general", []byte(sentinel))
+
+	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer readCancel()
+	_, data, err := receiver.Read(readCtx)
 	if err != nil {
 		t.Fatalf("receiver read: %v", err)
 	}
-	if string(data) != "hi" {
-		t.Fatalf("got %q want %q", data, "hi")
+	if string(data) != sentinel {
+		t.Fatalf("first frame received was %q; want %q (raw rebroadcast leaked)",
+			data, sentinel)
 	}
 }
 

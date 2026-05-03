@@ -203,11 +203,11 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		defer cancel()
 
 		go writeLoop(ctx, conn, sub)
-		readLoop(ctx, conn, h, channel, newTokenBucket(SendRateBurst, SendRatePerSec))
+		readLoop(ctx, conn, newTokenBucket(SendRateBurst, SendRatePerSec))
 	}
 }
 
-func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel string, bucket *tokenBucket) {
+func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -226,15 +226,13 @@ func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel str
 			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
 			return
 		}
-		// Phase-0 AC-3 contract: inbound WS frames are rebroadcast to
-		// every subscriber of the same channel. Phase-1 added a parallel
-		// REST producer (`POST /api/channels/{id}/messages`) which emits
-		// a `{"type":"message","data":<Message>}` envelope; the two
-		// shapes coexist on the wire today. A future feature will
-		// converge them by parsing inbound frames through the same
-		// envelope, but removing this raw rebroadcast now would regress
-		// the phase-0 AC.
-		h.Broadcast(channel, data)
+		// Audit #78 (medium): drop inbound frames silently. The phase-0
+		// raw rebroadcast let any peer forge {type,data} envelopes with
+		// arbitrary sender_user_id, bypassing persistence and audit log.
+		// Producers must use POST /api/channels/{id}/messages so the
+		// server attributes the sender from the JWT and persists first.
+		// The read still happens (drains the buffer; enforces size +
+		// rate limits above) — only the broadcast is gone.
 	}
 }
 
