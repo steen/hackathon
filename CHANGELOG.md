@@ -10,12 +10,29 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 17:00Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
+## 2026-05-03 17:30Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
 
 ### Added
 - `apps/server/internal/config` package: loads `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOW_PUBLIC_BIND` from env and runs `Validate()` once at startup. Refuses to boot when the JWT secret is missing, shorter than 32 bytes, non-ASCII, a single repeated character, low-entropy (fewer than 5 distinct bytes), or matches a dev-default denylist (`change-me`, `secret`, `dev`, `password`, `hackathon`, etc., padded variants included). Refuses to bind a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1`. Refuses to start without an invite code while registration is enabled.
-- `apps/server/main.go` calls `config.Validate()` before any HTTP setup; failures print a non-secret error to stderr and exit 1, success logs each check that passed by name.
+- `apps/server/main.go` calls `config.Validate()` before any HTTP setup; failures print a non-secret error to stderr and exit 1, success logs each check that passed by name. The validated `cfg.ListenAddr` is now what the server actually binds (with optional `CHAT_SERVER_PORT` overriding only the port) so the SEC-2 loopback enforcement has runtime effect, not just log effect.
 - Tests in `apps/server/internal/config/config_test.go` covering SEC-1 (missing/short/denylisted/repeated/low-entropy/non-ASCII secret), SEC-2 (loopback default, public-bind override, malformed addr), and US-11 startup invite-code enforcement. A leakage test asserts no error message echoes the secret value.
+
+## 2026-05-03 17:15Z — Body and WebSocket size/rate caps (phase 1) (#27)
+
+### Added
+- `apps/server/internal/httpx`: `Envelope` / `WriteError` matching the PRD §10 `{ok, data, error}` shape, plus a `BodyCap` middleware that caps every REST request at 16 KiB and writes a 413 `body_too_large` envelope on overflow (PRD §11 SEC-7). `WriteMessageTooLarge` provides the canonical 400 envelope for the REST chat-message path (SEC-8). `BodyCap` is wired into the global mux in `apps/server/main.go` so SEC-7 fires on every REST request.
+- `apps/server/internal/wsapi`: per-connection `SetReadLimit(64 KiB)` so the library closes oversize frames with WebSocket close code `1009` (SEC-6); 4 KiB cap on decoded message bodies (SEC-8 WS path) closes with `1009`; per-connection token bucket (10 msg/s, burst 30) closes flooding clients with `1008` (PRD §9). Body-size check runs before the rate-limit deduction so closed-on-oversize frames don't burn a token.
+- Tests assert the actual close codes observed by the client (`websocket.CloseStatus`), not just that the connection ended.
+
+## 2026-05-03 17:00Z — SQLite schema + ULID generation + migration runner (phase 1) (#29)
+
+### Added
+- `migrations/0001_init.sql` — baseline schema for `users` (with `token_version` for US-12 server-side JWT revocation), `channels`, `messages`, and `auth_events`. Indexes on `messages(channel_id, created_at)` and `auth_events(user_id, at)` to support paginated history and audit queries.
+- `migrations/embed.go` — `embed.FS` of every `*.sql` migration sibling, exposed as `migrations.FS`. The package lives under `migrations/` so `go:embed` (which cannot escape its own package directory) can reach the files at the canonical PRD §6 location.
+- `apps/server/internal/db` — `Apply`/`ApplyFS` migration runner (records applied filenames in a `schema_migrations` table, idempotent on re-run, transactional per file) and `Open` helper that opens via `modernc.org/sqlite` with WAL + FK-on pragmas. Reuses `EnsureFile` from #26 to create the SQLite file at `0600` per PRD §9.
+- `apps/server/internal/ids` — `NewULID()` wrapping `oklog/ulid/v2` with a `LockedMonotonicReader` so concurrent callers stay strictly increasing within the same millisecond.
+- `apps/server/internal/repo` — `repo.Repo` data-access façade with `New(*sql.DB)`. Concrete accessors land in later phase-1 features.
+- `apps/server/main.go` now opens the DB and applies migrations before accepting connections when `CHAT_DB_PATH` is set. Gating on the env var keeps the phase-0 `scripts/smoke.sh` boot path file-free until later phase-1 features (auth, channels, messages) require persistence.
 
 ## 2026-05-03 16:45Z — Security headers middleware + SQLite 0600 file perms (phase 1) (#26)
 

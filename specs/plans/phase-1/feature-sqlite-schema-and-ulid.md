@@ -1,7 +1,7 @@
 # Feature: SQLite schema and ULID generation
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - (foundational data model for US-1 through US-6, US-11, US-12)
