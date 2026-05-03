@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T17:26:50Z
-**Analyzed commit:** `fa60bfd`
+**Last updated:** 2026-05-03T19:55:35Z
+**Analyzed commit:** `ff5576d`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -59,12 +59,16 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [ws-hardening](phase-1/ws-hardening.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | implemented | 3/3 | 0 | 0 | 0 |
+| phase-2 | [go-client-package](phase-2/go-client-package.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-2 | [ts-api-client-package](phase-2/ts-api-client-package.md) | implemented | 6/7 | 1 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
 **Phase-1 totals:** 14 features analyzed of 14 spec'd · 64 ACs · 63 covered · 1 partial · 0 missing · 0 deferred.
 
-**Coordinated follow-up batch landed in `fa60bfd`:** the four planned-only stub specs (gap-A `access-log-fields-and-wiring`, gap-B `security-headers-and-sqlite-ensure-wiring`, gap-C `auth-endpoint-paths-align-with-prd`, gap-D `ws-userid-binding-and-channel-existence-check`) all closed in one PR set. Each one was tracked here at 0/N deferred; all four re-promote to N/N implemented at this SHA. The closure also transitively re-promotes three parent features whose ACs depended on the same wiring chain:
+**Phase-2 totals (so far):** 2 features analyzed of 5 spec'd (10/30 specs implemented; 20/40/50 unstarted) · 11 ACs · 10 covered · 1 partial · 0 missing · 0 deferred.
+
+**Coordinated follow-up batch landed in `fa60bfd`:** the four planned-only stub specs (gap-A `access-log-fields-and-wiring`, gap-B `security-headers-and-sqlite-ensure-wiring`, gap-C `auth-endpoint-paths-align-with-prd`, gap-D `ws-userid-binding-and-channel-existence-check`) all closed in one PR set. Each one was tracked at 0/N deferred; all four re-promote to N/N implemented at this SHA. The closure also transitively re-promotes parent features whose ACs depended on the same wiring chain:
 
 - `logging-and-error-envelope` AC-1 (was partial: missing `remote_ip` + `user_id`) → covered by `middleware.go:103`'s extended Printf format from gap-A.
 - `file-perms-and-headers` AC-2 + AC-3 (was partial: `SecurityHeaders` defined but not on the live mux) → covered by `main.go:154`'s outermost `SecurityHeaders` wrap from gap-B.
@@ -79,7 +83,9 @@ Generated automatically — leave this section alone; the agent rewrites it.
 
 `feature-auth-endpoints` (PR #38, paths aligned by gap-C) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary.
 
-**Phase-1 sibling PRs in flight (not yet on main):** none — phase-1 closes here modulo the single `auth-internals` AC-5 partial flag.
+`feature-go-client-package` (PR #64, with follow-ups #76 + 8ed4e82 + a4a5980) ships the Go HTTP+WS client at `packages/go-client/` (in-module, no `go.mod` of its own per CLAUDE.md). All 10 spec'd methods present; 23 tests across 5 `*_test.go` files cover REST + ticket-redeemed `Watch` end-to-end. AC-4 ("consumable from apps/cli via in-module import") satisfied at the import-graph level — no actual call site yet because that's `20-feature-cli-full-commands`'s job.
 
-**Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
+`feature-ts-api-client-package` (PR #67, with prettier follow-up #f85f955) ships `packages/api-client/` as `@hackathon/api-client` in the pnpm workspace. `Client` + `WebSocketClient` (with reconnect + `setTimeout` injection for deterministic tests) + `watch` async-iterable; 22 vitest cases. AC-6 (presence-event surface) sits at partial because the wire format is the client's *guess* at what `50-feature-presence` will emit — re-evaluate when that feature lands. AC-7 (consumable by apps/web) is satisfied at the workspace-graph level; `apps/web` doesn't exist yet (40-feature-web-app unstarted).
+
+**Phases 2 (remaining) and 3:** `phase-2/{20,40,50}-feature-*.md` and all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
