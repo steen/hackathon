@@ -2,7 +2,7 @@ name: feature-implementation-loop
 description: |
   Use when: You have a feature plan markdown file and want to drive the full implementation cycle (test plan → TDD → E2E → review → PR) in one run.
   Triggers: User invokes with a path to a feature plan (e.g. specs/plans/phase-1/feature-auth.md), or phrases like "run feature-implementation-loop", "implement feature from plan", "execute feature loop", "start feature implementation".
-  Does: Parses the feature plan and parent PRD; expands a full test plan; creates a feat/{slug} branch; runs a strict red-green-refactor TDD loop for unit tests; implements E2E tests; runs the full test suite; reviews the implementation against acceptance criteria, requirement IDs, and coding standards; fixes critical/high findings; pushes the branch and opens a PR via gh CLI with requirement-ID traceability.
+  Does: Parses the feature plan and parent PRD; expands a full test plan; creates a feat/{slug} branch; runs a strict red-green-refactor TDD loop for unit tests (gated by the full unit suite); implements E2E tests (gated by the full suite); reviews the implementation against acceptance criteria, requirement IDs, and coding standards; fixes critical/high findings; commits, pushes, and opens a PR via gh CLI with requirement-ID traceability.
   NOT for: Quick hotfixes, bug fixes without a feature plan, partially-implemented features already in progress, or non-test-driven changes.
 
 nodes:
@@ -13,12 +13,6 @@ nodes:
     allowed_tools: [Read, Bash, Glob, Grep]
     denied_tools: [Edit, Write]
 
-  - id: create-test-plan
-    command: feature-create-test-plan
-    depends_on: [parse-feature-plan]
-    allowed_tools: [Read, Write, Bash]
-    denied_tools: [Edit]
-
   - id: setup-branch
     depends_on: [parse-feature-plan]
     bash: |
@@ -28,7 +22,8 @@ nodes:
       # archon auto-shell-quotes $nodeId.output; reference it bare
       JSON=$parse-feature-plan.output
       # Strip markdown code fences if the model wrapped JSON in ```json ... ```
-      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
+      # Extract first valid JSON object (defends against code-fenced or prose-wrapped output)
+      JSON=$(printf '%s' "$JSON" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$JSON")
       SLUG=$(echo "$JSON" | jq -r '.slug')
 
       if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
@@ -37,9 +32,13 @@ nodes:
       fi
       BRANCH="feat/$SLUG"
 
-      if [ -n "$(git status --porcelain)" ]; then
-        echo "ERROR: working tree is dirty — commit or stash before running this workflow" >&2
-        git status --short >&2
+      # Ignore .archon/** in dirty check: archon injects the latest workflow/command
+      # files into the worktree filesystem regardless of the branch's HEAD, so they
+      # always appear modified relative to a stale base branch.
+      DIRTY=$(git status --porcelain -- ':(exclude).archon')
+      if [ -n "$DIRTY" ]; then
+        echo "ERROR: working tree has non-.archon dirty files — commit or stash" >&2
+        echo "$DIRTY" >&2
         exit 1
       fi
 
@@ -53,22 +52,25 @@ nodes:
 
       git rev-parse --abbrev-ref HEAD
 
+  - id: create-test-plan
+    command: feature-create-test-plan
+    depends_on: [setup-branch]
+    allowed_tools: [Read, Write, Bash]
+    denied_tools: [Edit]
+
   - id: tdd-unit-loop
-    depends_on: [create-test-plan, setup-branch]
+    depends_on: [create-test-plan]
     loop:
       prompt: |
         You are running a STRICT red-green-refactor TDD loop for unit tests.
 
-        Feature plan data (JSON):
+        Feature plan data (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $parse-feature-plan.output
-        ```
 
         The test plan path is the `test_plan_path` field of the JSON above.
 
-        Coding standards (read once if not already loaded):
-        - CLAUDE.md and ~/.claude/rules/common/*.md
+        Coding standards (the project's CLAUDE.md is automatically loaded by Claude Code; do not re-read it):
         - Immutability: never mutate existing objects; return new copies.
         - Files < 800 lines; extract when growing.
         - Validation at boundaries (user input, API responses, file content).
@@ -101,15 +103,28 @@ nodes:
         #!/bin/bash
         set -e
         FAIL=0
-        # Go modules under apps/* and packages/*
-        for d in apps/* packages/*; do
-          if [ -f "$d/go.mod" ]; then
+        FOUND=0
+        # Go: any module reachable via go.work (covers apps/*, packages/*, tests/*, and the root)
+        if [ -f go.work ]; then
+          FOUND=1
+          go test ./... -short || FAIL=1
+        else
+          for f in $(find . -maxdepth 4 -name go.mod -not -path '*/node_modules/*' 2>/dev/null); do
+            d=$(dirname "$f")
+            FOUND=1
             (cd "$d" && go test ./... -short) || FAIL=1
-          fi
-        done
-        # TS workspaces (skip silently if pnpm not present)
+          done
+        fi
+        # TS workspaces; --if-present skips workspaces that don't define the script
         if command -v pnpm >/dev/null 2>&1; then
-          pnpm -r test:unit || FAIL=1
+          if [ -f pnpm-workspace.yaml ] || [ -f pnpm-lock.yaml ]; then
+            FOUND=1
+            pnpm -r --if-present test:unit || FAIL=1
+          fi
+        fi
+        if [ "$FOUND" -eq 0 ]; then
+          echo "until_bash: no test runners detected — refusing to mark loop done" >&2
+          exit 1
         fi
         exit $FAIL
       max_iterations: 30
@@ -123,11 +138,9 @@ nodes:
         You are implementing E2E tests from the test plan and making them pass — without
         breaking any unit tests.
 
-        Feature plan data (JSON):
+        Feature plan data (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $parse-feature-plan.output
-        ```
 
         The test plan path is the `test_plan_path` field of the JSON above.
 
@@ -153,33 +166,19 @@ nodes:
       until_bash: |
         #!/bin/bash
         set -e
-        go test ./...
-        if command -v pnpm >/dev/null 2>&1; then
-          pnpm -r test
+        if [ -f go.work ] || ls -1 */go.mod >/dev/null 2>&1; then
+          go test ./...
+        fi
+        if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-workspace.yaml ]; then
+          pnpm -r --if-present test
         fi
       max_iterations: 20
       fresh_context: true
     allowed_tools: [Read, Write, Edit, Bash, Glob, Grep]
 
-  - id: run-full-suite
-    depends_on: [e2e-implementation]
-    bash: |
-      #!/bin/bash
-      set -e
-      echo "=== Running full Go test suite ==="
-      go test ./...
-      if command -v pnpm >/dev/null 2>&1; then
-        echo "=== Running full TS test suite ==="
-        pnpm -r test
-      else
-        echo "pnpm not found — skipping TS suite"
-      fi
-      echo "OK: full suite green"
-    timeout: 1800000
-
   - id: review-implementation
     command: feature-review
-    depends_on: [run-full-suite]
+    depends_on: [e2e-implementation]
     output_format:
       type: json
     allowed_tools: [Read, Glob, Grep, Bash]
@@ -192,17 +191,13 @@ nodes:
       prompt: |
         You are fixing review findings from `review-implementation`.
 
-        Findings (JSON):
+        Findings (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $review-implementation.output
-        ```
 
-        Feature plan data (JSON):
+        Feature plan data (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $parse-feature-plan.output
-        ```
 
         Each iteration:
         1. Address every `critical` finding first, then every `high`. Tackle `medium`
@@ -214,25 +209,28 @@ nodes:
              test file too.
         3. Run the full suite (`go test ./... && pnpm -r test`) after each batch.
         4. After all critical/high issues are addressed, write a marker file
-           `.archon/.feature-loop-second-pass-OK` containing the current git short SHA.
-           This marker tells the loop the second pass succeeded.
+           `$ARTIFACTS_DIR/second-pass-ok` containing the current git short SHA.
+           This marker tells the loop the second pass succeeded. (It lives in the
+           workflow artifacts dir so it stays out of the git working tree.)
 
         Do NOT introduce new features. Do NOT refactor unrelated code. Do NOT weaken tests
         to make them pass — fix the implementation.
 
         When all CRITICAL and HIGH findings are resolved, the full test suite is green, and
-        the marker file `.archon/.feature-loop-second-pass-OK` exists, emit the literal
+        the marker file `$ARTIFACTS_DIR/second-pass-ok` exists, emit the literal
         token `<promise>FINDINGS_ADDRESSED</promise>` as the last line of your output.
         Otherwise, do not emit it — the loop will continue.
       until: FINDINGS_ADDRESSED
       until_bash: |
         #!/bin/bash
         set -e
-        go test ./...
-        if command -v pnpm >/dev/null 2>&1; then
-          pnpm -r test
+        if [ -f go.work ] || ls -1 */go.mod >/dev/null 2>&1; then
+          go test ./...
         fi
-        test -f .archon/.feature-loop-second-pass-OK
+        if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-workspace.yaml ]; then
+          pnpm -r --if-present test
+        fi
+        test -f "$ARTIFACTS_DIR/second-pass-ok"
       max_iterations: 5
       fresh_context: true
     allowed_tools: [Read, Write, Edit, Bash, Glob, Grep]
@@ -248,8 +246,9 @@ nodes:
       JSON=$parse-feature-plan.output
       REVIEW=$review-implementation.output
       # Strip markdown code fences if the model wrapped JSON in ```json ... ```
-      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
-      REVIEW=$(echo "$REVIEW" | sed -e '/^[[:space:]]*```/d')
+      # Extract first valid JSON object (defends against code-fenced or prose-wrapped output)
+      JSON=$(printf '%s' "$JSON" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$JSON")
+      REVIEW=$(printf '%s' "$REVIEW" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$REVIEW")
 
       SLUG=$(echo "$JSON" | jq -r '.slug')
       FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
@@ -264,6 +263,24 @@ nodes:
       fi
 
       BRANCH="feat/$SLUG"
+
+      # Commit any outstanding implementation work. The TDD/E2E loops edit files
+      # but don't commit; without this the branch would be empty and gh pr create
+      # would fail with "No commits between main and feat/<slug>".
+      git add -A
+      if git diff --cached --quiet; then
+        echo "no staged changes to commit"
+      else
+        git commit -m "feat($SLUG): $FEATURE_NAME"
+      fi
+
+      # Refuse to push an empty branch.
+      AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+      if [ "$AHEAD" -eq 0 ]; then
+        echo "ERROR: branch $BRANCH has no commits ahead of origin/main — nothing to PR" >&2
+        exit 1
+      fi
+
       git push -u origin "$BRANCH"
 
       BODY_FILE="$(mktemp)"
@@ -324,14 +341,16 @@ nodes:
         DRAFT_FLAG="--draft"
       fi
 
+      # Use $BASE_BRANCH so --from feat/<prev> stacks PRs onto the prior branch.
+      # Defaults to main when unset.
+      PR_BASE="${BASE_BRANCH:-main}"
+
       gh pr create \
-        --base main \
+        --base "$PR_BASE" \
         --head "$BRANCH" \
         --title "feat($SLUG): $FEATURE_NAME" \
         --body-file "$BODY_FILE" \
         $DRAFT_FLAG
-
-      gh pr view "$BRANCH" --json url -q .url
 
   - id: summarize
     depends_on: [create-pr]
@@ -339,7 +358,10 @@ nodes:
       #!/bin/bash
       set -e
 
-      JSON='$parse-feature-plan.output'
+      # archon auto-shell-quotes $nodeId.output; reference bare and strip fences defensively
+      JSON=$parse-feature-plan.output
+      # Extract first valid JSON object (defends against code-fenced or prose-wrapped output)
+      JSON=$(printf '%s' "$JSON" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$JSON")
       SLUG=$(echo "$JSON" | jq -r '.slug')
       FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
 
@@ -350,7 +372,8 @@ nodes:
       UNIT_COUNT=$(grep -rE 'func Test[A-Za-z0-9_]+' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ' || echo 0)
       TS_UNIT_COUNT=$(grep -rE "it\\(['\"]" --include='*.test.ts' --include='*.test.tsx' --include='*.spec.ts' . 2>/dev/null | wc -l | tr -d ' ' || echo 0)
       E2E_COUNT=$(find tests/e2e -type f \( -name '*.spec.ts' -o -name '*.spec.js' \) 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-      FILES_CHANGED=$(git diff --name-only "main...HEAD" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+      # Use origin/main since the worktree may not have a local main ref
+      FILES_CHANGED=$(git diff --name-only "origin/main...HEAD" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 
       SUMMARY_FILE="$ARTIFACTS_DIR/summary.md"
       {

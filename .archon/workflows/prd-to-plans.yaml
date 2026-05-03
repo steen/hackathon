@@ -21,8 +21,7 @@ nodes:
   - id: generate-feature-plans
     command: prd-generate-feature-plans
     depends_on: [parse-prd]
-    allowed_tools: [Read, Write, Bash]
-    denied_tools: [Edit]
+    allowed_tools: [Read, Write, Edit, Bash, Glob]
 
   - id: generate-index
     command: prd-generate-index
@@ -99,12 +98,17 @@ nodes:
         const phaseLower = phaseContent.toLowerCase();
         for (const d of phase.deliverables ?? []) {
           // Requirement-ID-listing deliverables (e.g. "Tests for US-1, US-2, SEC-1…SEC-15")
-          // are covered iff every listed ID appears in the phase content.
-          const idRefs = d.match(idRefRe);
-          if (idRefs && idRefs.length > 0) {
-            const phaseLowerForIds = phaseLower;
+          // are covered iff every listed ID appears anywhere in the feature plans —
+          // an ID may legitimately be implemented in a different phase than the one
+          // whose deliverable list happens to mention it (e.g. SEC-15 covers a CLI
+          // flow in phase 2 even though phase 1's deliverable lists it).
+          const idRefs = (d.match(idRefRe) ?? []).map((id) =>
+            id.replace(/[^\w-]+$/, ""),
+          );
+          if (idRefs.length > 0) {
+            const allLower = allFeatureContent.toLowerCase();
             const missingIds = idRefs.filter(
-              (id) => !phaseLowerForIds.includes(id.toLowerCase()),
+              (id) => !allLower.includes(id.toLowerCase()),
             );
             if (missingIds.length > 0) {
               missingDeliverables.push(
