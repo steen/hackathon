@@ -89,20 +89,21 @@ WS_URL="ws://127.0.0.1:${PORT}/ws"
 API_URL="http://127.0.0.1:${PORT}"
 export CHAT_SERVER="$WS_URL"
 
-# Auth flow needs a SQLite file, a JWT secret, and the invite code.
-# Using the work dir keeps each smoke invocation hermetic.
+# Auth flow needs a SQLite file plus the JWT secret and invite code. The
+# work-dir DB makes each invocation hermetic. Per PR #28's startup config
+# validation, the secret + invite code are generated per-run via openssl
+# (no fake-secret literal committed to git; the values live only for the
+# duration of this smoke run). openssl is on every CI runner and avoids
+# the `tr <urandom | head` SIGPIPE trap under `set -o pipefail`.
 DB_PATH="$WORK_DIR/chat.db"
-JWT_SECRET="smoke-jwt-secret-must-be-long-enough-32b!"
-INVITE_CODE="smoke-invite-code"
-export CHAT_DB_PATH="$DB_PATH"
-export CHAT_JWT_SECRET="$JWT_SECRET"
-export CHAT_INVITE_CODE="$INVITE_CODE"
+SMOKE_JWT_SECRET="$(openssl rand -hex 20)"      # 40 hex chars, well over the 32-byte floor
+SMOKE_INVITE_CODE="$(openssl rand -hex 8)"      # 16 hex chars
 
 echo "[smoke] starting server on :${PORT}"
 CHAT_SERVER_PORT="$PORT" \
-CHAT_DB_PATH="$DB_PATH" \
-CHAT_JWT_SECRET="$JWT_SECRET" \
-CHAT_INVITE_CODE="$INVITE_CODE" \
+  CHAT_DB_PATH="$DB_PATH" \
+  CHAT_JWT_SECRET="$SMOKE_JWT_SECRET" \
+  CHAT_INVITE_CODE="$SMOKE_INVITE_CODE" \
   "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -126,7 +127,7 @@ SMOKE_PASS="smoke-password-1234567890"
 echo "[smoke] register ${SMOKE_USER}"
 REG_RESP=$(curl -fsS -X POST "${API_URL}/api/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\",\"invite_code\":\"${INVITE_CODE}\"}")
+  -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\",\"invite_code\":\"${SMOKE_INVITE_CODE}\"}")
 TOKEN=$(printf '%s' "$REG_RESP" | json_get token)
 if [[ -z "$TOKEN" ]]; then
   echo "[smoke] register did not return a token: ${REG_RESP}" >&2

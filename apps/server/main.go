@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"hackathon/apps/server/internal/auth"
+	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
@@ -22,7 +24,6 @@ import (
 )
 
 const (
-	defaultPort       = 8080
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
 	jwtSecretEnv      = "CHAT_JWT_SECRET"
@@ -39,7 +40,17 @@ const (
 var repository *repo.Repo
 
 func main() {
-	port, err := resolvePort(os.Getenv(portEnv))
+	cfg := config.Load()
+	checks, err := cfg.Validate()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	for _, ch := range checks {
+		log.Printf("config check ok: %s", ch.Name)
+	}
+
+	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
@@ -96,7 +107,7 @@ func main() {
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
+		Addr:              listenAddr,
 		Handler:           httpx.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
@@ -106,7 +117,7 @@ func main() {
 	defer stop()
 
 	go func() {
-		log.Printf("chat server listening on :%d", port)
+		log.Printf("chat server listening on %s", listenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -120,19 +131,26 @@ func main() {
 	}
 }
 
-// resolvePort parses raw as a TCP port number. Empty raw returns defaultPort.
-// Anything outside [1, 65535] is reported as a config error so operators see a
-// clear startup failure instead of a downstream listen-syscall message.
-func resolvePort(raw string) (int, error) {
-	if raw == "" {
-		return defaultPort, nil
+// resolveListenAddr returns the address the HTTP server should bind. cfg is
+// the validated CHAT_LISTEN_ADDR (default 127.0.0.1:8080); portOverride is
+// the legacy CHAT_SERVER_PORT env var, kept for compatibility with existing
+// tests and operator habits. When portOverride is set it replaces the port
+// component of cfg without changing the host, so SEC-2 (loopback unless
+// overridden) still holds.
+func resolveListenAddr(cfg, portOverride string) (string, error) {
+	if portOverride == "" {
+		return cfg, nil
 	}
-	n, err := strconv.Atoi(raw)
+	n, err := strconv.Atoi(portOverride)
 	if err != nil {
-		return 0, fmt.Errorf("%s=%q is not a valid integer: %w", portEnv, raw, err)
+		return "", fmt.Errorf("%s=%q is not a valid integer: %w", portEnv, portOverride, err)
 	}
 	if n < 1 || n > 65535 {
-		return 0, fmt.Errorf("%s=%d is out of range [1,65535]", portEnv, n)
+		return "", fmt.Errorf("%s=%d is out of range [1,65535]", portEnv, n)
 	}
-	return n, nil
+	host, _, err := net.SplitHostPort(cfg)
+	if err != nil {
+		return "", fmt.Errorf("config: CHAT_LISTEN_ADDR=%q is not host:port: %w", cfg, err)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(n)), nil
 }

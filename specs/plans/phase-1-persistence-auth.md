@@ -17,7 +17,7 @@ Phase 0
 - [x] Auth endpoints: register (invite-code gated) / login / me / logout / ws-ticket.
 - [ ] Channels endpoints; messages endpoints (REST + WS).
 - [ ] Hardening that must land in Phase 1 (not Phase 3):
-- [ ] Startup checks: JWT secret length + dev-default denylist; non-loopback bind requires `CHAT_ALLOW_PUBLIC_BIND=1`; registration requires `CHAT_INVITE_CODE`.
+- [x] Startup checks: JWT secret length + dev-default denylist; non-loopback bind requires `CHAT_ALLOW_PUBLIC_BIND=1`; registration requires `CHAT_INVITE_CODE`.
 - [ ] Per-IP rate limits on login and registration; per-username login backoff.
 - [x] WS read limit (64 KiB), per-conn send rate limit, 4 KiB body cap, REST 16 KiB body cap.
 - [ ] Same-origin WS upgrade check; one-shot 30s ws-ticket flow; WS rejects sends to non-existent channels.
