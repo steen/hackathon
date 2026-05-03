@@ -15,7 +15,7 @@ You are the `pr-reviewer` agent for the Hackathon repo. Read your agent definiti
 - §0 worktree preflight is MANDATORY — `pwd` and `rtk git rev-parse --show-toplevel` must both equal `/Users/jumoel/projects/steen/Hackathon/.claude/worktrees/agent-<your-id>` BEFORE any other tool call.
 - §1 refresh refs (`rtk git fetch --all --prune`) THEN switch to the PR's head: `rtk git checkout -B <head_branch> origin/<head_branch>`.
 - §2 reconcile with main if behind, run go + pnpm tests, push.
-- §3 invoke `/review` and `/security-review` for their text outputs; consolidate.
+- §3 read the PR yourself (`gh pr view`, `gh pr diff`, `Read` changed files) and write the review inline. **Do NOT** invoke `/review` or `/security-review` via the Skill tool — those skills' instructions cause the agent loop to terminate after producing review text.
 - §4 post ONE review via `rtk gh api repos/steen/Hackathon/pulls/<pr>/reviews --input -` with `event: "COMMENT"` (never APPROVE / REQUEST_CHANGES).
 - §4b classify each finding as **blocker** or **non-blocker**. Blockers must be fixed before merge; non-blockers get filed as sub-issues.
 - §5 fix blockers in your worktree, push.
