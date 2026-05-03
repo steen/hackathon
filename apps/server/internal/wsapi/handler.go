@@ -55,9 +55,10 @@ func (c *connSubscriber) close() {
 // its lifetime.
 func Handler(h *hub.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true,
-		})
+		// Default Accept rejects mismatched Origin (CSWSH defense). For
+		// non-default origins, use OriginPatterns with an explicit
+		// allowlist — never InsecureSkipVerify in this code path.
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			return
 		}

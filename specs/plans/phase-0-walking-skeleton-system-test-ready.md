@@ -14,7 +14,7 @@ None
 - [x] Monorepo scaffold: `go.work`, `pnpm-workspace.yaml`, root `package.json` with `dev` / `build` / `test` scripts.
 - [x] `apps/server`: `/ws` endpoint with in-memory hub, broadcasts every received message to all subscribers of the channel.
 - [x] `apps/cli`: `chatd send` and `chatd watch` against `/ws` (no login).
-- [x] **System test**: `scripts/smoke.sh` boots server, runs two `chatd watch` processes, pipes a message via `chatd send`, asserts both watchers see it.
+- [ ] **System test**: `scripts/smoke.sh` boots server, runs two `chatd watch` processes, pipes a message via `chatd send`, asserts both watchers see it.
 
 ## Validation criteria
 - `scripts/smoke.sh` passes. This stays green for the rest of the project.

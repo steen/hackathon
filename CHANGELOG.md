@@ -10,7 +10,7 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0)
+## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 
 ### Added
 - `apps/cli/main.go` is now a `package main` dispatcher delegating to `apps/cli/cmd`. Supports `chatd [--url URL] send <msg...>` and `chatd [--url URL] watch`; URL falls back to `CHAT_SERVER` env or the default. Cancels on SIGINT/SIGTERM via `signal.NotifyContext`. The library shipped in #14; this lands the missing entrypoint.
@@ -21,12 +21,12 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 ### Removed
 - `apps/cli/doc.go` (its `package cli` declaration conflicted with the new `package main` in the same directory).
 
-## 2026-05-03 15:20Z — Server `/ws` endpoint with in-memory hub (phase 0)
+## 2026-05-03 15:20Z — Server `/ws` endpoint with in-memory hub (phase 0) (#17)
 
 ### Added
-- `apps/server/main.go` boots an HTTP server on `CHAT_SERVER_PORT` (default `8080`) with graceful shutdown on SIGINT/SIGTERM.
+- `apps/server/main.go` boots an HTTP server on `CHAT_SERVER_PORT` (default `8080`, validated 1–65535) with `ReadHeaderTimeout`/`IdleTimeout` (Slowloris mitigation) and graceful shutdown on SIGINT/SIGTERM.
 - `apps/server/internal/hub` provides per-channel pub/sub fan-out with `Subscribe` / `Unsubscribe` / `Broadcast`. Broadcast snapshots the subscriber set under a read lock so a slow subscriber cannot stall the hub.
-- `apps/server/internal/wsapi` exposes the `/ws` HTTP handler. Each accepted connection auto-subscribes to `#general` for its lifetime; reads broadcast as text frames; writes drain through a 64-slot buffered queue (overflow drops messages for that subscriber rather than blocking the hub).
+- `apps/server/internal/wsapi` exposes the `/ws` HTTP handler. Default Origin verification is enforced (no `InsecureSkipVerify`). Each accepted connection auto-subscribes to `#general` for its lifetime; reads broadcast as text frames; writes drain through a 64-slot buffered queue (overflow drops messages for that subscriber rather than blocking the hub).
 
 ## 2026-05-03 13:05Z — CLI send/watch library (no-auth, phase 0) (#14)
 
