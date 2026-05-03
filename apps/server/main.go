@@ -113,7 +113,7 @@ func run() error {
 		}
 		tickets = auth.NewTicketStore()
 		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
-		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfig())
+		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfigFromEnv())
 		userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
 		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
 			DB:          repository.DB(),

@@ -123,6 +123,12 @@ function startServer(opts: {
       CHAT_DB_PATH: opts.dbPath,
       CHAT_JWT_SECRET: opts.jwtSecret,
       CHAT_INVITE_CODE: opts.inviteCode,
+      // Per-IP register limiter override (issue #114). Production stays at
+      // Burst=5 / Refill=15min; the harness needs a generous budget so a
+      // single 127.0.0.1 can run many flows back-to-back without hitting
+      // 429 rate_limited. Anything large enough to clear a full suite.
+      CHAT_REGISTER_BURST: "1000",
+      CHAT_REGISTER_REFILL: "1s",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
