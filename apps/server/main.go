@@ -12,22 +12,51 @@ import (
 	"syscall"
 	"time"
 
+	appdb "hackathon/apps/server/internal/db"
+	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
+	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
 )
 
 const (
 	defaultPort       = 8080
 	portEnv           = "CHAT_SERVER_PORT"
+	dbPathEnv         = "CHAT_DB_PATH"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
 )
 
+// repository is a process-wide handle that later phase-1 features (auth,
+// channels, messages) will use to reach SQLite. Kept package-level so the
+// startup wiring lives in one place; nil when CHAT_DB_PATH is unset (phase-0
+// boot path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
+var repository *repo.Repo
+
 func main() {
 	port, err := resolvePort(os.Getenv(portEnv))
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+
+	if dbPath := os.Getenv(dbPathEnv); dbPath != "" {
+		sqlDB, err := appdb.Open(dbPath)
+		if err != nil {
+			log.Fatalf("db open: %v", err)
+		}
+		defer func() { _ = sqlDB.Close() }()
+		migCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := appdb.Apply(migCtx, sqlDB); err != nil {
+			cancel()
+			log.Fatalf("db migrate: %v", err)
+		}
+		cancel()
+		repository, err = repo.New(sqlDB)
+		if err != nil {
+			log.Fatalf("repo init: %v", err)
+		}
+		log.Printf("db ready at %s", dbPath)
 	}
 
 	h := hub.New()
@@ -40,7 +69,7 @@ func main() {
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           mux,
+		Handler:           httpx.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
