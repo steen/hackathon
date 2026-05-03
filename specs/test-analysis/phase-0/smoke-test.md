@@ -1,8 +1,8 @@
 ---
 feature: smoke-test
 phase: phase-0
-analyzed_at: 2026-05-03T14:06:50Z
-analyzed_commit: 4902b5f55fc78b6ea268a001d0aec33d5ad34ff8
+analyzed_at: 2026-05-03T14:36:54Z
+analyzed_commit: 979995f4036835473476118401f425f04de70106
 implementation_status: implemented
 total_acs: 5
 covered: 5
@@ -14,15 +14,15 @@ deferred: 0
 # Test analysis: System smoke test (`scripts/smoke.sh`)
 
 **Spec:** `specs/plans/phase-0/feature-smoke-test.md`
-**Implementation status:** implemented — `scripts/smoke.sh` exists and is executable; root `package.json` `test` script runs `bash scripts/smoke.sh && pnpm -r --if-present run test`. Verified by running the script in this worktree at `4902b5f`: both watchers received the broadcast.
+**Implementation status:** implemented — `scripts/smoke.sh` exists and is executable; root `package.json` `test` script runs `bash scripts/smoke.sh && pnpm -r --if-present run test`. Verified by running the script in this worktree at `979995f`: both watchers received the broadcast. PR #25 hardened the script in two ways: (a) replaced sleep-based subscriber-readiness with `/debug/subs` polling, (b) cleanup escalates SIGTERM → SIGKILL after a bounded wait so wedged children can't hang `wait`.
 
 ## Acceptance criteria
 
 | AC | Statement (verbatim from spec) | Status | Test reference |
 |----|-------------------------------|--------|----------------|
-| AC-1 | `scripts/smoke.sh` boots the server, starts two `chatd watch` processes, sends a message via `chatd send`, and asserts both watchers received it. | covered | `scripts/smoke.sh` itself + `tests/smoke-test/wiring.test.ts::TestAC1_smoke_test_script_executes_the_documented_flow` (static check that the script invokes `./apps/server`, two `chatd watch`s, a `chatd send`, and a watcher-output assertion). Runtime: `pnpm test` invokes the script. |
+| AC-1 | `scripts/smoke.sh` boots the server, starts two `chatd watch` processes, sends a message via `chatd send`, and asserts both watchers received it. | covered | `scripts/smoke.sh` itself + `tests/smoke-test/wiring.test.ts::TestAC1_smoke_test_script_executes_the_documented_flow` (static check that the script invokes `./apps/server`, two `chatd watch`s, a `chatd send`, and a watcher-output assertion) + `TestAC1_smoke_test_uses_debug_subs_for_deterministic_subscriber_readiness` (catches a regression to sleep-based readiness). Runtime: `pnpm test` invokes the script. |
 | AC-2 | The script exits 0 on success, non-zero with a clear error message on failure. | covered | `tests/smoke-test/wiring.test.ts::TestAC2_smoke_test_script_uses_strict_mode_and_explicit_failure_output` (asserts `set -euo pipefail` + the FAIL stderr branch). Runtime: success path observed by `pnpm test`. |
-| AC-3 | The script tears down all spawned processes on completion (success or failure). | covered | `tests/smoke-test/wiring.test.ts::TestAC3_smoke_test_script_traps_exit_and_kills_spawned_pids` (asserts `trap … EXIT INT TERM HUP` + a cleanup function that `kill`s recorded PIDs). |
+| AC-3 | The script tears down all spawned processes on completion (success or failure). | covered | `tests/smoke-test/wiring.test.ts::TestAC3_smoke_test_script_traps_exit_and_kills_spawned_pids` (asserts `trap … EXIT INT TERM HUP` + a cleanup function that `kill`s recorded PIDs) + `TestAC3_smoke_test_cleanup_escalates_term_to_kill_for_wedged_children` (catches a regression that drops the SIGKILL escalation). |
 | AC-4 | The script is referenced by the root `package.json` `test` script (or an equivalent task) so it runs as part of the standard test workflow. | covered | `tests/smoke-test/wiring.test.ts::TestAC4_smoke_test_script_is_wired_into_root_package_json_test_script` (now a hard assertion — the bootstrap-era early-return guard is removed). |
 | AC-5 | This test stays green for the rest of the project (validation criterion for Phase 0 and Phase 1). | covered (meta) | `tests/smoke-test/wiring.test.ts::TestAC5_smoke_test_script_is_executable_and_present` (per-tick liveness check). The "stays green over time" property is what CI is for; this test only asserts the entry conditions. |
 
