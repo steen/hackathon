@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T17:26:50Z
-**Analyzed commit:** `fa60bfd`
+**Last updated:** 2026-05-03T20:02:50Z
+**Analyzed commit:** `7b6b9b3`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -59,10 +59,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [ws-hardening](phase-1/ws-hardening.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | implemented | 3/3 | 0 | 0 | 0 |
+| phase-2 | [presence](phase-2/presence.md) | implemented | 4/5 | 0 | 0 | 1 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
 **Phase-1 totals:** 14 features analyzed of 14 spec'd · 64 ACs · 63 covered · 1 partial · 0 missing · 0 deferred.
+
+**Phase-2 totals (so far):** 1 feature analyzed of 5 spec'd (10/30 covered by sibling PR #82, in flight; 50 in this PR; 20/40 unstarted) · 5 ACs · 4 covered · 0 partial · 0 missing · 1 deferred. AC-4 of presence (web app + CLI consumers) deferred until `40-feature-web-app` and a CLI presence consumer ship.
 
 **Coordinated follow-up batch landed in `fa60bfd`:** the four planned-only stub specs (gap-A `access-log-fields-and-wiring`, gap-B `security-headers-and-sqlite-ensure-wiring`, gap-C `auth-endpoint-paths-align-with-prd`, gap-D `ws-userid-binding-and-channel-existence-check`) all closed in one PR set. Each one was tracked here at 0/N deferred; all four re-promote to N/N implemented at this SHA. The closure also transitively re-promotes three parent features whose ACs depended on the same wiring chain:
 
@@ -79,7 +82,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 
 `feature-auth-endpoints` (PR #38, paths aligned by gap-C) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary.
 
+`feature-presence` (PR #80, server-side only) ships the hub-level refcount + WS broadcast + `GET /api/presence` REST endpoint. 17 in-package tests across `hub/presence_test.go` (9), `wsapi/presence_test.go` (4), `http/presence_handlers_test.go` (4). AC-4 (web app + CLI consumers) deferred until those features ship.
+
+**Schema-drift flag (cross-feature):** the server emits the presence frame as `{type:"presence", data:{kind, user_id}}` but the TS api-client (PR #82, in flight) defines `PresenceEvent.data` as `{kind, user:User}` (full user record). One side needs to move — picking the lighter-weight `{user_id}` shape requires the client to maintain a userID→username map; embedding the full `User` matches the REST endpoint's `{id, username}` shape. **Production change required either way; out of test-agent scope.** Worth flagging when reviewing PR #82 or a follow-up presence-client integration PR.
+
 **Phase-1 sibling PRs in flight (not yet on main):** none — phase-1 closes here modulo the single `auth-internals` AC-5 partial flag.
 
-**Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
+**Phase-2 sibling PR in flight:** PR #82 (`go-client-package` 4/4 + `ts-api-client-package` 6/7+1-partial). Ts-api-client AC-6 (presence event surface) sits at partial pending presence-impl-and-schema-reconciliation; once both PR #80 (this) and the schema-drift fix land, the next test-watch tick should re-evaluate it.
+
+**Remaining phase 2 (3 features) and phase 3 (5 features):** `phase-2/{20,40}-feature-*.md` and all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
