@@ -15,8 +15,16 @@
 //      single-arg shape, plus ticket presence).
 
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { WebSocket as NodeWebSocket } from "ws";
 import { Client } from "@hackathon/api-client";
 import { serverUrl, inviteCode, uniqueUsername, strongPassword } from "./helpers.js";
+
+// Node has no global WebSocket on the LTS used in CI, so capturing
+// `globalThis.WebSocket` at module load is unreliable. The test wants
+// a real working ctor to forward sniffing calls to — `ws` (vitest
+// transitive dep, also pinned in tests/e2e devDependencies) provides
+// one that satisfies the api-client's `WebSocketLike` shape.
+const RealWS = NodeWebSocket as unknown as new (url: string) => WebSocket;
 
 interface SniffedRequest {
   url: string;
@@ -79,7 +87,6 @@ describe("AC-3: auth transport — Bearer on REST, ticket on WS, no bearer on WS
       argLength: number;
     }
     const dials: DialRecord[] = [];
-    const RealWS = globalThis.WebSocket;
 
     class SniffingWebSocket {
       readyState = 0;

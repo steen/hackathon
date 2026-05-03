@@ -1,5 +1,12 @@
 import { randomBytes } from "node:crypto";
+import { WebSocket as NodeWebSocket } from "ws";
 import { createClient, type Client } from "@hackathon/api-client";
+
+// Node has no global WebSocket on the LTS used in CI; the api-client
+// falls back to globalThis.WebSocket when no WebSocket ctor is passed.
+// Thread the `ws` package's WebSocket through every helper-built Client
+// so tests run identically on dev (where node may expose one) and CI.
+const WSCtor = NodeWebSocket as unknown as new (url: string) => WebSocket;
 
 export function serverUrl(): string {
   const v = process.env.E2E_SERVER_URL;
@@ -42,7 +49,7 @@ export interface RegisteredUser {
 export async function registerFresh(prefix = "u"): Promise<RegisteredUser> {
   const username = uniqueUsername(prefix);
   const password = strongPassword();
-  const client = createClient({ baseUrl: serverUrl() });
+  const client = createClient({ baseUrl: serverUrl(), WebSocket: WSCtor });
   const auth = await client.register(username, password, inviteCode());
   return { client, username, password, token: auth.token, userId: auth.user.id };
 }
