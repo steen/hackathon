@@ -25,10 +25,8 @@ nodes:
       #!/bin/bash
       set -euo pipefail
 
-      JSON=$(cat <<'__ARCHON_PARSE_OUTPUT_END__'
-      $parse-feature-plan.output
-      __ARCHON_PARSE_OUTPUT_END__
-      )
+      # archon auto-shell-quotes $nodeId.output; reference it bare
+      JSON=$parse-feature-plan.output
       # Strip markdown code fences if the model wrapped JSON in ```json ... ```
       JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
       SLUG=$(echo "$JSON" | jq -r '.slug')
@@ -246,14 +244,9 @@ nodes:
       #!/bin/bash
       set -euo pipefail
 
-      JSON=$(cat <<'__ARCHON_PARSE_OUTPUT_END__'
-      $parse-feature-plan.output
-      __ARCHON_PARSE_OUTPUT_END__
-      )
-      REVIEW=$(cat <<'__ARCHON_REVIEW_OUTPUT_END__'
-      $review-implementation.output
-      __ARCHON_REVIEW_OUTPUT_END__
-      )
+      # archon auto-shell-quotes $nodeId.output; reference bare
+      JSON=$parse-feature-plan.output
+      REVIEW=$review-implementation.output
       # Strip markdown code fences if the model wrapped JSON in ```json ... ```
       JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
       REVIEW=$(echo "$REVIEW" | sed -e '/^[[:space:]]*```/d')
