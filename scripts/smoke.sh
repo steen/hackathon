@@ -153,9 +153,13 @@ if [[ -z "$TICKET" ]]; then
 fi
 
 # WS handshake hardening (ticket redemption at /ws upgrade) lands in
-# the ws-hardening feature; for now /ws ignores the query parameter.
-# We still pass --ws-ticket so the smoke wiring is in place — the
-# server's coder/websocket Accept ignores unknown query params.
+# the ws-hardening feature; for now /ws ignores the query parameter,
+# so reusing one ticket across both watchers and the sender works.
+# Once the upgrader calls Redeem() — single-use — this script must
+# issue one ticket per chatd invocation (three total). Reusing one
+# ticket will fail silently for the second and third consumers.
+# We still pass --ws-ticket today so the smoke wiring is in place —
+# coder/websocket Accept ignores unknown query params.
 echo "[smoke] starting two watchers (with ticket)"
 "$CHATD_BIN" --ws-ticket "$TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
 WATCH1_PID=$!
