@@ -21,8 +21,8 @@ Phase 2
 - clean clone → `pnpm dev` → full demo flow under 5 minutes.
 
 ## Features
-- [README quick start](phase-3/feature-readme-quickstart.md)
+- [README quick start](phase-3/feature-readme-quick-start.md)
 - [Embedded web build](phase-3/feature-embedded-web-build.md)
 - [Seed #general](phase-3/feature-seed-general-channel.md)
-- [Single-binary demo path](phase-3/feature-single-binary-demo.md)
+- [Single-binary demo path verified](phase-3/feature-single-binary-demo-verified.md)
 - [CHANGELOG 0.1.0 entry](phase-3/feature-changelog-entry.md)

@@ -9,7 +9,7 @@
 ## Acceptance criteria
 - Access-log middleware logs method, path, status, latency, IP, and user ID (if known).
 - Sensitive query parameters (`token`, `ticket`) are stripped/redacted from logged URLs.
-- All error responses use a consistent user-safe envelope: `{ "error": { "code": string, "message": string } }`.
+- Every JSON response uses the envelope `{ ok: bool, data: any|null, error: { code: string, message: string }|null }` per PRD §6. `ok=false` implies `error` is non-null and `data` is null; `ok=true` implies the inverse.
 - Internal error details (stack, raw DB error) are not exposed to clients but are logged on the server side with a request ID.
 
 ## Implementation steps
@@ -22,7 +22,7 @@
 ## Test plan
 - `test_access_log_strips_token_query_param` — covers SEC logging hygiene.
 - `test_access_log_strips_ticket_query_param` — covers SEC logging hygiene.
-- `test_error_envelope_shape_is_consistent` — covers cross-cutting error format.
+- `test_error_envelope_shape_is_consistent` — covers cross-cutting error format. Asserts all three keys (`ok`, `data`, `error`) are present on both success and error response bodies, with the `ok=true ⇒ error=null, data≠null` and `ok=false ⇒ error≠null, data=null` invariants.
 - `test_panic_recovery_returns_generic_envelope_and_logs_internally` — covers cross-cutting hygiene.
 
 ## Files expected to be touched or created

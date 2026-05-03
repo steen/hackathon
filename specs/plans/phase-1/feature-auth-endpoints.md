@@ -16,6 +16,7 @@
 - `POST /api/logout` increments the user's `token_version`, invalidating all outstanding tokens (US-12).
 - `POST /api/ws-ticket` issues a one-shot, 30-second ticket bound to the user, redeemable once at WS upgrade (see `feature-ws-hardening.md`).
 - All auth endpoints write entries to `auth_events`.
+- `scripts/smoke.sh` continues to exit 0 after this feature lands.
 
 ## Implementation steps
 1. Wire HTTP router (e.g., chi or stdlib `http.ServeMux`) and a JSON helper.
@@ -26,6 +27,7 @@
    - `logout`: parses token, increments `users.token_version` for the user, logs event.
    - `ws-ticket`: generates random 128-bit token, stores `(user_id, token, expires_at)` in an in-memory ticket store, returns it.
 3. Add an auth middleware that extracts and verifies bearer tokens and `tv` from the DB.
+4. Update `scripts/smoke.sh` to perform a `chatd login` (or fetch a ws-ticket via the test invite code) before sending, so the Phase-0 smoke acceptance survives the auth landing.
 
 ## Test plan
 - `test_register_creates_user_with_invite_code` — covers US-1, US-11.
@@ -37,6 +39,7 @@
 - `test_me_rejects_token_after_logout` — covers US-12.
 - `test_logout_increments_token_version` — covers US-12.
 - `test_ws_ticket_is_single_use_and_30s_ttl` — covers WS handshake spec.
+- `test_auth_events_records_register_login_logout_kinds` — covers SEC-13. Drives a register → login → logout flow and asserts `auth_events` has one row per kind for that user.
 
 ## Files expected to be touched or created
 - `apps/server/internal/http/auth_handlers.go`

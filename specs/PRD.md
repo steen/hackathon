@@ -137,32 +137,33 @@ Each story has an ID (`US-N`) used to tag tests and demo steps. A story is "cove
                          └─────────┘
 ```
 
-### Monorepo layout (pnpm workspaces + go.work)
+### Monorepo layout (pnpm workspaces + single-module Go)
 
 ```
 hackathon/
+├── go.mod                  # single root Go module, name `hackathon`; imports use `hackathon/<path>`
 ├── apps/
-│   ├── server/             # Go module — main HTTP+WS server
-│   │   ├── cmd/server/main.go
-│   │   ├── internal/api/   # handlers, middleware, hub
-│   │   ├── internal/service/
-│   │   ├── internal/repo/  # SQLite implementation
-│   │   ├── go.mod
+│   ├── server/             # main HTTP+WS server
+│   │   ├── main.go         # (or cmd/server/main.go as the package grows)
+│   │   ├── internal/hub/   # in-process pub/sub
+│   │   ├── internal/wsapi/ # WebSocket handler + framing
+│   │   ├── internal/repo/  # SQLite-backed data access (planned)
 │   │   └── package.json    # scripts wrap go commands
-│   ├── cli/                # Go module — chatd
+│   ├── cli/                # chatd
 │   └── web/                # Vite + React + TS — pnpm package
 ├── packages/
-│   ├── go-client/          # Go module — HTTP+WS client (CLI)
+│   ├── go-client/          # HTTP+WS client (CLI), part of the `hackathon` module
 │   └── api-client/         # TS package — HTTP+WS client + types (Web)
 ├── migrations/
 │   └── 0001_init.sql
-├── go.work
 ├── pnpm-workspace.yaml
 ├── package.json            # root scripts: dev, build, test
 ├── CHANGELOG.md
 ├── README.md
-└── .agents/plans/PRD.md
+└── specs/PRD.md
 ```
+
+The exact internal package layout under `apps/server/internal/` will firm up as features land in Phase 1; the names above are the planned shape rather than verified directories.
 
 ### Key patterns
 
@@ -246,7 +247,7 @@ Vite + React 18 + TypeScript + Zustand + Tailwind.
 | Tool | Purpose |
 |---|---|
 | `pnpm` (workspaces) | JS package management + monorepo orchestration |
-| `go.work` | Go multi-module workspace |
+| single root `go.mod` (`module hackathon`) | Single Go module covers all apps and packages; imports use `hackathon/<path>` |
 | `goose` | Database migrations |
 | `golangci-lint` | Go static analysis |
 | `eslint` + `prettier` | TS/JS lint and format |
@@ -477,7 +478,7 @@ Total budget: ~8 hours.
 **Goal**: server up, two CLI clients exchanging real-time messages over WebSocket. No auth, no DB, hardcoded `#general`. Prove the wire end-to-end.
 
 Deliverables:
-- Monorepo scaffold: `go.work`, `pnpm-workspace.yaml`, root `package.json` with `dev` / `build` / `test` scripts.
+- Monorepo scaffold: `pnpm-workspace.yaml`, root `package.json` with `dev` / `build` / `test` scripts, single root `go.mod` with module name `hackathon`.
 - `apps/server`: `/ws` endpoint with in-memory hub, broadcasts every received message to all subscribers of the channel.
 - `apps/cli`: `chatd send` and `chatd watch` against `/ws` (no login).
 - **System test**: `scripts/smoke.sh` boots server, runs two `chatd watch` processes, pipes a message via `chatd send`, asserts both watchers see it.
@@ -569,14 +570,14 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 ## 15. Appendix
 
 ### Related documents
-- This PRD: `.agents/plans/PRD.md`
+- This PRD: `specs/PRD.md`
 - Changelog: `CHANGELOG.md`
 - README (Phase 3 deliverable): `README.md`
+- Build process: features are implemented by Claude Code agent teams (one team per feature, members `impl` / `bull` / `qual`); the prior Archon `feature-implementation-loop` workflow is no longer the active driver. Files under `.archon/` are kept for reference.
 
 ### Key dependency links
 - pnpm: https://pnpm.io
 - pnpm workspaces: https://pnpm.io/workspaces
-- Go workspaces: https://go.dev/ref/mod#workspaces
 - chi: https://github.com/go-chi/chi
 - nhooyr.io/websocket: https://pkg.go.dev/nhooyr.io/websocket
 - modernc.org/sqlite: https://pkg.go.dev/modernc.org/sqlite

@@ -11,16 +11,16 @@ Server up, two CLI clients exchanging real-time messages over WebSocket. No auth
 None
 
 ## Deliverables
-- [x] Monorepo scaffold: `go.work`, `pnpm-workspace.yaml`, root `package.json` with `dev` / `build` / `test` scripts.
+- [x] Monorepo scaffold: `pnpm-workspace.yaml`, root `package.json` with `dev` / `build` / `test` scripts, single root `go.mod` with module name `hackathon`.
 - [x] `apps/server`: `/ws` endpoint with in-memory hub, broadcasts every received message to all subscribers of the channel.
 - [x] `apps/cli`: `chatd send` and `chatd watch` against `/ws` (no login).
-- [ ] **System test**: `scripts/smoke.sh` boots server, runs two `chatd watch` processes, pipes a message via `chatd send`, asserts both watchers see it.
+- [x] **System test**: `scripts/smoke.sh` boots server, runs two `chatd watch` processes, pipes a message via `chatd send`, asserts both watchers see it.
 
 ## Validation criteria
 - `scripts/smoke.sh` passes. This stays green for the rest of the project.
 
 ## Features
 - [Monorepo scaffold](phase-0/feature-monorepo-scaffold.md)
-- [Server WS endpoint with in-memory hub](phase-0/feature-server-ws-endpoint.md)
+- [Server WS endpoint with in-memory hub](phase-0/feature-server-ws-hub.md)
 - [CLI send and watch](phase-0/feature-cli-send-watch.md)
 - [Smoke system test](phase-0/feature-smoke-test.md)

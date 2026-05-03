@@ -20,7 +20,7 @@
 5. Reset per-username state on successful login.
 
 ## Test plan
-- `test_ip_rate_limit_blocks_after_burst` — covers SEC rate-limit goals.
+- `test_ip_rate_limit_blocks_after_burst` — covers SEC-5. Asserts the 11th login attempt within 5 min from one source IP returns HTTP 429 (per PRD §11 SEC-5).
 - `test_username_backoff_grows_with_failures` — covers SEC rate-limit goals.
 - `test_successful_login_resets_username_backoff` — covers SEC rate-limit goals.
 - `test_rate_limited_responses_use_error_envelope` — covers cross-cutting error envelope.

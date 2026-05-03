@@ -20,7 +20,7 @@
 5. Ensure 413 responses use the user-safe error envelope.
 
 ## Test plan
-- `test_ws_rejects_frame_over_64kib` — covers SEC limits.
+- `test_ws_rejects_frame_over_64kib` — covers SEC-6. Asserts the WebSocket close code is `1009` (per PRD §11 SEC-6).
 - `test_ws_rejects_message_body_over_4kib` — covers SEC limits.
 - `test_ws_send_rate_limit_drops_excess` — covers SEC limits.
 - `test_rest_rejects_body_over_16kib_with_413` — covers SEC limits.

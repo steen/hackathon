@@ -27,7 +27,6 @@
 - `apps/cli/main.go`
 - `apps/cli/cmd/send.go`
 - `apps/cli/cmd/watch.go`
-- `apps/cli/go.mod`
 
 ## Risks
 - None identified at this stage; auth and reconnection land in later phases.

@@ -27,20 +27,19 @@ Phase 0
 - [ ] Tests for US-1, US-2, US-3, US-4, US-5, US-6, US-11, US-12 and SEC-1…SEC-15.
 
 ## Validation criteria
-- smoke test still green (now over authenticated WS).
+- smoke test still green; if the auth flow requires `chatd login` first, `scripts/smoke.sh` is updated as part of `feature-auth-endpoints.md`.
 
 ## Features
-- [SQLite schema](phase-1/feature-sqlite-schema.md)
-- [ULID generation](phase-1/feature-ulid-generation.md)
-- [Auth (bcrypt + JWT)](phase-1/feature-internal-auth.md)
+
+Test ownership: each feature's `## Test plan` carries its US-N / SEC-N coverage.
+
+- [SQLite schema (also covers ULID generation)](phase-1/feature-sqlite-schema-and-ulid.md)
+- [Auth (bcrypt + JWT)](phase-1/feature-auth-internals.md)
 - [Auth endpoints](phase-1/feature-auth-endpoints.md)
-- [Channels and messages endpoints](phase-1/feature-channels-messages-endpoints.md)
-- [Phase-1 hardening](phase-1/feature-phase-1-hardening.md)
-- [Startup checks](phase-1/feature-startup-checks.md)
+- [Channels and messages endpoints](phase-1/feature-channels-and-messages.md)
+- [Startup checks](phase-1/feature-startup-config-checks.md)
 - [Rate limits](phase-1/feature-rate-limits.md)
-- [Request size limits](phase-1/feature-request-size-limits.md)
-- [WS upgrade and ticket validation](phase-1/feature-ws-upgrade-ticket-validation.md)
-- [Access-log middleware and error envelope](phase-1/feature-access-log-error-envelope.md)
-- [SQLite file permissions](phase-1/feature-sqlite-file-permissions.md)
-- [Response security headers](phase-1/feature-security-headers.md)
-- [Tests for US-1…US-12 and SEC-1…SEC-15](phase-1/feature-tests-us-sec.md)
+- [Request size limits](phase-1/feature-body-and-ws-caps.md)
+- [WS upgrade and ticket validation](phase-1/feature-ws-hardening.md)
+- [Access-log middleware and error envelope](phase-1/feature-logging-and-error-envelope.md)
+- [SQLite file permissions and response security headers](phase-1/feature-file-perms-and-headers.md)
