@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T15:24:52Z
-**Analyzed commit:** `440d18f`
+**Last updated:** 2026-05-03T15:29:59Z
+**Analyzed commit:** `6bfb65d`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -50,13 +50,14 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 4/5 | 1 | 0 | 0 |
 | phase-1 | [auth-internals](phase-1/auth-internals.md) | implemented | 4/5 | 1 | 0 | 0 |
 | phase-1 | [security-headers-and-sqlite-ensure-wiring](phase-1/security-headers-and-sqlite-ensure-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
+| phase-1 | [startup-config-checks](phase-1/startup-config-checks.md) | implemented | 5/5 | 0 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred. PR #25 added a 6th AC to `server-ws-hub` (the new `/debug/subs` endpoint), fully covered by `apps/server/internal/wsapi/debug_handler_test.go`.
 
-**Phase-1 totals (so far):** 5 features analyzed of 12 spec'd · 22 ACs · 15 covered · 3 partial · 0 missing · 4 deferred.
+**Phase-1 totals (so far):** 6 features analyzed of 12 spec'd · 27 ACs · 20 covered · 3 partial · 0 missing · 4 deferred.
 
 Notable phase-1 gaps:
-- `auth-internals` AC-5 partial: signing-key-from-config wiring belongs to `feature-startup-config-checks` (now landed via #28); next tick will resolve.
+- `auth-internals` AC-5 partial: signing-key-from-config wiring belongs to `feature-startup-config-checks` — that feature is now in the table at 5/5; next tick will reanalyze and promote AC-5 to covered.
 - `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field (production-code fix; PR #32 findings flag it).
 - `sqlite-schema-and-ulid` AC-4 partial: schema permits ULIDs and `ids.NewULID()` is solid, but no shipped INSERT code path used it at the analyzed SHA — closed once `feature-channels-and-messages` (#42) lands.
 - `security-headers-and-sqlite-ensure-wiring`: spec landed as `planned` to track gaps the agent flagged earlier; impl not started.
