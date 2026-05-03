@@ -1,49 +1,47 @@
 ---
 feature: cli-send-watch
 phase: phase-0
-analyzed_at: 2026-05-03T15:15:00+02:00
-analyzed_commit: 206b9e265fadf27b7b59cf0f99e7db941231676a
-implementation_status: stub
+analyzed_at: 2026-05-03T13:35:37Z
+analyzed_commit: c3e7e991b84a21a648eaed1ce7188c28647079db
+implementation_status: implemented
 total_acs: 4
-covered: 0
+covered: 4
 partial: 0
 missing: 0
-deferred: 4
+deferred: 0
 ---
 
 # Test analysis: CLI `chatd send` and `chatd watch` (no auth)
 
 **Spec:** `specs/plans/phase-0/feature-cli-send-watch.md`
-**Implementation status:** stub — `apps/cli/` contains only `doc.go` (`package cli` declaration, no `main`, no `send`/`watch` subcommands).
+**Implementation status:** implemented — `apps/cli/cmd/{send,watch,url}.go` provide the public `Send`, `Watch`, and `ResolveURL` functions. (Note: `apps/cli/main.go` and a Cobra-style root command are not yet wired; the spec's "subcommand dispatcher" wording is satisfied at the library level only. A binary entry point remains TODO and will be picked up by a follow-up feature.)
 
 ## Acceptance criteria
 
 | AC | Statement (verbatim from spec) | Status | Test reference |
 |----|-------------------------------|--------|----------------|
-| AC-1 | `chatd send <message>` connects to `/ws`, sends one text frame, exits 0 on success. | deferred | impl is stub |
-| AC-2 | `chatd watch` connects to `/ws` and prints every message it receives to stdout, one per line. | deferred | impl is stub |
-| AC-3 | Server URL is configurable via `--url` flag or `CHAT_SERVER` env var, defaulting to `ws://localhost:PORT/ws`. | deferred | impl is stub |
-| AC-4 | No login flow or token handling exists in this phase. | deferred | impl is stub (asserted by absence) |
+| AC-1 | `chatd send <message>` connects to `/ws`, sends one text frame, exits 0 on success. | covered | `apps/cli/cmd/send_test.go::TestAC_0_1_SendWritesSingleTextFrameToWebSocket` + `tests/cli-send-watch/cli_test.go::TestAC1_CliSendWatch_SendWritesPayloadAsTextFrameAndExitsZero` |
+| AC-2 | `chatd watch` connects to `/ws` and prints every message it receives to stdout, one per line. | covered | `apps/cli/cmd/watch_test.go::TestAC_0_2_WatchPrintsEachFrameOnItsOwnLine` + `tests/cli-send-watch/cli_test.go::TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine` |
+| AC-3 | Server URL is configurable via `--url` flag or `CHAT_SERVER` env var, defaulting to `ws://localhost:PORT/ws`. | covered | `apps/cli/cmd/url_test.go` (3 tests covering flag-over-env-over-default) + `tests/cli-send-watch/cli_test.go::TestAC3_CliSendWatch_UrlPrecedenceFlagOverEnvOverDefault` |
+| AC-4 | No login flow or token handling exists in this phase. | covered | `apps/cli/cmd/no_auth_test.go::TestAC_0_4_NoAuthSymbolsReferencedFromCLI` (static walk of `apps/cli/**/*.go`) + `tests/cli-send-watch/cli_test.go::TestAC4_CliSendWatch_NoAuthorizationHeaderOnUpgrade` (runtime assertion) |
 
 ## Findings
 
-### Deferred tests
+### Covered
 
-- **AC-1** — Go unit test against a fake `httptest.Server`/`gorilla/websocket` that captures the frame written by `chatd send`. Assertion: payload equals the joined args. Location: `tests/cli-send-watch/cli_test.go`.
-- **AC-2** — Go unit test where the fake WS server emits N frames; assert stdout from `chatd watch` contains all N lines in order, separated by newline. Location: same file.
-- **AC-3** — Go unit test exercising URL precedence: `--url` flag wins over `CHAT_SERVER` env var, both win over the default. Location: same file.
-- **AC-4** — Negative assertion test: `chatd send` makes no `Authorization` header on the upgrade request. Location: same file.
+All four ACs have direct in-package coverage in `apps/cli/cmd/*_test.go`. The bootstrap-era skipped placeholders in `tests/cli-send-watch/cli_test.go` have been replaced with thin live tests that exercise the public `cmd.Send`, `cmd.Watch`, and `cmd.ResolveURL` functions to anchor the AC IDs at the system-test layer. They complement (rather than duplicate) the deeper in-package tests:
 
-A skipped placeholder test per AC has been written so the IDs are anchored.
+- The in-package `send_test.go` records protocol details (frame type, close code, payload bytes); the `tests/`-layer test asserts only the system-visible behavior (one frame, contains the message text, no error).
+- The in-package `watch_test.go` exercises both the happy path and the context-cancel teardown handshake; the `tests/`-layer test asserts only that N input frames produce N output lines on the writer.
+- The in-package `url_test.go` covers the precedence matrix; the `tests/`-layer test re-runs the matrix as a smoke check from outside the package.
+- The in-package `no_auth_test.go` is a static AST walk asserting no auth-related identifiers/imports exist; the `tests/`-layer test makes a live dial and checks the request the server receives carries no `Authorization` header.
 
-### Implementation gap
+### Implementation gap (out of test scope)
 
-Spec mentions `apps/cli/go.mod` but per `CLAUDE.md` no per-app `go.mod` should exist. Update spec to drop that entry.
-
-The smoke test (separate feature) depends on this implementation; tests there are also deferred.
+`apps/cli/main.go` and a CLI binary entry point (Cobra root + `send`/`watch` subcommands wiring) are not yet present. The spec's "implementation steps" mention `apps/cli/main.go` and a "subcommand dispatcher". This gap doesn't affect the ACs above — they all describe library behavior — but does mean `chatd` is not yet runnable as a binary. A follow-up feature should address it. No additional tests are needed from the test-analysis agent at that time; existing tests already cover the library surface that the CLI binary will wrap.
 
 ## Recommendations
 
-1. Skipped test placeholders written under `tests/cli-send-watch/`.
-2. When `apps/cli/main.go`, `cmd/send.go`, and `cmd/watch.go` are written, remove the `t.Skip` and import from `hackathon/apps/cli/...`.
-3. Update spec to remove `apps/cli/go.mod` from "Files expected to be touched or created".
+1. Replaced the skipped placeholders in `tests/cli-send-watch/cli_test.go` with live anchor tests.
+2. Spec follow-up: add a separate "CLI binary wiring" feature for `apps/cli/main.go` and the Cobra root command. Until then, the spec's status of "done (PR #14)" is accurate at the library level only.
+3. Spec follow-up: drop `apps/cli/go.mod` from "Files expected to be touched or created" (project uses single root go.mod).

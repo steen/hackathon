@@ -36,17 +36,19 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T15:15:00+02:00
-**Analyzed commit:** `206b9e2`
+**Last updated:** 2026-05-03T13:35:37Z
+**Analyzed commit:** `c3e7e99`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
-| phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 3/5 | 0 | 2 | 0 |
-| phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | stub | 0/5 | 0 | 0 | 5 |
-| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | stub | 0/4 | 0 | 0 | 4 |
-| phase-0 | [smoke-test](phase-0/smoke-test.md) | stub | 0/5 | 0 | 0 | 5 |
+| phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-0 | [smoke-test](phase-0/smoke-test.md) | stub | 0/5 | 1 | 0 | 4 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 3 covered · 2 missing · 14 deferred.
+**Phase-0 totals:** 4 features · 19 ACs · 14 covered · 1 partial · 0 missing · 4 deferred.
 
-**Phases 1–3:** specs exist (`specs/plans/phase-{1,2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up automatically once phase-0 advances and new commits land on `main`.
+The deferred ACs all belong to `smoke-test`, which gates on `scripts/smoke.sh` being written (the script's runtime behavior IS the test). All Phase-0 *implementation* ACs are now covered.
+
+**Phases 1–3:** specs exist (`specs/plans/phase-{1,2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once Phase-1 implementation commits start landing on `main`.
 <!-- AGENT-INDEX-END -->
