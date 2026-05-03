@@ -25,7 +25,7 @@
 
 ## Files expected to be touched or created
 - `Makefile` or `package.json` (demo target)
-- `README.md` (demo path section, coordinated with `feature-readme-quick-start.md`)
+- `README.md` (demo path section, coordinated with `10-feature-readme-quick-start.md`)
 - `apps/server/internal/config/config.go` (defaults verified, no schema changes expected)
 
 ## Risks
