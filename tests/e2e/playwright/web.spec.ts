@@ -1,4 +1,10 @@
-import { test, expect, type Page, type BrowserContext } from "@playwright/test";
+import {
+  test,
+  expect,
+  type Page,
+  type BrowserContext,
+  type WebSocketRoute,
+} from "@playwright/test";
 
 const TEST_PASSWORD = "e2e-fake-pw-1234567890";
 
@@ -135,46 +141,63 @@ test.describe("Web e2e (real browser via Playwright)", () => {
     }
   });
 
-  // TODO: flaky — see #81 follow-up. The api-client's reconnect schedule
-  // mints a fresh WS ticket on every retry, and Playwright's
-  // page.context().setOffline(true) lets the in-flight HTTP request complete
-  // while blocking new ones — the resulting state mix puts the badge into
-  // a "Reconnecting..." loop that doesn't always settle inside the 30s
-  // budget on slow CI. The transport-layer reconnect path is exercised by
-  // packages/api-client/src/ws.test.ts and apps/web/src/routes/Chat.test.tsx
-  // (the "forced close triggers reconnect that mints a fresh ticket" test);
-  // this scenario is the browser-driven cousin and remains an open AC.
-  test.skip("AC: WS drops + restores → presence/state catch up via reconnect backoff", async ({
-    page,
-  }) => {
+  // Drives a deterministic WS drop+restore via Playwright's
+  // page.routeWebSocket (Playwright >= 1.48). The route forwards traffic to
+  // the real server by default; the test calls server.close() at a known
+  // point to simulate a transport-level disconnect. The api-client's
+  // reconnect path then mints a fresh ticket and opens a new socket, which
+  // routeWebSocket intercepts again and forwards. setOffline isn't used —
+  // its mix of HTTP-blocked / sockets-killed semantics is what made the
+  // original scenario flaky (see #104).
+  test("AC: WS drops + restores → reconnect, post-outage message arrives", async ({ page }) => {
     const username = uniqueUsername("u-web-reconn");
+    const other = uniqueUsername("u-web-other");
     const reg = await registerViaApi(username);
+    const otherReg = await registerViaApi(other);
     const channel = await createChannelViaApi(reg.token, uniqueUsername("ch"));
+
+    // Track every server-side WS handle so we can close them on demand. New
+    // sockets opened by the api-client's reconnect path land here too.
+    const serverSides: WebSocketRoute[] = [];
+    await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+      const server = ws.connectToServer();
+      serverSides.push(server);
+    });
 
     await loginInBrowser(page, username);
     await page.getByRole("button", { name: `#${channel.name}` }).click();
 
-    // Confirm initial connection — the badge shows "Connected".
-    await expect(page.getByRole("status")).toContainText(/connected/i, { timeout: 10_000 });
+    const status = page.getByRole("status");
+    await expect(status).toHaveText(/^connected$/i, { timeout: 10_000 });
+    expect(serverSides.length).toBeGreaterThanOrEqual(1);
 
-    // Force a WS drop by toggling the page offline (Playwright closes
-    // existing sockets); flip back online and confirm the next message
-    // posted via REST shows up in the DOM (WS reconnected and replayed).
-    await page.context().setOffline(true);
-    await expect(page.getByRole("status")).toContainText(/reconnect|disconnect|connecting/i, {
-      timeout: 10_000,
-    });
-    await page.context().setOffline(false);
+    // Capture the count before the drop so we can assert a fresh socket was
+    // minted post-reconnect (not just the same one bouncing).
+    const beforeDrop = serverSides.length;
 
-    // Wait for reconnection — the api-client's backoff schedule starts at
-    // 500ms so this typically resolves inside a couple of seconds, but the
-    // WS ticket mint + handshake adds a beat on slow CI.
-    await expect(page.getByRole("status")).toContainText(/connected/i, { timeout: 30_000 });
+    // Drop every live server-side handle. The browser sees a real close
+    // frame, the api-client's onclose fires, scheduleReconnect kicks in.
+    for (const s of serverSides) {
+      await s.close();
+    }
 
+    await expect(status).toHaveText(/reconnect|connecting|disconnect/i, { timeout: 5_000 });
+
+    // routeWebSocket + the in-process proxy adds a couple-hundred-ms tax on
+    // top of the api-client's first backoff slot (500ms). 5s is tight
+    // enough to catch a regression in the backoff/ticket loop without
+    // tripping on CI scheduler jitter.
+    await expect(status).toHaveText(/^connected$/i, { timeout: 5_000 });
+    expect(serverSides.length).toBeGreaterThan(beforeDrop);
+
+    // Post from a different user AFTER reconnect; the renewed subscription
+    // must deliver the live event. (True during-outage replay would need a
+    // server-side catchup mechanism — that's a separate issue, not this
+    // scenario's responsibility.)
     const body = `post-reconn-${String(Date.now())}`;
-    await postViaApi(reg.token, channel.id, body);
+    await postViaApi(otherReg.token, channel.id, body);
     await expect(page.locator('[data-testid="msg"]', { hasText: body })).toBeVisible({
-      timeout: 15_000,
+      timeout: 10_000,
     });
   });
 });
