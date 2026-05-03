@@ -11,8 +11,8 @@ Real users, channels, messages persisted to SQLite.
 Phase 0
 
 ## Deliverables
-- [ ] SQLite schema (`migrations/0001_init.sql`) including `users.token_version` and `auth_events` table.
-- [ ] ULID generation.
+- [x] SQLite schema (`migrations/0001_init.sql`) including `users.token_version` and `auth_events` table.
+- [x] ULID generation.
 - [ ] `internal/auth`: bcrypt + JWT with `tv` claim; constant-time login path; password length policy.
 - [ ] Auth endpoints: register (invite-code gated) / login / me / logout / ws-ticket.
 - [ ] Channels endpoints; messages endpoints (REST + WS).
