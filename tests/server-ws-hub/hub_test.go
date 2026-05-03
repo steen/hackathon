@@ -113,10 +113,23 @@ func TestAC1_ServerWsHub_WsEndpointAccepts101Upgrade(t *testing.T) {
 	}
 }
 
+// Audit #78 (medium) removed the phase-0 raw rebroadcast — inbound WS
+// frames are now silently dropped because they let any peer forge
+// {type,data} envelopes with arbitrary sender_user_id. The two ACs
+// below were originally written against that contract; they are now
+// flipped to assert the new (post-removal) behavior:
+//
+//   - AC2 (hardcoded #general): both clients still join the same default
+//     channel — verified via /debug/subs?channel=#general showing 2.
+//   - AC3 (broadcast reaches all subscribers): a server-side broadcast
+//     onto #general (the supported producer path is REST, but the hub
+//     primitive is the same) reaches every WS subscriber. Inbound frames
+//     written by a client must NOT reach others.
+//
+// The original "client A writes, client B reads" assertion is now a
+// negative assertion: client B must NOT receive client A's bytes.
+
 func TestAC2_ServerWsHub_HardcodedGeneralChannel(t *testing.T) {
-	// Two independent clients must both observe a frame written by either.
-	// If the handler subscribed each conn to a per-conn ephemeral channel,
-	// b would never see a's write.
 	srv := startServer(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -133,24 +146,28 @@ func TestAC2_ServerWsHub_HardcodedGeneralChannel(t *testing.T) {
 	}
 	defer b.CloseNow()
 
-	// Give the server a brief moment to register both subscribers before
-	// broadcast (read loops are goroutines started after Subscribe but the
-	// dial returning is not a synchronization point on the server side).
-	time.Sleep(50 * time.Millisecond)
-
-	if err := a.Write(ctx, websocket.MessageText, []byte("from-a")); err != nil {
-		t.Fatalf("a write: %v", err)
-	}
-	_, data, err := b.Read(ctx)
-	if err != nil {
-		t.Fatalf("b read: %v", err)
-	}
-	if string(data) != "from-a" {
-		t.Fatalf("b received %q, want %q (server did not place both clients on a shared channel)", data, "from-a")
+	// Wait for both subscribers to register on the shared default
+	// channel via the unauthenticated /debug/subs probe.
+	debugURL := fmt.Sprintf("http://127.0.0.1:%d/debug/subs?channel=%%23general", srv.port)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		count, err := fetchSubscriberCount(debugURL)
+		if err != nil {
+			t.Fatalf("fetch /debug/subs: %v", err)
+		}
+		if count == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("debug/subs#general = %d after 2s; want 2 (server did not place both on shared channel)", count)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func TestAC3_ServerWsHub_BroadcastReachesAllSubscribers(t *testing.T) {
+// Audit #78 regression: inbound WS frames are dropped, not rebroadcast.
+// A peer who writes a frame must not see it echoed to other subscribers.
+func TestAC3_ServerWsHub_InboundFramesDropped(t *testing.T) {
 	srv := startServer(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -169,23 +186,32 @@ func TestAC3_ServerWsHub_BroadcastReachesAllSubscribers(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if err := conns[0].Write(ctx, websocket.MessageText, []byte("ping")); err != nil {
+	if err := conns[0].Write(ctx, websocket.MessageText, []byte("forged-ping")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
+	// Each receiver should NOT observe the forged frame within a
+	// short window. We use a per-read deadline shorter than ctx so a
+	// timeout is the success path.
 	var wg sync.WaitGroup
 	errs := make(chan error, n)
 	for i, c := range conns {
+		if i == 0 {
+			continue // skip the sender (its own frame would not echo regardless)
+		}
 		wg.Add(1)
 		go func(i int, c *websocket.Conn) {
 			defer wg.Done()
-			_, data, err := c.Read(ctx)
-			if err != nil {
-				errs <- fmt.Errorf("conn[%d] read: %w", i, err)
+			readCtx, readCancel := context.WithTimeout(ctx, 500*time.Millisecond)
+			defer readCancel()
+			_, data, err := c.Read(readCtx)
+			if err == nil {
+				errs <- fmt.Errorf("conn[%d] received %q; want timeout (raw rebroadcast leaked)", i, data)
 				return
 			}
-			if string(data) != "ping" {
-				errs <- fmt.Errorf("conn[%d] received %q, want %q", i, data, "ping")
+			// Any non-timeout error — close, etc. — is also a failure.
+			if readCtx.Err() == nil {
+				errs <- fmt.Errorf("conn[%d] read errored without timeout: %w", i, err)
 			}
 		}(i, c)
 	}
@@ -194,6 +220,24 @@ func TestAC3_ServerWsHub_BroadcastReachesAllSubscribers(t *testing.T) {
 	for err := range errs {
 		t.Error(err)
 	}
+}
+
+// fetchSubscriberCount queries the /debug/subs endpoint and parses
+// "<n>\n" into an int.
+func fetchSubscriberCount(url string) (int, error) {
+	resp, err := http.Get(url) //nolint:gosec,noctx // test helper, URL is built from the test-managed loopback port
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	var count int
+	if _, err := fmt.Fscanf(resp.Body, "%d", &count); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func TestAC4_ServerWsHub_ServerListensOnConfiguredPort(t *testing.T) {
