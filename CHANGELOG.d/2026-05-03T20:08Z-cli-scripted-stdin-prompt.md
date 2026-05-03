@@ -1,0 +1,1 @@
+- fix(cli): cache the prompt `bufio.Reader` on `Env` so scripted invocations like `chatd register alice <<< $'pw\ninvite\n'` keep their second line. The previous code wrapped `env.Stdin` in a fresh `bufio.Reader` per `readLine` call; the first call drained the underlying pipe into its 4 KiB buffer and the next call's brand-new wrapper saw an empty pipe.

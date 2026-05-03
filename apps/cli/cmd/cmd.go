@@ -5,6 +5,7 @@
 package cmd
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,12 @@ type Env struct {
 	Stderr    io.Writer
 	ConfigDir string
 	Server    string
+
+	// stdinReader caches a bufio.Reader over Stdin so multi-prompt
+	// flows (register's password+invite, login's username+password)
+	// don't lose pre-buffered bytes when scripted via heredoc/<<<.
+	// Lazy-initialised; readLine is the sole accessor.
+	stdinReader *bufio.Reader
 }
 
 // DefaultEnv returns an Env wired to the real process streams. The
