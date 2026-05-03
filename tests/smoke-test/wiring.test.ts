@@ -33,6 +33,18 @@ describe("smoke-test: wiring + script structure", () => {
     expect(/grep -F.*\$MSG/.test(body), "must grep watcher output files for the sent message").toBe(true);
   });
 
+  it("TestAC1_smoke_test_uses_debug_subs_for_deterministic_subscriber_readiness", () => {
+    // The script must NOT use a fixed sleep to wait for both watchers to
+    // register with the hub — that race was the original flake. Per the spec
+    // risks section it polls /debug/subs?channel=#general until the count
+    // reaches 2 (5s budget). Catches a regression where someone reverts to a
+    // sleep-based wait.
+    const body = smokeBody();
+    expect(/\/debug\/subs/.test(body), "must poll /debug/subs to wait for subscribers").toBe(true);
+    expect(/channel=%23general/.test(body), "must poll /debug/subs with URL-encoded #general").toBe(true);
+    expect(/EXPECTED_SUBS=\s*2\b/.test(body), "must wait for exactly 2 subscribers (one per watcher)").toBe(true);
+  });
+
   it("TestAC2_smoke_test_script_uses_strict_mode_and_explicit_failure_output", () => {
     const body = smokeBody();
     expect(/^set -euo pipefail$/m.test(body), "must use 'set -euo pipefail' for non-zero on first error").toBe(true);
@@ -48,6 +60,18 @@ describe("smoke-test: wiring + script structure", () => {
     // The cleanup function must kill the recorded PIDs.
     expect(/SERVER_PID|WATCH1_PID|WATCH2_PID/.test(body), "must record PIDs to clean up").toBe(true);
     expect(/\bkill\b/.test(body), "cleanup must invoke kill on the recorded PIDs").toBe(true);
+  });
+
+  it("TestAC3_smoke_test_cleanup_escalates_term_to_kill_for_wedged_children", () => {
+    // Per spec risks: wedged children that ignore SIGTERM must not hang
+    // `wait` indefinitely. Cleanup escalates SIGTERM -> SIGKILL after a
+    // bounded wait. Catches a regression where someone simplifies cleanup
+    // back to a single `kill $pid; wait` (which deadlocks on a wedged child).
+    const body = smokeBody();
+    expect(/kill\s+-KILL\s+"\$pid"/.test(body) || /kill\s+-9\s+"\$pid"/.test(body), "cleanup must escalate to SIGKILL for children that ignore SIGTERM").toBe(true);
+    // The escalation must be guarded by a kill -0 liveness check so we don't
+    // -KILL an already-exited PID (which would race with `wait`).
+    expect(/kill\s+-0\s+"\$pid"/.test(body), "cleanup must probe with kill -0 before escalating to SIGKILL").toBe(true);
   });
 
   it("TestAC4_smoke_test_script_is_wired_into_root_package_json_test_script", () => {

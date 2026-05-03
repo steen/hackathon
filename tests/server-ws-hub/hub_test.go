@@ -2,6 +2,8 @@ package server_ws_hub_test
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -15,6 +17,17 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+// randomSecret returns a hex string sized for the SEC-1 minimum so the test
+// harness boots the server without committing a fixed fake-secret literal.
+func randomSecret(t *testing.T, byteLen int) string {
+	t.Helper()
+	b := make([]byte, byteLen)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("rand.Read: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
 
 // System-level tests for specs/plans/phase-0/feature-server-ws-hub.md.
 // Builds and launches apps/server on a chosen port, then dials it. Deeper
@@ -44,7 +57,14 @@ func startServer(t *testing.T) *runningServer {
 	port := freePort(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binPath)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("CHAT_SERVER_PORT=%d", port))
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("CHAT_SERVER_PORT=%d", port),
+		// PR #28: SEC-1 needs a strong, non-denylisted secret. Generated
+		// per-test from crypto/rand so no fake-secret literal is committed
+		// to git; lives only in this test process's env.
+		"CHAT_JWT_SECRET="+randomSecret(t, 32),
+		"CHAT_INVITE_CODE="+randomSecret(t, 8),
+	)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
