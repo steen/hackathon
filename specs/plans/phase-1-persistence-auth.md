@@ -22,8 +22,8 @@ Phase 0
 - [x] WS read limit (64 KiB), per-conn send rate limit, 4 KiB body cap, REST 16 KiB body cap.
 - [ ] Same-origin WS upgrade check; one-shot 30s ws-ticket flow; WS rejects sends to non-existent channels.
 - [x] Access-log middleware strips `token` and `ticket` query params; user-safe error envelope.
-- [ ] SQLite file created `0600`.
-- [ ] Response security headers (CSP, nosniff, no-referrer, frame-deny).
+- [x] SQLite file created `0600`.
+- [x] Response security headers (CSP, nosniff, no-referrer, frame-deny).
 - [ ] Tests for US-1, US-2, US-3, US-4, US-5, US-6, US-11, US-12 and SEC-1…SEC-15.
 
 ## Validation criteria
