@@ -10,6 +10,16 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 18:00Z — Rate limits: per-IP login/register, per-username login backoff (phase 1)
+
+### Added
+- `apps/server/internal/ratelimit/iplimit.go` — token-bucket limiter keyed by IP, fronted by a bounded LRU so an attacker rotating source IPs cannot grow memory (PRD §14 risk). `LoginIPConfig` (burst 10 / 5 min) and `RegisterIPConfig` (burst 5 / 15 min) match PRD §9. `LoginIPConfig` is the source of truth for SEC-5 (the 11th login attempt within 5 min from one IP returns 429).
+- `apps/server/internal/ratelimit/userlimit.go` — per-username login-failure tracker with linear backoff (configurable Step + GraceFailures), capped at MaxDelay so a forgotten password cannot lock an account out (PRD §9: "without enabling lockout-DoS"). Username keys are case-folded so case-only variation cannot bypass the gate. Records age out after `ResetAfter`.
+- `apps/server/internal/http/middleware_ratelimit.go` — `IPRateLimit` middleware that consumes one token per request, writes the user-safe envelope on 429 (new `CodeRateLimited` error code), sets `Retry-After`, and writes one `auth_events` row (kind `rate_limited`) so rejections are observable per the spec AC.
+- `apps/server/internal/http/auth_handlers.go` — `Login` consults the per-username gate before authenticating, increments on failure, clears it on success. `AuthDeps` grows an optional `UserLimiter` so tests can opt in/out.
+- `apps/server/main.go` — wires both IP limiters and the username limiter onto `/api/login` (5-minute Retry-After) and `/api/register` (15-minute Retry-After).
+- Tests: `TestIPRateLimitBlocksEleventhLoginAttemptWithin5min` (SEC-5, name and assertion both pin the exact threshold), per-IP register burst limit, refill-over-time, LRU eviction, concurrent access, per-username backoff growth, MaxDelay cap, Reset on success, ResetAfter expiry, case-insensitivity, and the `auth_events` rate-limit audit row.
+
 ## 2026-05-03 17:30Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1)
 
 ### Added

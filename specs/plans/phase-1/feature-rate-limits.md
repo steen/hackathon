@@ -1,7 +1,7 @@
 # Feature: Rate limits (per-IP login/register, per-username login backoff)
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - (security hardening; defends US-1 register and US-2 login flows from brute force / abuse)
