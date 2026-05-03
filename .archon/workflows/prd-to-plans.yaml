@@ -32,12 +32,26 @@ nodes:
 
   - id: validate-coverage
     depends_on: [generate-index]
-    runtime: bun
-    script: |
+    bash: |
+      set -euo pipefail
+      tmpjson=$(mktemp -t prd-XXXXXX)
+      tmpts=$(mktemp -t prd-XXXXXX).ts
+      trap 'rm -f "$tmpjson" "$tmpts"' EXIT
+
+      # parse-prd output is shell-quoted by Archon, so this safely captures it
+      # (including backticks, quotes, newlines) into a file for the bun script.
+      printf '%s' $parse-prd.output > "$tmpjson"
+
+      cat > "$tmpts" <<'TSEOF'
       import { readdirSync, readFileSync, existsSync } from "fs";
       import { join } from "path";
 
-      const data = $parse-prd.output;
+      const raw = readFileSync(process.argv[2], "utf-8").trim();
+      // The PRD parser may wrap JSON in a ```json ... ``` markdown fence; strip it.
+      const fenceMatch = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+      const jsonText = fenceMatch ? fenceMatch[1] : raw;
+      const data = JSON.parse(jsonText);
+
       const requirements: { id: string; description: string }[] = data.requirements ?? [];
       const phases: { number: number; deliverables: string[] }[] = data.phases ?? [];
 
@@ -70,6 +84,7 @@ nodes:
         if (!re.test(allFeatureContent)) missingReqs.push(req.id);
       }
 
+      const idRefRe = /\b(?:US|FR|SEC)-[\w.\-]+/gi;
       const missingDeliverables: string[] = [];
       for (const phase of phases) {
         const phaseDir = join(plansDir, `phase-${phase.number}`);
@@ -83,6 +98,21 @@ nodes:
         }
         const phaseLower = phaseContent.toLowerCase();
         for (const d of phase.deliverables ?? []) {
+          // Requirement-ID-listing deliverables (e.g. "Tests for US-1, US-2, SEC-1…SEC-15")
+          // are covered iff every listed ID appears in the phase content.
+          const idRefs = d.match(idRefRe);
+          if (idRefs && idRefs.length > 0) {
+            const phaseLowerForIds = phaseLower;
+            const missingIds = idRefs.filter(
+              (id) => !phaseLowerForIds.includes(id.toLowerCase()),
+            );
+            if (missingIds.length > 0) {
+              missingDeliverables.push(
+                `Phase ${phase.number}: ${d} (missing IDs: ${missingIds.join(", ")})`,
+              );
+            }
+            continue;
+          }
           const words = d.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
           if (words.length === 0) continue;
           const hits = words.filter((w) => phaseLower.includes(w)).length;
@@ -107,6 +137,9 @@ nodes:
         process.exit(1);
       }
       console.log("OK: full coverage");
+      TSEOF
+
+      bun "$tmpts" "$tmpjson"
 
   - id: update-changelog
     command: prd-update-changelog
