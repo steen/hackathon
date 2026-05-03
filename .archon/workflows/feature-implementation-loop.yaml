@@ -304,6 +304,35 @@ nodes:
 
       BRANCH="feat/$SLUG"
 
+      # Mark the feature plan as done and tick the matching deliverable in
+      # the parent phase plan. These edits land in the PR's own commit so
+      # tracking stays in sync with merge state.
+      if [ -f "$FEATURE_PLAN" ]; then
+        # **Status:** planned → done (portable: rewrite via awk)
+        if grep -q '^\*\*Status:\*\*' "$FEATURE_PLAN"; then
+          awk '/^\*\*Status:\*\*/ {print "**Status:** done"; next} {print}' "$FEATURE_PLAN" > "$FEATURE_PLAN.tmp" && mv "$FEATURE_PLAN.tmp" "$FEATURE_PLAN"
+        fi
+      fi
+      if [ -f "$PHASE_PLAN" ]; then
+        # Tick the first unticked deliverable whose line contains a
+        # case-insensitive match for the feature name's first word OR slug.
+        # This is heuristic but works for the existing plan vocabulary.
+        SLUG_KEYS="$SLUG $(echo "$FEATURE_NAME" | tr ' ' '\n' | head -3 | paste -sd'|' -)"
+        # Find the first matching unticked deliverable line and tick it.
+        awk -v keys="$SLUG_KEYS" '
+          BEGIN { ticked=0; n=split(keys, a, "[ |]"); for (i=1;i<=n;i++) k[i]=tolower(a[i]) }
+          {
+            if (!ticked && $0 ~ /^- \[ \]/) {
+              low=tolower($0)
+              for (i=1;i<=n;i++) {
+                if (k[i] != "" && index(low, k[i])) { sub(/\[ \]/, "[x]"); ticked=1; break }
+              }
+            }
+            print
+          }
+        ' "$PHASE_PLAN" > "$PHASE_PLAN.tmp" && mv "$PHASE_PLAN.tmp" "$PHASE_PLAN"
+      fi
+
       # Resolve parent branch (captured by setup-branch). Falls back to
       # origin's default if the marker is missing.
       if [ -f "$ARTIFACTS_DIR/parent-branch" ]; then
