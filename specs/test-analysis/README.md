@@ -36,14 +36,14 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T20:38:00Z
-**Analyzed commit:** `a283ba3`
+**Last updated:** 2026-05-03T20:45:00Z
+**Analyzed commit:** `75bce4c`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
 | phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
-| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 3/4 | 1 | 0 | 0 |
+| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | superseded by phase-2/cli-full-commands | — | — | — | — |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | implemented | 4/4 | 0 | 0 | 0 |
@@ -63,12 +63,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-2 | [ts-api-client-package](phase-2/ts-api-client-package.md) | implemented | 6/7 | 1 | 0 | 0 |
 | phase-2 | [presence](phase-2/presence.md) | implemented | 4/5 | 0 | 0 | 1 |
 | phase-2 | [web-app](phase-2/web-app.md) | implemented | 5/6 | 1 | 0 | 0 |
+| phase-2 | [cli-full-commands](phase-2/cli-full-commands.md) | implemented | 10/10 | 0 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 20 ACs · 19 covered · 1 partial · 0 missing · 0 deferred. The partial is `cli-send-watch` AC-1 — `chatd send` writes a frame the server now drops post-audit-#78. CLI-side tests still pass; system-level "send delivers a message that watchers see" is broken until `chatd send` is rewritten to POST against `/api/channels/{id}/messages` (lands with `20-feature-cli-full-commands`) or deprecated.
+**Phase-0 totals:** 3 active features · 16 ACs · 16 covered · 0 partial · 0 missing · 0 deferred. (`cli-send-watch` is superseded by `phase-2/cli-full-commands`; its 4 ACs are no longer counted. **Note:** sibling PR #91 in flight modifies `phase-0/cli-send-watch.md` to mark AC-1 partial pre-supersession; the per-feature file may temporarily contradict this index row until a follow-up tick reconciles.)
 
 **Phase-1 totals:** 14 features analyzed of 14 spec'd · 64 ACs · 63 covered · 1 partial · 0 missing · 0 deferred.
 
-**Phase-2 totals (so far):** 4 features analyzed of 5 spec'd (10/30/40/50 specs implemented; 20-cli-full-commands unstarted) · 22 ACs · 19 covered · 2 partial · 0 missing · 1 deferred. The two phase-2 partials and the deferred AC are all the same cross-feature gap: web app needs api-client to wrap `GET /api/presence`, presence-server's wire format needs to reconcile with ts-api-client's `PresenceEvent` type, and the web-app's chat page TODO closes once both sides converge.
+**Phase-2 totals:** 5 features analyzed of 5 spec'd (10/20/30/40/50 — phase-2 closes here) · 32 ACs · 29 covered · 2 partial · 0 missing · 1 deferred. The two phase-2 partials and the deferred AC are all the same cross-feature gap: web app needs api-client to wrap `GET /api/presence`, presence-server's wire format needs to reconcile with ts-api-client's `PresenceEvent` type, and the web-app's chat page TODO closes once both sides converge.
 
 **Coordinated follow-up batch landed in `fa60bfd`:** the four planned-only stub specs (gap-A `access-log-fields-and-wiring`, gap-B `security-headers-and-sqlite-ensure-wiring`, gap-C `auth-endpoint-paths-align-with-prd`, gap-D `ws-userid-binding-and-channel-existence-check`) all closed in one PR set. Each one was tracked at 0/N deferred; all four re-promote to N/N implemented at this SHA. The closure also transitively re-promotes parent features whose ACs depended on the same wiring chain:
 
@@ -95,15 +96,15 @@ Generated automatically — leave this section alone; the agent rewrites it.
 
 **Schema-drift flag (cross-feature, blocks 2 partials + 1 deferred):** the server emits the presence frame as `{type:"presence", data:{kind, user_id}}` but the TS api-client defines `PresenceEvent.data` as `{kind, user:User}` (full user record). One side needs to move — picking the lighter-weight `{user_id}` shape requires the client to maintain a userID→username map; embedding the full `User` matches the REST endpoint's `{id, username}` shape. **Production change required either way; out of test-agent scope.** Closing this drift unblocks: ts-api-client AC-6 (partial → covered), web-app AC-5 (partial → covered, after api-client adds `getPresence()` wrap), and presence AC-4 (deferred → covered, since web's the missing consumer).
 
-**Remaining phase 2 (1 feature) and phase 3 (5 features):** `phase-2/20-feature-cli-full-commands.md` and all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
+`feature-cli-full-commands` (PR #66 + smoke rewire `c35ed34`) ships `apps/cli/` rewritten on top of `hackathon/packages/go-client`. 8 subcommands (`register`/`login`/`whoami`/`logout`/`channels`/`history`/`watch`/`send`); config persistence at `$XDG_CONFIG_HOME/chatd/config.json` (mode 0600); `--server`/`$CHAT_SERVER` for base URL. 19 in-package tests against a real `httptest.Server` + sqlite stack; all 10 named tests from the spec's Test plan are present. Closes `phase-2/go-client-package` AC-4 at the call-site level. **Supersedes** `phase-0/feature-cli-send-watch` — the old "raw WS, no auth" contract is now actively contradicted; the per-feature findings doc is kept as a history record.
 
 ## Audit #78 response (`a283ba3`)
 
 A security audit of the WS path landed in three coordinated PRs:
 
-- **PR #85 (`92d447f`) `fix(wsapi): drop raw inbound WS rebroadcast`.** The phase-0 readLoop rebroadcast inbound frames verbatim, letting any authenticated peer forge `{type, data}` envelopes with arbitrary `sender_user_id` and impersonate other users — no DB write, no audit row. Fix: drop the broadcast; keep the read (drains the buffer; enforces size + rate limits). Producers must use `POST /api/channels/{id}/messages`. **Cross-impact:** `phase-0/server-ws-hub` AC-3 reframed (test was re-flipped to assert inbound-dropped + REST-broadcast); `phase-0/cli-send-watch` AC-1 silently functionally regressed (CLI test still passes; messages don't reach watchers).
+- **PR #85 (`92d447f`) `fix(wsapi): drop raw inbound WS rebroadcast`.** The phase-0 readLoop rebroadcast inbound frames verbatim, letting any authenticated peer forge `{type, data}` envelopes with arbitrary `sender_user_id` and impersonate other users — no DB write, no audit row. Fix: drop the broadcast; keep the read (drains the buffer; enforces size + rate limits). Producers must use `POST /api/channels/{id}/messages`. **Cross-impact:** `phase-0/server-ws-hub` AC-3 reframed (test was re-flipped to assert inbound-dropped + REST-broadcast); `phase-0/cli-send-watch` AC-1 silently functionally regressed pre-supersession (CLI test still passed; messages didn't reach watchers). Now moot — superseded by `phase-2/cli-full-commands` whose `chatd send` calls `client.PostMessage` (REST).
 - **PR #87 (`80c1de0`) `fix(wsapi): gate /debug/subs to loopback`.** The `internal-only` wording in `phase-0/server-ws-hub` AC-6 is now enforced rather than implicit — non-loopback sources get 403. New tests in `wsapi/debug_handler_test.go` cover the gate.
 - **PR #86 (`cb1e075`) `fix(audit): access log records authenticated user_id`.** The auth middleware wrote user_id under `auth.ctxKeyUserID`; the access log read via `http.UserID` (different unexported key) — so `user_id` was always `-` for authenticated requests in production. The in-isolation middleware tests passed because they wrote+read through the same key. Fix: pointer sink installed by AccessLog, written through by RequireJWT via a new `MiddlewareConfig.WithUserID` callback. New chain-level black-box test added. **Generalizable lesson:** middleware tests must drive the production chain order to catch keying mismatches.
 
-**Remaining gap from audit follow-up:** `cli-send-watch` AC-1 is partial. Closing it is a production change (rewrite `chatd send` to POST against the messages endpoint, requires CLI auth wiring) — natural home is `20-feature-cli-full-commands`.
+**Remaining phase 3 (5 features):** all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
