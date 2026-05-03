@@ -1,7 +1,7 @@
 # Feature: Auth endpoints (register, login, me, logout, ws-ticket)
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - US-1 — As a friend, I want to register an account, so I can join the chat.
