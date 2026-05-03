@@ -104,12 +104,12 @@ func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel str
 			log.Printf("ws read: %v", err)
 			return
 		}
-		if !bucket.allow() {
-			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
-			return
-		}
 		if len(data) > MessageBodyLimit {
 			_ = conn.Close(websocket.StatusMessageTooBig, "message body exceeds 4 KiB limit")
+			return
+		}
+		if !bucket.allow() {
+			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
 			return
 		}
 		h.Broadcast(channel, data)
