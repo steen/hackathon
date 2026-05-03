@@ -21,7 +21,7 @@ git -C "$PWD" log --oneline --no-merges -100 2>/dev/null || echo "(ingen commits
 
 Kig i mappen `linkedin-posts/` efter eksisterende opslag-filer (`*.md`).
 
-- Sorter filerne kronologisk (filnavn er `YYYY-MM-DD-N.md`).
+- Sorter filerne kronologisk (filnavn er `YYYY-MM-DD-HH-MM.md`).
 - Find den **seneste fil med `status: posted`** i frontmatteren.
   - Brug dens `covers_to` SHA som udgangspunkt for git log.
 - Hvis ingen fil har `status: posted`, brug den seneste fils `covers_to` SHA.
@@ -46,25 +46,26 @@ git log <covers_to>..HEAD --stat --no-merges
 
 Skriv et engagerende opslag på **dansk** der:
 
-- Præsenterer de vigtigste fremskridt og ændringer på en måde der giver mening for et professionelt publikum (ikke kun udviklere)
+- Er skrevet til et **teknisk publikum**: udviklere, tekniske testere og software-arkitekter
+- Præsenterer de vigtigste fremskridt og ændringer med teknisk dybde — brug gerne fagtermer, arkitekturbeslutninger og konkrete tekniske detaljer
 - Har en fængende åbningslinje
 - Er **150–300 ord** langt
-- Bruger emojis sparsomt og naturligt
+- Bruger **ingen emojis**
 - Slutter med 3–6 relevante **hashtags** (mix af dansk og engelsk)
 - Undgår interne commit-beskeder ordret — omskriv til menneskesprog
 
 ### 4. Gem opslaget
 
 Bestem filnavnet:
-- Tæl eksisterende filer med dagens dato (`YYYY-MM-DD-*.md`) og inkrementer tælleren.
-- Format: `linkedin-posts/YYYY-MM-DD-N.md` (f.eks. `2026-05-03-1.md`)
+- Hent det aktuelle tidspunkt ned til minut: kør `date +"%Y-%m-%d-%H-%M"`.
+- Format: `linkedin-posts/YYYY-MM-DD-HH-MM.md` (f.eks. `2026-05-03-14-37.md`)
 
 Gem filen med dette frontmatter øverst:
 
 ```
 ---
 status: draft
-created_at: YYYY-MM-DD
+created_at: YYYY-MM-DDTHH:MM
 covers_from: <SHA for første nye commit, eller "beginning">
 covers_to: <SHA for HEAD>
 posted_at: null
