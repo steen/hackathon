@@ -1,8 +1,8 @@
 ---
 feature: logging-and-error-envelope
 phase: phase-1
-analyzed_at: 2026-05-03T17:26:50Z
-analyzed_commit: fa60bfdd928918ed6813ff04b1c947e66dd78758
+analyzed_at: 2026-05-03T20:38:00Z
+analyzed_commit: a283ba3df1d16750dfe0ccbd8e4f370dd6519c68
 implementation_status: implemented
 total_acs: 4
 covered: 4
@@ -14,29 +14,30 @@ deferred: 0
 # Test analysis: Access-log middleware and user-safe error envelope
 
 **Spec:** `specs/plans/phase-1/feature-logging-and-error-envelope.md`
-**Implementation status:** implemented — `apps/server/internal/http/{middleware,errors}.go` ship the envelope, request-ID context, access log, and panic recovery. AC-1's missing fields (`IP` and `user_id`) were closed by `feature-access-log-fields-and-wiring` (gap-A in `fa60bfd`); both fields now ship and the chain is wired in main.go.
+**Implementation status:** implemented — `apps/server/internal/http/{middleware,errors}.go` ship the envelope, request-ID context, access log, and panic recovery. AC-1's missing fields were closed by `feature-access-log-fields-and-wiring` (gap-A in `fa60bfd`), but a follow-up audit found the user_id field was always `-` for authenticated requests because `auth.RequireJWT` and `http.AccessLog` keyed their context values on different unexported types. **Audit fix in commit `cb1e075` (PR #86)** plumbs a pointer sink from AccessLog through RequireJWT, and adds a real chain-level black-box test. AC-1 now covered for real, not just structurally.
 
 ## Acceptance criteria
 
 | AC | Statement (verbatim from spec) | Status | Test reference |
 |----|-------------------------------|--------|----------------|
-| AC-1 | Access-log middleware logs method, path, status, latency, IP, and user ID (if known). | covered | `apps/server/internal/http/middleware_test.go::TestAccessLogRecordsMethodPathStatusLatencyAndRequestID` + `TestAccessLogRecordsRemoteIPHostPortion` (added by gap-A) + `TestAccessLogRecordsUserIDFromContext` + `TestAccessLogUserIDRendersDashWhenUnset` (empty `user_id` rendered as `-` to keep `key=value` parsing unambiguous). The Printf format now includes `remote_ip=%s user_id=%s` per `apps/server/internal/http/middleware.go:103`. |
+| AC-1 | Access-log middleware logs method, path, status, latency, IP, and user ID (if known). | covered | `apps/server/internal/http/middleware_test.go::TestAccessLogRecordsMethodPathStatusLatencyAndRequestID` + `TestAccessLogRecordsRemoteIPHostPortion` (added by gap-A) + `TestAccessLogRecordsUserIDFromContext` + `TestAccessLogUserIDRendersDashWhenUnset` + **the new black-box chain test added by `cb1e075`** (`TestAccessLogRecordsAuthenticatedUserIDThroughRealChain` at `middleware_test.go:242` — runs an authenticated request through the real chain `SecurityHeaders → RequestIDMiddleware → AccessLog → RequireJWT` and asserts `user_id` matches the authenticated user's ULID; the same test file's `TestAccessLogUserIDRendersDashWhenUnset` covers the unauthenticated case). The Printf format now includes `remote_ip=%s user_id=%s` per `apps/server/internal/http/middleware.go:103`. |
 | AC-2 | Sensitive query parameters (`token`, `ticket`) are stripped/redacted from logged URLs. | covered | `apps/server/internal/http/middleware_test.go::TestAccessLogStripsTokenQueryParam_SEC11` + `TestAccessLogStripsTicketQueryParam_SEC11` + `TestAccessLogRedactsRepeatedAndEncodedKeys` (handles repeated keys + percent-encoding edge cases). |
 | AC-3 | Every JSON response uses the envelope `{ ok, data, error }` per PRD §6 with the documented null/non-null pairing. | covered | `apps/server/internal/http/errors_test.go::TestErrorEnvelopeShapeIsConsistent` (3 subtests covering ok-with-data, ok-with-nil-data, and error shapes; explicitly asserts JSON keys are physically present, not merely Go zero-values). |
 | AC-4 | Internal error details are not exposed to clients but are logged on the server side with a request ID. | covered | `apps/server/internal/http/middleware_test.go::TestPanicRecoveryReturnsGenericEnvelopeAndLogsInternally` (asserts the panic value never reaches the response body; verifies the server log captures it with `request_id=`). |
 
 ## Findings
 
-### Partial — AC-1 is missing IP
+### AC-1 history — three closures
 
-The middleware's `log.Printf` call (`apps/server/internal/http/middleware.go:83`) emits `method`, `path`, `status`, `latency_ms` (plus the impl's added `request_id`) — four of the six fields AC-1 names. Missing:
+- **Phase-1 original (PR #34, `fa60bfd-`):** middleware logged method/path/status/latency/request_id. Missing `IP` and `user_id`. Marked partial.
+- **gap-A closure (`fa60bfd`, PR #79):** added `remote_ip=%s user_id=%s` to the Printf format. `TestAccessLogRecordsRemoteIPHostPortion` and `TestAccessLogRecordsUserIDFromContext` covered the middleware in isolation. **The agent flipped this to covered — but the production middleware chain was still broken.**
+- **Audit fix (`cb1e075`, PR #86):** the in-isolation tests passed because they called `WithUserID(req.Context(), "...")` directly on the request context they handed to `AccessLog`. The production chain `SecurityHeaders → RequestIDMiddleware → AccessLog → RequireJWT` failed because:
+  - `auth.RequireJWT` wrote the user id under `auth.ctxKeyUserID` (an unexported key in the auth package).
+  - `http.AccessLog` read via `http.UserID`, which keys on a different unexported type.
+  - So `user_id` was always `-` for authenticated requests in the live binary.
+- The fix installs a pointer sink on the outgoing request context; `AccessLog` reads it after `ServeHTTP` returns, and `RequireJWT` writes through it via the new `MiddlewareConfig.WithUserID` callback (avoiding an `auth → http` import cycle). The new black-box test `TestAccessLogRecordsAuthenticatedUserIDThroughRealChain` (`middleware_test.go:242`) drives the real chain and pins the live behavior.
 
-- **IP** — no `remote_addr` / `ip=` field. `r.RemoteAddr` is always observable; the gap is purely in the format string. This matters: an access log without source IP can't support per-IP rate-limit tracing or abuse forensics.
-- **user_id (if known)** — also absent. The spec hedges with "if known", and there's no auth feature shipped yet at this SHA, so user_id is never known today. This becomes a real gap once `feature-auth-endpoints` lands and the request context can carry a user ID.
-
-**Recommended follow-up (production code change, out of test-agent scope):** extend the `Printf` format to include `remote_addr=%s` (from `r.RemoteAddr`, optionally split by `:` to drop the port), and plumb `user_id=%s` once auth lands. Then add a one-line assertion to `TestAccessLogRecordsMethodPathStatusLatencyAndRequestID` checking the new field.
-
-The test-agent did NOT add a failing test to drive this. The gap is in production code and naming-an-IP-field is a straightforward owner change; a failing test in `tests/` would just shout at the next implementer without giving them the structured spec context they already have here.
+The lesson: testing middleware in isolation is necessary but not sufficient. Chain-level black-box tests catch the keying-mismatch class of bug that otherwise lurks until someone greps logs.
 
 ### Coverage notes
 
@@ -46,6 +47,6 @@ The test-agent did NOT add a failing test to drive this. The gap is in productio
 
 ## Recommendations
 
-1. **Production change (not a test task):** add `remote_addr=` to the access log format. Then extend `TestAccessLogRecordsMethodPathStatusLatencyAndRequestID` with one assertion line.
-2. **Wait-and-see:** revisit AC-1's `user_id` clause once `feature-auth-endpoints` lands and a user ID can be plumbed via context.
-3. **Optional hardening test:** wrap a Hijacker-using handler with `AccessLog` + httptest, dial it via WS, assert upgrade succeeds. Catches the silent regression where someone removes the `Hijack()` method on `statusRecorder`. Not gated by any AC; defer until the agent revisits this feature.
+1. No new tests added by this run — the audit-fix author added the load-bearing chain test (`TestAccessLogRecordsAuthenticatedUserIDThroughRealChain`) which now anchors AC-1's user_id requirement at the production-chain level rather than just the in-isolation middleware level.
+2. **Generalizable lesson worth a contract doc note:** when middleware reads from `context.Value`, the canonical write site (and the canonical read site) must agree on the key — and the test must drive the *production chain order* to catch keying mismatches. The pointer-sink pattern in `cb1e075` is a defensive workaround for the cross-package case; in single-package middleware chains, exporting the keying type publicly is enough.
+3. **Optional hardening test (still valid from prior tick):** wrap a Hijacker-using handler with `AccessLog` + httptest, dial it via WS, assert upgrade succeeds. Catches the silent regression where someone removes the `Hijack()` method on `statusRecorder`. Not gated by any AC.
