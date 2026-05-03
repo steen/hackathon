@@ -143,7 +143,18 @@ function startProxy({ distDir, fixtureBaseUrl }) {
       headers: { ...req.headers, host: `${fixtureHost}:${String(fixturePort)}` },
     };
     const upstream = httpRequest(opts);
+    // Without error handlers on the post-upgrade sockets, an ECONNRESET
+    // when the browser tears down (test teardown closes contexts → all
+    // WS sockets close at once) bubbles to node as an unhandled 'error'
+    // and crashes the proxy with exit code 1. Each test currently passes
+    // before the crash; we want clean teardown too.
+    sock.on("error", () => {
+      /* ignore — peer hang-up or RST during teardown */
+    });
     upstream.on("upgrade", (upRes, upSock, upHead) => {
+      upSock.on("error", () => {
+        /* ignore — peer hang-up or RST during teardown */
+      });
       const lines = [`HTTP/1.1 ${String(upRes.statusCode ?? 101)} Switching Protocols`];
       for (const [k, v] of Object.entries(upRes.headers)) {
         if (Array.isArray(v)) for (const vv of v) lines.push(`${k}: ${String(vv)}`);
