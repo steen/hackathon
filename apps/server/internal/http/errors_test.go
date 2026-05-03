@@ -50,7 +50,7 @@ func TestErrorEnvelopeShapeIsConsistent(t *testing.T) {
 
 	t.Run("error shape", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		WriteError(rec, http.StatusBadRequest, CodeBadRequest, "missing field foo")
+		WriteError(rec, http.StatusBadRequest, "bad_request", "missing field foo")
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", rec.Code)

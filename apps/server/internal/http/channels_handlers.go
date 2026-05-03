@@ -105,9 +105,11 @@ func (h *ChannelsHandlers) Routes(
 // channelIDFromPath returns the id segment of /api/channels/{id}/messages,
 // validated as a 26-char ULID-ish token. Tightly scoped here so a typo
 // in the route pattern surfaces as a 400 rather than a SQL lookup with
-// untrusted input.
+// untrusted input. Lowercase is folded to upper before validation so
+// clients that normalize URLs to lower (PR #42 review) hit the same
+// path as the canonical uppercase form `ids.NewULID().String()` emits.
 func channelIDFromPath(r *stdhttp.Request) (string, bool) {
-	id := r.PathValue("id")
+	id := strings.ToUpper(r.PathValue("id"))
 	if len(id) != 26 {
 		return "", false
 	}

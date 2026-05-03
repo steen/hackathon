@@ -433,6 +433,24 @@ func TestAuthEventsRecordsRegisterLoginLogoutKinds(t *testing.T) {
 	}
 }
 
+// SEC-13 — ws_ticket_issued is recorded when a ticket is minted.
+func TestAuthEventsRecordsWSTicketIssued(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+	tok := registerOK(t, f, "alice", "correct-horse-battery")
+	if rr := f.post(t, "/api/ws-ticket", nil, tok); rr.Code != stdhttp.StatusOK {
+		t.Fatalf("ws-ticket: %d", rr.Code)
+	}
+	var n int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM auth_events WHERE kind = ?`,
+		AuthEventTicketIssued).Scan(&n); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("ws_ticket_issued rows: got %d want 1", n)
+	}
+}
+
 // SEC-13 — login_failure is recorded for wrong-password.
 func TestAuthEventsRecordsLoginFailure(t *testing.T) {
 	f := newFixture(t)

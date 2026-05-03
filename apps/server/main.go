@@ -18,6 +18,7 @@ import (
 	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
 	httpapi "hackathon/apps/server/internal/http"
+	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/ratelimit"
 	"hackathon/apps/server/internal/repo"
@@ -27,7 +28,7 @@ import (
 const (
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
-	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
+	jwtSecretEnv      = "CHAT_JWT_SECRET"
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
 	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
@@ -35,24 +36,18 @@ const (
 	idleTimeout       = 120 * time.Second
 )
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatalf("%v", err)
-	}
-}
-
-// repository is the process-wide SQLite handle for later phase-1 features
-// (auth, channels, messages). Nil when CHAT_DB_PATH is unset (phase-0 boot
-// path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
-//
-//nolint:unused // wired into run() once phase-1 handlers land.
+// repository is a process-wide handle that later phase-1 features (auth,
+// channels, messages) will use to reach SQLite. Kept package-level so the
+// startup wiring lives in one place; nil when CHAT_DB_PATH is unset (phase-0
+// boot path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
 var repository *repo.Repo
 
-func run() error {
+func main() {
 	cfg := config.Load()
 	checks, err := cfg.Validate()
 	if err != nil {
-		return fmt.Errorf("config: %w", err)
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
 	}
 	for _, ch := range checks {
 		log.Printf("config check ok: %s", ch.Name)
@@ -60,38 +55,39 @@ func run() error {
 
 	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
 	if err != nil {
-		return fmt.Errorf("config: %w", err)
+		log.Fatalf("config: %v", err)
 	}
 
 	if dbPath := os.Getenv(dbPathEnv); dbPath != "" {
 		sqlDB, err := appdb.Open(dbPath)
 		if err != nil {
-			return fmt.Errorf("db open: %w", err)
+			log.Fatalf("db open: %v", err)
 		}
 		defer func() { _ = sqlDB.Close() }()
 		migCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := appdb.Apply(migCtx, sqlDB); err != nil {
 			cancel()
-			return fmt.Errorf("db migrate: %w", err)
+			log.Fatalf("db migrate: %v", err)
 		}
 		cancel()
 		repository, err = repo.New(sqlDB)
 		if err != nil {
-			return fmt.Errorf("repo init: %w", err)
+			log.Fatalf("repo init: %v", err)
 		}
-		log.Printf("db ready at %q", dbPath)
+		log.Printf("db ready at %s", dbPath)
 	}
 
 	h := hub.New()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
-	wsCfg := wsapi.Config{OriginPatterns: parseAllowedOrigins(os.Getenv(allowedOriginsEnv))}
+	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
+	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
+	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
 	var tickets *auth.TicketStore
 
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
 		if len(jwtSecret) == 0 {
-			return fmt.Errorf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
+			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
 		tickets = auth.NewTicketStore()
 		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
@@ -129,13 +125,14 @@ func run() error {
 	}
 
 	mux.HandleFunc("/ws", wsapi.Handler(h, tickets, wsCfg))
+	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           httpapi.BodyCap(mux),
+		Handler:           httpx.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
@@ -156,7 +153,6 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
-	return nil
 }
 
 // parseAllowedOrigins splits a comma-separated CHAT_ALLOWED_ORIGINS
