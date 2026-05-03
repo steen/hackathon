@@ -42,14 +42,42 @@ nodes:
         exit 1
       fi
 
-      # Capture the parent branch (whatever archon checked out: main, or another
-      # feat/* branch when --from was used). create-pr will use this as the PR's
-      # base so stacked features get the correct base branch (BASE_BRANCH archon
-      # variable always points at the repo default, so it can't carry --from).
-      PARENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+      # Determine parent branch by matching HEAD against known origin branches.
+      # archon names the worktree branch `archon/task-<x>` and starts it at
+      # either origin/main or origin/<--from arg>. The actual parent is whichever
+      # origin branch tip equals HEAD.
+      if ! git fetch origin --prune --quiet; then
+        echo "warning: git fetch origin failed; falling back to local origin refs (may be stale)" >&2
+      fi
+      HEAD_SHA=$(git rev-parse HEAD)
+      PARENT_BRANCH=""
+      # Prefer feat/* matches over main so stacked PRs detect their parent.
+      for ref in $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/feat/*'); do
+        if [ "$(git rev-parse "$ref" 2>/dev/null || echo)" = "$HEAD_SHA" ]; then
+          PARENT_BRANCH=${ref#origin/}
+          break
+        fi
+      done
+      if [ -z "$PARENT_BRANCH" ]; then
+        if [ "$(git rev-parse origin/main 2>/dev/null || echo)" = "$HEAD_SHA" ]; then
+          PARENT_BRANCH=main
+        fi
+      fi
+      if [ -z "$PARENT_BRANCH" ]; then
+        echo "WARNING: HEAD ($HEAD_SHA) matched no origin/feat/* or origin/main tip — defaulting to main" >&2
+        echo "  origin/main: $(git rev-parse origin/main 2>/dev/null || echo '<unresolved>')" >&2
+        PARENT_BRANCH=main
+      fi
       mkdir -p "$ARTIFACTS_DIR"
       printf '%s' "$PARENT_BRANCH" > "$ARTIFACTS_DIR/parent-branch"
       echo "parent branch captured: $PARENT_BRANCH"
+
+      # Ensure we branch from the LATEST origin/$PARENT_BRANCH, not whatever
+      # stale tip archon's worktree happened to start at.
+      if [ "$(git rev-parse "origin/$PARENT_BRANCH" 2>/dev/null || echo)" != "$HEAD_SHA" ]; then
+        echo "fast-forwarding HEAD to origin/$PARENT_BRANCH"
+        git reset --hard "origin/$PARENT_BRANCH"
+      fi
 
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
         echo "branch $BRANCH already exists — checking out"
