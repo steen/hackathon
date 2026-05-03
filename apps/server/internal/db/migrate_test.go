@@ -75,6 +75,24 @@ func TestApplyAppliesEmbeddedMigrations(t *testing.T) {
 	}
 }
 
+// TestApplyCreatesMessagesCursorIndex pins the cursor pagination index from
+// migration 0002 — a future migration that accidentally renames or drops it
+// will silently regress paginated history; this test catches that.
+func TestApplyCreatesMessagesCursorIndex(t *testing.T) {
+	ctx := context.Background()
+	sqlDB := openMemDB(t)
+	if err := appdb.Apply(ctx, sqlDB); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	var name string
+	err := sqlDB.QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_messages_channel_id'`,
+	).Scan(&name)
+	if err != nil {
+		t.Errorf("expected idx_messages_channel_id index after Apply: %v", err)
+	}
+}
+
 // TestApplyIsIdempotent re-runs Apply on an already-migrated DB and verifies
 // no error and no duplicate rows in schema_migrations.
 // (Acceptance: "migration runner ... is idempotent on re-run".)
