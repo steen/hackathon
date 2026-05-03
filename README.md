@@ -67,9 +67,9 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 
 | Var | Required | Default | Purpose |
 |-----|----------|---------|---------|
-| `CHAT_JWT_SECRET` | when `CHAT_DB_PATH` is set | — | JWT signing key. ≥32 ASCII bytes, ≥5 distinct bytes, not a single repeated char, not on the dev-default denylist (`change-me`, `secret`, `password`, `dev`, `test`, `placeholder`, `hackathon`, …). |
-| `CHAT_INVITE_CODE` | yes | — | Gate code for registration. Any non-empty string. |
-| `CHAT_DB_PATH` | for the persistent/auth boot path | — | SQLite file path. If unset, the server runs in **phase-0 mode** with no auth and no SQLite — useful for `scripts/smoke.sh` and the CI smoke harness, not for real use. |
+| `CHAT_JWT_SECRET` | yes | — | JWT signing key. ≥32 ASCII bytes, ≥5 distinct bytes, not a single repeated char, not on the dev-default denylist (`change-me`, `secret`, `password`, `dev`, `test`, `placeholder`, `hackathon`, …). Validated unconditionally at startup, even when `CHAT_DB_PATH` is unset. |
+| `CHAT_INVITE_CODE` | yes | — | Gate code for registration. Any non-empty string. Validated unconditionally at startup. |
+| `CHAT_DB_PATH` | for the auth/persistence boot path | — | SQLite file path. When set, the server mounts the auth + channels + messages handlers and boots the migration runner. When unset, the server runs in **phase-0 mode** with the WS hub and `/debug/subs` only (no auth, no SQLite); not used by `scripts/smoke.sh` (which sets a `$WORK_DIR`-scoped DB path) and not intended for real use. |
 | `CHAT_LISTEN_ADDR` | no | `127.0.0.1:8080` | `host:port` to bind. Non-loopback hosts are rejected unless `CHAT_ALLOW_PUBLIC_BIND=1`. |
 | `CHAT_ALLOW_PUBLIC_BIND` | no | unset | Set to `1` to allow a non-loopback bind (e.g. `0.0.0.0:8080`). The server logs a `WARN` because `CHAT_TRUSTED_PROXY` is not yet wired (PRD §9), so behind a proxy IP rate limits collapse onto the proxy IP. |
 | `CHAT_ALLOWED_ORIGINS` | no | same-origin only | Comma-separated WebSocket `Origin` allowlist. Stray empty entries are dropped. |
