@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:06:50Z
-**Analyzed commit:** `4902b5f`
+**Last updated:** 2026-05-03T14:56:48Z
+**Analyzed commit:** `f765726`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -45,10 +45,12 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 4/5 | 1 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
+**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred. (PRs #25, #32, #35 are open and rework totals once merged; this index reflects current `main`.)
+**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 5 ACs · 4 covered · 1 partial · 0 missing · 0 deferred. The 1 partial is AC-4 of `sqlite-schema-and-ulid`: schema permits ULIDs (TEXT PRIMARY KEY) and `ids.NewULID()` exists with strong tests, but no shipped INSERT code path uses it yet — `repo.Repo` is a constructor-only stub. Will firm up once `feature-channels-and-messages` lands.
 
-Phase-0 is now fully covered. PR #18 closed the last gaps by adding `apps/cli/main.go` (the `chatd` binary) and `scripts/smoke.sh` (the system smoke test wired into `package.json` `test`).
+**Phase-1 sibling PRs in flight (not yet on main):** PR #32 tracks `logging-and-error-envelope` (3/4, AC-1 IP gap); PR #37 tracks `file-perms-and-headers` (1/3, SecurityHeaders not wired). Both findings docs will appear in the index once their PRs merge; the next tick after each merge reconciles totals.
 
-**Phases 1–3:** specs exist (`specs/plans/phase-{1,2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once Phase-1 implementation commits start landing on `main`.
+**Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
