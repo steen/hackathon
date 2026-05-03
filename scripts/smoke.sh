@@ -23,15 +23,22 @@ WATCH2_PID=""
 cleanup() {
   local rc=$?
   set +e
+  # Bounded TERM-then-KILL: a wedged child that ignores SIGTERM (deadlock,
+  # blocked syscall, masked signal) would otherwise let `wait` block until
+  # the workflow-level timeout. Pure bash so we don't depend on coreutils
+  # `timeout` (BSD `wait` lacks `-t`; macOS `coreutils` is not standard).
   for pid in "$WATCH1_PID" "$WATCH2_PID" "$SERVER_PID"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null
+    [[ -z "$pid" ]] && continue
+    kill -0 "$pid" 2>/dev/null || continue
+    kill "$pid" 2>/dev/null
+    for _ in $(seq 1 50); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null
     fi
-  done
-  for pid in "$WATCH1_PID" "$WATCH2_PID" "$SERVER_PID"; do
-    if [[ -n "$pid" ]]; then
-      wait "$pid" 2>/dev/null
-    fi
+    wait "$pid" 2>/dev/null
   done
   if [[ $rc -ne 0 ]]; then
     echo "--- server.log ---" >&2
@@ -82,20 +89,23 @@ WS_URL="ws://127.0.0.1:${PORT}/ws"
 API_URL="http://127.0.0.1:${PORT}"
 export CHAT_SERVER="$WS_URL"
 
-# Auth flow needs a SQLite file, a JWT secret, and the invite code.
-# Using the work dir keeps each smoke invocation hermetic.
+# Auth flow needs a SQLite file, a JWT secret, and an invite code. Both
+# secrets are generated per-run via openssl so no fake-secret literal is
+# committed to git; the values live only for the duration of this smoke
+# run. openssl is on every CI runner and avoids the `tr <urandom | head`
+# SIGPIPE trap under `set -o pipefail`.
 DB_PATH="$WORK_DIR/chat.db"
-JWT_SECRET="smoke-jwt-secret-must-be-long-enough-32b!"
-INVITE_CODE="smoke-invite-code"
+SMOKE_JWT_SECRET="$(openssl rand -hex 20)"      # 40 hex chars, well over the 32-byte floor
+SMOKE_INVITE_CODE="$(openssl rand -hex 8)"      # 16 hex chars
 export CHAT_DB_PATH="$DB_PATH"
-export CHAT_JWT_SECRET="$JWT_SECRET"
-export CHAT_INVITE_CODE="$INVITE_CODE"
+export CHAT_JWT_SECRET="$SMOKE_JWT_SECRET"
+export CHAT_INVITE_CODE="$SMOKE_INVITE_CODE"
 
 echo "[smoke] starting server on :${PORT}"
 CHAT_SERVER_PORT="$PORT" \
 CHAT_DB_PATH="$DB_PATH" \
-CHAT_JWT_SECRET="$JWT_SECRET" \
-CHAT_INVITE_CODE="$INVITE_CODE" \
+CHAT_JWT_SECRET="$SMOKE_JWT_SECRET" \
+CHAT_INVITE_CODE="$SMOKE_INVITE_CODE" \
   "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
@@ -119,7 +129,7 @@ SMOKE_PASS="smoke-password-1234567890"
 echo "[smoke] register ${SMOKE_USER}"
 REG_RESP=$(curl -fsS -X POST "${API_URL}/api/register" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\",\"invite_code\":\"${INVITE_CODE}\"}")
+  -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\",\"invite_code\":\"${SMOKE_INVITE_CODE}\"}")
 TOKEN=$(printf '%s' "$REG_RESP" | json_get token)
 if [[ -z "$TOKEN" ]]; then
   echo "[smoke] register did not return a token: ${REG_RESP}" >&2
@@ -152,10 +162,25 @@ WATCH2_TICKET=$(mint_ticket)
 "$CHATD_BIN" --ws-ticket "$WATCH2_TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
 WATCH2_PID=$!
 
-# Phase-0 simplification: a brief sleep to let the WebSocket dials complete
-# and the hub register both subscribers before we publish. The hub does not
-# expose a subscriber-count endpoint yet.
-sleep 0.5
+# Wait for both watchers to register with the hub. Polling /debug/subs avoids
+# the race where a slow CI runner's WebSocket dial takes longer than a fixed
+# sleep and the publish below misses one or both subscribers. The %23 is a
+# URL-encoded '#' so curl doesn't truncate the query at a fragment.
+EXPECTED_SUBS=2
+SUBS_URL="http://127.0.0.1:${PORT}/debug/subs?channel=%23general"
+subs_ready=0
+for _ in $(seq 1 50); do
+  count=$(curl -fsS "$SUBS_URL" 2>/dev/null || echo "")
+  if [[ "$count" == "$EXPECTED_SUBS" ]]; then
+    subs_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ $subs_ready -ne 1 ]]; then
+  echo "[smoke] expected ${EXPECTED_SUBS} subscribers within 5s (last count: ${count:-<none>})" >&2
+  exit 1
+fi
 
 MSG="smoke-$$-$(date +%s%N)"
 echo "[smoke] sending message: ${MSG}"
