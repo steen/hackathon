@@ -10,6 +10,14 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 16:00Z — Access-log middleware + user-safe error envelope (phase 1)
+
+### Added
+- `apps/server/internal/http` package with the `{ok, data, error}` response envelope (`WriteOK`, `WriteError`) per PRD §10. All three keys are physically present on every response — `ok=true` ships `data` filled and `error: null`; `ok=false` ships `data: null` and `error: {code, message}`.
+- Access-log middleware emits one line per request with method, path, status, latency, and request ID. Sensitive query parameters `token` and `ticket` are redacted via `net/url` parsing (handles repeated keys and percent-encoded values), satisfying SEC-11.
+- Panic recovery middleware logs the panic value and stack server-side with the request ID, returns a generic 500 envelope, and never leaks the panic value to the client.
+- Request-ID middleware mints a 128-bit hex ID per request, plumbs it via `RequestID(ctx)`, and echoes it as the `X-Request-Id` response header for log correlation.
+
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 
 ### Added
