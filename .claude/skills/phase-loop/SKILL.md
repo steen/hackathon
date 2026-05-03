@@ -64,7 +64,7 @@ For each sub-issue, all of these must be true:
 4. It does NOT require editing conflict-magnet files (`apps/server/main.go`, `CHANGELOG.md`) when another in-flight PR also touches that file.
 5. Branching off `origin/main` will not require any cherry-pick from an open PR (no stacking).
 
-If the filter produces an empty set, **idle**: emit a one-line idle marker (no work to dispatch) and skip to step 12.
+If the filter produces an empty set, **idle**: emit the idle banner from `references/idle-banner.md` (a sad, passive-aggressive ANSI figure expressing the agent's emotional state about having no work, plus a one-line diagnostic of what is blocked on what), then skip to step 12. The same banner fires from step 12 if dispatch count was zero for any other reason (every candidate blocked by an in-flight PR, etc.).
 
 ### 5. Plan the batch
 
@@ -141,3 +141,4 @@ If invoked without `auto`, exit cleanly. The user re-fires manually.
 
 - `references/worker-prompt-template.md` — the standard prompt scaffold passed to each `issue-pr-worker` dispatch.
 - `references/eligibility-examples.md` — worked examples of conflict-surface analysis for tricky cases (PR touches `wsapi/handler.go`, sec finding wants to edit it; cli + web disjoint; etc.).
+- `references/idle-banner.md` — the sad ANSI banner library used when a tick produces zero new dispatches.
