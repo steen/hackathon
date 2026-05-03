@@ -83,7 +83,18 @@ WS_URL="ws://127.0.0.1:${PORT}/ws"
 export CHAT_SERVER="$WS_URL"
 
 echo "[smoke] starting server on :${PORT}"
-CHAT_SERVER_PORT="$PORT" "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
+# PR #28 startup config validation requires a strong JWT secret and an invite
+# code. Loopback default for CHAT_LISTEN_ADDR is fine — no public-bind override.
+# Both values are generated per-run via openssl so no fake-secret literal is
+# committed to git; the values live only for the duration of this smoke run.
+# openssl is on every CI runner and avoids the `tr <urandom | head` SIGPIPE
+# trap under `set -o pipefail`.
+SMOKE_JWT_SECRET="$(openssl rand -hex 20)"      # 40 hex chars, well over the 32-byte floor
+SMOKE_INVITE_CODE="$(openssl rand -hex 8)"      # 16 hex chars
+CHAT_SERVER_PORT="$PORT" \
+  CHAT_JWT_SECRET="$SMOKE_JWT_SECRET" \
+  CHAT_INVITE_CODE="$SMOKE_INVITE_CODE" \
+  "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 # Wait for the listening port (up to ~5s).
