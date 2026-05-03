@@ -47,9 +47,11 @@ Each finding belongs to exactly ONE dimension.
 
 ## Output
 
-Output **only** a single JSON object:
+Output **only** a single raw JSON object as your final response. **Do NOT wrap it in a markdown code fence** (no ```` ``` ```` or ```` ```json ````). Your message must start with `{` and end with `}` — nothing before, nothing after.
 
-```json
+Expected shape:
+
+```
 {
   "verdict": "pass",
   "critical": [],

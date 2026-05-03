@@ -25,7 +25,10 @@ nodes:
       #!/bin/bash
       set -euo pipefail
 
-      JSON='$parse-feature-plan.output'
+      # archon auto-shell-quotes $nodeId.output; reference it bare
+      JSON=$parse-feature-plan.output
+      # Strip markdown code fences if the model wrapped JSON in ```json ... ```
+      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
       SLUG=$(echo "$JSON" | jq -r '.slug')
 
       if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
@@ -241,8 +244,12 @@ nodes:
       #!/bin/bash
       set -euo pipefail
 
-      JSON='$parse-feature-plan.output'
-      REVIEW='$review-implementation.output'
+      # archon auto-shell-quotes $nodeId.output; reference bare
+      JSON=$parse-feature-plan.output
+      REVIEW=$review-implementation.output
+      # Strip markdown code fences if the model wrapped JSON in ```json ... ```
+      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
+      REVIEW=$(echo "$REVIEW" | sed -e '/^[[:space:]]*```/d')
 
       SLUG=$(echo "$JSON" | jq -r '.slug')
       FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')

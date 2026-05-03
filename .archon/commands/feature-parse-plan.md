@@ -35,7 +35,9 @@ $ARGUMENTS
 
 ## Output
 
-Output **only** a single JSON object as your final response, with this exact shape:
+Output **only** a single raw JSON object as your final response. **Do NOT wrap it in a markdown code fence** (no ```` ``` ```` or ```` ```json ````). Your message must start with `{` and end with `}` — nothing before, nothing after.
+
+Expected shape:
 
 ```json
 {
