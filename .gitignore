@@ -6,6 +6,11 @@ dist/
 npm-debug.log*
 pnpm-debug.log*
 
+# Playwright test runs
+test-results/
+playwright-report/
+.last-run.json
+
 # Go
 *.exe
 *.test
