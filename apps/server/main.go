@@ -13,6 +13,7 @@ import (
 	"time"
 
 	appdb "hackathon/apps/server/internal/db"
+	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
@@ -61,13 +62,14 @@ func main() {
 	h := hub.New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", wsapi.Handler(h))
+	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           mux,
+		Handler:           httpx.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}

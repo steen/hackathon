@@ -12,6 +12,7 @@
 - Every received message is broadcast to all subscribers of the message's channel.
 - Server starts via `go run ./apps/server` and listens on a configurable port (env var or default).
 - No authentication is required at this stage.
+- `GET /debug/subs?channel=<name>` returns the current subscriber count for the given channel as plain text (decimal integer + `\n`). Internal-only (the `/debug/` prefix marks it as not part of the product API and not on the `{ok,data,error}` envelope contract); intended for CI scripts and tests to avoid sleep-based readiness races.
 
 ## Implementation steps
 1. Create `apps/server/main.go` with a minimal HTTP server.

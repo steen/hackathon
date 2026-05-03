@@ -10,10 +10,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Open returns a *sql.DB pointing at a SQLite file at path. The file is
-// created with mode 0600 if missing (PRD §9 — the DB stores password hashes
-// and audit data; never world-readable). Existing files are not chmodded; a
-// warning belongs in the startup checks feature, not here.
+// Open returns a *sql.DB pointing at a SQLite file at path. EnsureFile (SEC-14)
+// creates the file at 0600 if missing and tightens an existing too-wide file —
+// this is the single canonical entry point for "the SQLite file is on disk
+// with the right permissions" so the driver never opens a world-readable file.
 //
 // The driver name is "sqlite" (modernc.org/sqlite), not "sqlite3".
 func Open(path string) (*sql.DB, error) {
@@ -26,16 +26,8 @@ func Open(path string) (*sql.DB, error) {
 			return nil, fmt.Errorf("db.Open: mkdir %q: %w", dir, err)
 		}
 	}
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		// Create the file with 0600 before the driver opens it; modernc/sqlite
-		// will respect existing perms and not widen them.
-		f, ferr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600)
-		if ferr != nil {
-			return nil, fmt.Errorf("db.Open: pre-create %q: %w", path, ferr)
-		}
-		_ = f.Close()
-	} else if err != nil {
-		return nil, fmt.Errorf("db.Open: stat %q: %w", path, err)
+	if err := EnsureFile(path); err != nil {
+		return nil, fmt.Errorf("db.Open: %w", err)
 	}
 
 	// _pragma options: WAL is friendlier to concurrent readers + a single
