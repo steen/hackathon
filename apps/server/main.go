@@ -113,7 +113,15 @@ func run() error {
 		}
 		tickets = auth.NewTicketStore()
 		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
-		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfigFromEnv())
+		registerIPCfg := ratelimit.RegisterIPConfigFromEnv()
+		registerIPDefault := ratelimit.RegisterIPConfig()
+		if registerIPCfg.Burst != registerIPDefault.Burst || registerIPCfg.Refill != registerIPDefault.Refill {
+			log.Printf("WARN: %s/%s loosen the per-IP register rate limit (Burst=%d, Refill=%s vs PRD §9 default Burst=%d, Refill=%s); ensure this is a test/dev override",
+				ratelimit.EnvRegisterBurst, ratelimit.EnvRegisterRefill,
+				registerIPCfg.Burst, registerIPCfg.Refill,
+				registerIPDefault.Burst, registerIPDefault.Refill)
+		}
+		registerIPLimiter := ratelimit.NewIPLimiter(registerIPCfg)
 		userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
 		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
 			DB:          repository.DB(),
