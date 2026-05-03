@@ -10,15 +10,16 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
+	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
-	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/ratelimit"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
@@ -29,6 +30,7 @@ const (
 	dbPathEnv         = "CHAT_DB_PATH"
 	jwtSecretEnv      = "CHAT_JWT_SECRET"
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
+	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
@@ -77,15 +79,17 @@ func main() {
 
 	h := hub.New()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", wsapi.Handler(h))
-	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
+	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
+	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
+	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
+	var tickets *auth.TicketStore
 
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
 		if len(jwtSecret) == 0 {
 			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
-		tickets := auth.NewTicketStore()
+		tickets = auth.NewTicketStore()
 		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
 		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfig())
 		userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
@@ -120,6 +124,9 @@ func main() {
 		ch.Routes(mux, require, msg)
 	}
 
+	mux.HandleFunc("/ws", wsapi.Handler(h, tickets, wsCfg))
+	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
+
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
@@ -146,6 +153,24 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// parseAllowedOrigins splits a comma-separated CHAT_ALLOWED_ORIGINS
+// value into the OriginPatterns shape coder/websocket expects. Empty
+// or whitespace-only entries are dropped so a stray trailing comma is
+// not treated as a wildcard.
+func parseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveListenAddr returns the address the HTTP server should bind. cfg is

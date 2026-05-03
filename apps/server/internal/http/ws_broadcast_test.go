@@ -29,7 +29,7 @@ func TestWSSubscriberReceivesBroadcastMessage(t *testing.T) {
 	// wsapi handler for /ws, sharing the same hub.
 	mux := stdhttp.NewServeMux()
 	mux.Handle("/api/", cf.mux)
-	mux.HandleFunc("/ws", wsapi.Handler(cf.hub))
+	mux.HandleFunc("/ws", wsapi.Handler(cf.hub, nil, wsapi.Config{}))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
