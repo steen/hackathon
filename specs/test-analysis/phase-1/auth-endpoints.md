@@ -1,8 +1,8 @@
 ---
 feature: auth-endpoints
 phase: phase-1
-analyzed_at: 2026-05-03T15:46:48Z
-analyzed_commit: 5b7953c9325b4648cda02e9a5cb6d3116ca88ba6
+analyzed_at: 2026-05-03T17:26:50Z
+analyzed_commit: fa60bfdd928918ed6813ff04b1c947e66dd78758
 implementation_status: implemented
 total_acs: 7
 covered: 7
