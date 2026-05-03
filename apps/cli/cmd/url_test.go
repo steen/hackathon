@@ -8,21 +8,21 @@ import (
 	"github.com/jumoel/hackathon/packages/go-shared/serverdefaults"
 )
 
-func TestAC3_ResolveURL_FlagWinsOverEnvAndDefault(t *testing.T) {
+func TestUS8_ResolveURL_FlagWinsOverEnvAndDefault(t *testing.T) {
 	got := cmd.ResolveURL("ws://flag.example/ws", "ws://env.example/ws")
 	if want := "ws://flag.example/ws"; got != want {
 		t.Fatalf("ResolveURL = %q, want %q", got, want)
 	}
 }
 
-func TestAC3_ResolveURL_EnvWinsOverDefault(t *testing.T) {
+func TestUS8_ResolveURL_EnvWinsOverDefault(t *testing.T) {
 	got := cmd.ResolveURL("", "ws://env.example/ws")
 	if want := "ws://env.example/ws"; got != want {
 		t.Fatalf("ResolveURL = %q, want %q", got, want)
 	}
 }
 
-func TestAC3_ResolveURL_FallsBackToLocalhostDefault(t *testing.T) {
+func TestUS8_ResolveURL_FallsBackToLocalhostDefault(t *testing.T) {
 	got := cmd.ResolveURL("", "")
 	want := fmt.Sprintf("ws://localhost:%d/ws", serverdefaults.Port)
 	if got != want {
@@ -30,7 +30,7 @@ func TestAC3_ResolveURL_FallsBackToLocalhostDefault(t *testing.T) {
 	}
 }
 
-func TestAC3_ResolveURL_RejectsEmptyAfterTrim(t *testing.T) {
+func TestUS8_ResolveURL_TreatsWhitespaceFlagAsUnset(t *testing.T) {
 	got := cmd.ResolveURL("   ", "")
 	want := fmt.Sprintf("ws://localhost:%d/ws", serverdefaults.Port)
 	if got != want {

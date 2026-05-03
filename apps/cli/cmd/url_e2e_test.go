@@ -76,7 +76,7 @@ func runSend(flag, env string, args []string) error {
 	return cmd.Send(ctx, url, args)
 }
 
-func TestAC3_E2E_URLFlagAndEnvDriveDial(t *testing.T) {
+func TestUS8_E2E_URLFlagAndEnvDriveDial(t *testing.T) {
 	a := newCountingWSServer(t)
 	b := newCountingWSServer(t)
 

@@ -24,7 +24,7 @@ func cliSourceRoot(t *testing.T) string {
 	return root
 }
 
-func TestAC4_CLISourceContainsNoAuthOrTokenSymbols(t *testing.T) {
+func TestUS8_CLISourceContainsNoAuthOrTokenSymbols(t *testing.T) {
 	root := cliSourceRoot(t)
 
 	bannedIdents := []string{

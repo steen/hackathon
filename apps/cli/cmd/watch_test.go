@@ -54,7 +54,7 @@ func wsURLOf(srv *httptest.Server) string {
 	return "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 }
 
-func TestAC2_WatchExitsCleanlyOnContextCancel(t *testing.T) {
+func TestUS8_WatchExitsCleanlyOnContextCancel(t *testing.T) {
 	srv := newSilentWSServer(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -78,7 +78,7 @@ func TestAC2_WatchExitsCleanlyOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestAC2_WatchPrintsEachFrameOnItsOwnLine(t *testing.T) {
+func TestUS8_WatchPrintsEachFrameOnItsOwnLine(t *testing.T) {
 	srv := newWriterWSServer(t, []string{"alpha", "beta", "gamma"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

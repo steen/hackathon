@@ -75,7 +75,7 @@ func (f *fakeWSServer) recordedFrames() []recordedFrame {
 	return out
 }
 
-func TestAC1_SendReturnsErrorWhenServerUnreachable(t *testing.T) {
+func TestUS8_SendReturnsErrorWhenServerUnreachable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -88,7 +88,7 @@ func TestAC1_SendReturnsErrorWhenServerUnreachable(t *testing.T) {
 	}
 }
 
-func TestAC1_SendWritesJoinedArgsAsSingleTextFrame(t *testing.T) {
+func TestUS8_SendWritesJoinedArgsAsSingleTextFrame(t *testing.T) {
 	fake := newFakeWSServer(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
