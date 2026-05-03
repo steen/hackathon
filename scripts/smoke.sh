@@ -83,7 +83,12 @@ WS_URL="ws://127.0.0.1:${PORT}/ws"
 export CHAT_SERVER="$WS_URL"
 
 echo "[smoke] starting server on :${PORT}"
-CHAT_SERVER_PORT="$PORT" "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
+# PR #28 startup config validation requires a strong JWT secret and an invite
+# code. Loopback default for CHAT_LISTEN_ADDR is fine — no public-bind override.
+CHAT_SERVER_PORT="$PORT" \
+  CHAT_JWT_SECRET="smoke-jwt-secret-A1b2C3d4E5f6G7h8I9J0kLmNoPqR" \
+  CHAT_INVITE_CODE="smoke-invite" \
+  "$SERVER_BIN" >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 # Wait for the listening port (up to ~5s).
