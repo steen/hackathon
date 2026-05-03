@@ -1,7 +1,7 @@
 # Feature: CLI `chatd send` and `chatd watch` (no auth)
 
 **Parent phase:** [Phase 0: Walking skeleton, system test ready](../phase-0-walking-skeleton-system-test-ready.md)
-**Status:** planned
+**Status:** done (PR #14)
 
 ## Requirements covered
 - (no user-story IDs land fully here; US-8 is completed in Phase 2 with the full command set)

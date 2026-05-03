@@ -1,7 +1,7 @@
 # Feature: Server WebSocket endpoint with in-memory hub
 
 **Parent phase:** [Phase 0: Walking skeleton, system test ready](../phase-0-walking-skeleton-system-test-ready.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - (no user-story IDs from the PRD map directly; this is the wire-end groundwork for US-5 which lands fully in Phase 1)
