@@ -29,6 +29,8 @@ nodes:
       $parse-feature-plan.output
       __ARCHON_PARSE_OUTPUT_END__
       )
+      # Strip markdown code fences if the model wrapped JSON in ```json ... ```
+      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
       SLUG=$(echo "$JSON" | jq -r '.slug')
 
       if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
@@ -252,6 +254,9 @@ nodes:
       $review-implementation.output
       __ARCHON_REVIEW_OUTPUT_END__
       )
+      # Strip markdown code fences if the model wrapped JSON in ```json ... ```
+      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
+      REVIEW=$(echo "$REVIEW" | sed -e '/^[[:space:]]*```/d')
 
       SLUG=$(echo "$JSON" | jq -r '.slug')
       FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
