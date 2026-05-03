@@ -36,21 +36,20 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:27:13Z
-**Analyzed commit:** `8013612`
+**Last updated:** 2026-05-03T14:36:54Z
+**Analyzed commit:** `979995f`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
 | phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
-| phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
-**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 4 ACs · 3 covered · 1 partial · 0 missing · 0 deferred.
+**Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred. PR #25 added a 6th AC to `server-ws-hub` (the new `/debug/subs` endpoint), fully covered by `apps/server/internal/wsapi/debug_handler_test.go`.
 
-Phase-1 implementation is starting (PR #24 shipped `feature-logging-and-error-envelope`). The other 9 phase-1 features still have specs but no implementation; the agent will write per-feature findings docs as each lands. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (the spec lists it explicitly) — see the per-feature findings for details.
+**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 4 ACs · 3 covered · 1 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (the spec lists it explicitly) — see the per-feature findings for details. The other 9 phase-1 features still have specs but no implementation.
 
-**Phases 2–3:** specs exist; the agent will pick them up once their implementation commits start landing on `main`.
+**Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->

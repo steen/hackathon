@@ -91,20 +91,13 @@ export CHAT_SERVER="$WS_URL"
 
 # Auth flow needs a SQLite file, a JWT secret, and the invite code.
 # Using the work dir keeps each smoke invocation hermetic. Both auth
-# secrets are generated per-run from /dev/urandom so no fake-secret
-# literal is committed to git; the values live only for the duration of
-# this smoke run (CLAUDE.md "no hardcoded secrets").
+# secrets are generated per-run via openssl so no fake-secret literal
+# is committed to git (CLAUDE.md "no hardcoded secrets"); openssl is on
+# every CI runner and avoids the `tr </dev/urandom | head` SIGPIPE trap
+# under `set -o pipefail`.
 DB_PATH="$WORK_DIR/chat.db"
-gen_secret() {
-  python3 - "$1" <<'PY'
-import secrets, string, sys
-n = int(sys.argv[1])
-alphabet = string.ascii_letters + string.digits
-print("".join(secrets.choice(alphabet) for _ in range(n)))
-PY
-}
-SMOKE_JWT_SECRET="$(gen_secret 40)"
-SMOKE_INVITE_CODE="$(gen_secret 16)"
+SMOKE_JWT_SECRET="$(openssl rand -hex 20)"   # 40 hex chars, well over the 32-byte floor
+SMOKE_INVITE_CODE="$(openssl rand -hex 8)"   # 16 hex chars
 export CHAT_DB_PATH="$DB_PATH"
 export CHAT_JWT_SECRET="$SMOKE_JWT_SECRET"
 export CHAT_INVITE_CODE="$SMOKE_INVITE_CODE"

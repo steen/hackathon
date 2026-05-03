@@ -13,7 +13,7 @@ describe("AC-2: pnpm-workspace.yaml declares apps/* and packages/*", () => {
 
   it("AC-2: pnpm-workspace.yaml parses cleanly and packages includes apps/* and packages/*", () => {
     const raw = readFileSync(workspacePath, "utf8");
-    const parsed = parseYaml(raw);
+    const parsed = parseYaml(raw) as { packages?: string[] };
 
     expect(parsed).toBeTypeOf("object");
     expect(parsed).not.toBeNull();

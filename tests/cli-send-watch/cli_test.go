@@ -128,7 +128,7 @@ func TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine(t *testing.T) 
 	}
 	url := newFakeWS(t, rec)
 
-	var out safeBuffer
+	out := &safeBuffer{}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -136,7 +136,7 @@ func TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine(t *testing.T) 
 	// won't do on its own) or when ctx is cancelled. Run it in a goroutine
 	// and cancel after the expected output appears.
 	done := make(chan error, 1)
-	go func() { done <- cmd.Watch(ctx, url, &out) }()
+	go func() { done <- cmd.Watch(ctx, url, out) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	want := "one\ntwo\nthree\n"
