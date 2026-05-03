@@ -10,7 +10,7 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 17:30Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1)
+## 2026-05-03 17:45Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
 
 ### Added
 - `apps/server/internal/http` — new package owning the JSON envelope helpers and the auth HTTP handlers (the package shadows `net/http` deliberately; call sites import it as `httpapi`):
@@ -25,15 +25,11 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - `scripts/smoke.sh` — now runs through `register → login → ws-ticket` against the real HTTP API (curl + python3 JSON parse, no jq dep), then hands the ticket to `chatd watch` / `chatd send`. The phase-0 fan-out assertion stays unchanged. Each smoke invocation is hermetic: `CHAT_DB_PATH` lives in the temp work dir, and `CHAT_JWT_SECRET` + `CHAT_INVITE_CODE` are scoped to the script.
 - Tests covering US-1, US-2, US-11, US-12, SEC-3, SEC-4, SEC-12, SEC-13: register success / wrong invite / bad username / short password / duplicate; login success / wrong password / byte-identical envelope vs unknown-user; `/api/me` for valid + post-logout (US-12); `auth_events` row counts for register/login_success/login_failure/logout (SEC-13); ws-ticket single-use, expiry boundary, concurrent redemption (SEC-12).
 
-### Fixed
-- `tests/cli-send-watch/cli_test.go` — wrap the test buffer in a mutex (`safeBuffer`) so the polling read in the test does not race the `cmd.Watch` goroutine's `Fprintln`. Without this, `go test -race ./...` failed on this preexisting test even with no auth-endpoint changes touched.
-- `apps/server/internal/auth/jwt_test.go` `TestJWTRejectsTamperedSignature` — flip a byte in the *middle* of the signature segment instead of the last char. The trailing char of an unpadded base64url 32-byte HMAC encodes only 4 useful bits; substituting it for another char with the same high-4-bits decoded to the same signature bytes and the assertion legitimately failed (~25% flake rate on `-count=20`).
-
 ### Notes / known gaps
 - PRD §10 names the auth routes under `/api/auth/...`; the feature spec and this PR mount them at `/api/...`. Following the feature spec is intentional — flagged here so the channels/messages feature can revisit the prefix decision.
 - PRD §9 describes an `auth_events` row as `(id, user_id, username, event, source_ip, user_agent, created_at)` but the on-disk migration (parent PR #29) shipped `(id, user_id, kind, ip, ua, at)`. The endpoints log against the migration shape per the explicit instruction in the feature spec; if PRD-shaped columns are wanted, a migration in the parent (sqlite-schema) feature is the right place.
 
-## 2026-05-03 16:45Z — Auth internals: bcrypt + JWT + password policy (phase 1)
+## 2026-05-03 17:30Z — Auth internals: bcrypt + JWT + constant-time login (phase 1) (#33)
 
 ### Added
 - `apps/server/internal/auth` — package holding the password and JWT primitives the auth endpoints will plug into:
@@ -44,15 +40,45 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Tests carry SEC-3 (timing within tolerance, sanity check) and SEC-4 (byte-identical error text) IDs where applicable.
 - `go.mod` picks up `github.com/golang-jwt/jwt/v5` and `golang.org/x/crypto`.
 
-## 2026-05-03 14:21Z — SQLite schema + ULID generation (phase 1)
+## 2026-05-03 17:15Z — Body and WebSocket size/rate caps (phase 1) (#27)
+
+### Added
+- `apps/server/internal/httpx`: `Envelope` / `WriteError` matching the PRD §10 `{ok, data, error}` shape, plus a `BodyCap` middleware that caps every REST request at 16 KiB and writes a 413 `body_too_large` envelope on overflow (PRD §11 SEC-7). `WriteMessageTooLarge` provides the canonical 400 envelope for the REST chat-message path (SEC-8). `BodyCap` is wired into the global mux in `apps/server/main.go` so SEC-7 fires on every REST request.
+- `apps/server/internal/wsapi`: per-connection `SetReadLimit(64 KiB)` so the library closes oversize frames with WebSocket close code `1009` (SEC-6); 4 KiB cap on decoded message bodies (SEC-8 WS path) closes with `1009`; per-connection token bucket (10 msg/s, burst 30) closes flooding clients with `1008` (PRD §9). Body-size check runs before the rate-limit deduction so closed-on-oversize frames don't burn a token.
+- Tests assert the actual close codes observed by the client (`websocket.CloseStatus`), not just that the connection ended.
+
+## 2026-05-03 17:00Z — SQLite schema + ULID generation + migration runner (phase 1) (#29)
 
 ### Added
 - `migrations/0001_init.sql` — baseline schema for `users` (with `token_version` for US-12 server-side JWT revocation), `channels`, `messages`, and `auth_events`. Indexes on `messages(channel_id, created_at)` and `auth_events(user_id, at)` to support paginated history and audit queries.
 - `migrations/embed.go` — `embed.FS` of every `*.sql` migration sibling, exposed as `migrations.FS`. The package lives under `migrations/` so `go:embed` (which cannot escape its own package directory) can reach the files at the canonical PRD §6 location.
-- `apps/server/internal/db` — `Apply`/`ApplyFS` migration runner (records applied filenames in a `schema_migrations` table, idempotent on re-run, transactional per file) and `Open` helper that creates the SQLite file at `0600` (PRD §9) and opens via `modernc.org/sqlite` with WAL + FK-on pragmas.
+- `apps/server/internal/db` — `Apply`/`ApplyFS` migration runner (records applied filenames in a `schema_migrations` table, idempotent on re-run, transactional per file) and `Open` helper that opens via `modernc.org/sqlite` with WAL + FK-on pragmas. Reuses `EnsureFile` from #26 to create the SQLite file at `0600` per PRD §9.
 - `apps/server/internal/ids` — `NewULID()` wrapping `oklog/ulid/v2` with a `LockedMonotonicReader` so concurrent callers stay strictly increasing within the same millisecond.
 - `apps/server/internal/repo` — `repo.Repo` data-access façade with `New(*sql.DB)`. Concrete accessors land in later phase-1 features.
 - `apps/server/main.go` now opens the DB and applies migrations before accepting connections when `CHAT_DB_PATH` is set. Gating on the env var keeps the phase-0 `scripts/smoke.sh` boot path file-free until later phase-1 features (auth, channels, messages) require persistence.
+
+## 2026-05-03 16:45Z — Security headers middleware + SQLite 0600 file perms (phase 1) (#26)
+
+### Added
+- `apps/server/internal/http/headers_middleware.go` (SEC-10) sets `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, and `X-Frame-Options` on every response. The CSP literal is held verbatim from PRD §9 in a single constant; tests assert byte-for-byte equality with the PRD string and that all four headers appear on 200, 404, and 500 paths.
+- `apps/server/internal/db/perms.go` (SEC-14) exposes `EnsureFile` which pre-creates the SQLite database file with mode `0600` and chmods existing files to `0600` (covers cases where the process umask widened a freshly created file). Test asserts `os.Stat` returns `0600`.
+
+## 2026-05-03 16:30Z — Smoke-test follow-ups: deterministic readiness + bounded teardown (#25)
+
+### Added
+- `GET /debug/subs?channel=<name>` on the server returns the current subscriber count for the given channel as plain text. Internal-only (the `/debug/` prefix marks it as not part of the product API and not on the `{ok,data,error}` envelope contract); intended for CI scripts and tests to avoid sleep-based readiness races. Wired under the same mux as `/ws` in `apps/server/main.go`. Unit-tested in `apps/server/internal/wsapi/debug_handler_test.go`.
+
+### Changed
+- `scripts/smoke.sh` now polls `/debug/subs?channel=#general` (5s budget) until both watchers have registered before publishing, instead of `sleep 0.5`. Removes a CI flake on slow runners where the WebSocket dial took longer than the fixed sleep and the publish missed one or both subscribers.
+- `scripts/smoke.sh` `cleanup()` escalates SIGTERM to SIGKILL after a ~5s poll per pid, then `wait`s. Previously a wedged child that ignored SIGTERM (deadlock, blocked syscall, masked signal) would leave `wait` blocked until the workflow-level timeout, masking the failure and burning runner minutes. Pure bash — no `coreutils timeout` dependency.
+
+## 2026-05-03 16:00Z — Access-log middleware + user-safe error envelope (phase 1) (#24)
+
+### Added
+- `apps/server/internal/http` package with the `{ok, data, error}` response envelope (`WriteOK`, `WriteError`) per PRD §10. All three keys are physically present on every response — `ok=true` ships `data` filled and `error: null`; `ok=false` ships `data: null` and `error: {code, message}`.
+- Access-log middleware emits one line per request with method, path, status, latency, and request ID. Sensitive query parameters `token` and `ticket` are redacted via `net/url` parsing (handles repeated keys and percent-encoded values), satisfying SEC-11.
+- Panic recovery middleware logs the panic value and stack server-side with the request ID, returns a generic 500 envelope, and never leaks the panic value to the client.
+- Request-ID middleware mints a 128-bit hex ID per request, plumbs it via `RequestID(ctx)`, and echoes it as the `X-Request-Id` response header for log correlation.
 
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 

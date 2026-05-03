@@ -39,6 +39,11 @@ func init() {
 // calls return strictly increasing IDs (monotonic guarantee); across
 // millisecond boundaries the natural time prefix preserves order. Safe for
 // concurrent use.
+//
+// ULIDs are sortable primary keys, NOT session tokens. The entropy stream is
+// math/rand (seeded once from crypto/rand), which is predictable to anyone
+// who observes a few sequential IDs. Use crypto/rand directly for any
+// auth/session/CSRF token.
 func NewULID() string {
 	id, err := ulid.New(ulid.Timestamp(time.Now()), entropy)
 	if err != nil {

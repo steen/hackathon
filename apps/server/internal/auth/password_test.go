@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHashVerifyRoundTrip(t *testing.T) {
@@ -58,5 +60,20 @@ func TestDummyHashIsValidBcrypt(t *testing.T) {
 	VerifyDummy("anything")
 	if err := Verify(dummyHash, "anything"); !errors.Is(err, ErrInvalidPassword) {
 		t.Fatalf("dummyHash should be a real bcrypt hash that nothing matches; got %v", err)
+	}
+}
+
+func TestDummyHashCostMatchesBcryptCost(t *testing.T) {
+	// SEC-3 timing parity holds only while the dummy comparison and the
+	// real comparison run at the same bcrypt cost. If BcryptCost is ever
+	// raised without regenerating dummyHash, unknown-username responses
+	// stay fast while wrong-password responses get slower — a silent
+	// timing-side-channel regression. Fail CI loudly on that drift.
+	c, err := bcrypt.Cost([]byte(dummyHash))
+	if err != nil {
+		t.Fatalf("bcrypt.Cost(dummyHash): %v", err)
+	}
+	if c != BcryptCost {
+		t.Fatalf("dummyHash cost %d != BcryptCost %d — regenerate dummyHash at the new cost", c, BcryptCost)
 	}
 }

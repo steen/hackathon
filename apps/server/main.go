@@ -14,6 +14,7 @@ import (
 
 	"hackathon/apps/server/internal/auth"
 	appdb "hackathon/apps/server/internal/db"
+	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
 	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/repo"
@@ -65,6 +66,7 @@ func main() {
 	h := hub.New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", wsapi.Handler(h))
+	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
 
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
@@ -95,7 +97,7 @@ func main() {
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           mux,
+		Handler:           httpx.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
