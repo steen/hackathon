@@ -44,7 +44,11 @@ func startServer(t *testing.T) *runningServer {
 	port := freePort(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binPath)
-	cmd.Env = append(os.Environ(), fmt.Sprintf("CHAT_SERVER_PORT=%d", port))
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("CHAT_SERVER_PORT=%d", port),
+		"CHAT_JWT_SECRET=test-secret-32-bytes-min-aaaaaaaa",
+		"CHAT_INVITE_CODE=test-invite",
+	)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 
