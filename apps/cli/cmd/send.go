@@ -12,8 +12,9 @@ func Send(ctx context.Context, url string, args []string) error {
 	if err != nil {
 		return err
 	}
+	defer c.CloseNow() // safety net — no-op once Close runs cleanly below
+
 	if err := c.Write(ctx, websocket.MessageText, []byte(strings.Join(args, " "))); err != nil {
-		c.CloseNow()
 		return err
 	}
 	return c.Close(websocket.StatusNormalClosure, "")

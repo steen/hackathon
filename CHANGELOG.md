@@ -10,6 +10,13 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 13:05Z — CLI send/watch library (no-auth, phase 0) (#14)
+
+### Added
+- `apps/cli/cmd` package implementing `Send` (one-shot text frame to `/ws`) and `Watch` (read loop streaming text frames to an `io.Writer`) against a `coder/websocket` client; both perform a clean `StatusNormalClosure` handshake on parent-context cancellation.
+- `ResolveURL` precedence: explicit flag → `CHAT_SERVER` env var → `ws://localhost:8080/ws`.
+- AC-tagged test gate (`TestAC_0_4_NoAuthSymbolsReferencedFromCLI`) statically verifying no auth-related imports or literals leak into CLI sources during phase 0.
+
 ## 2026-05-03 11:59Z — Single-root Go module (#8)
 
 ### Changed

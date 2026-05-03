@@ -16,7 +16,11 @@ func TestAC_0_4_NoAuthSymbolsReferencedFromCLI(t *testing.T) {
 		t.Fatalf("abs: %v", err)
 	}
 
-	forbiddenLiterals := []string{"authorization", "bearer ", "token"}
+	// Anchor "token" with surrounding context so this gate doesn't false-
+	// positive on benign uses (a `go/token` import for AST work, a comment
+	// about a parser token, etc.). Bare "auth" is still an import-only check
+	// below; the literals are content checks.
+	forbiddenLiterals := []string{"authorization", "bearer ", "auth token", "access token", "bearer token", "x-token"}
 
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
