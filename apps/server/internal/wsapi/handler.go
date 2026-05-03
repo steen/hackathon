@@ -12,6 +12,7 @@ import (
 
 	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/hub"
+	"hackathon/apps/server/internal/ids"
 )
 
 const (
@@ -132,7 +133,21 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 				http.Error(w, "channel parameter too long", http.StatusBadRequest)
 				return
 			}
-			channel = c
+			// Upper-fold non-sentinel channel ids so a lower-cased
+			// URL hits the same channel as the REST surface, which
+			// also folds via ids.NormalizeChannelID (audit #78, info).
+			// The defaultChannel sentinel ("#general") is a literal
+			// and must NOT be folded.
+			if c != defaultChannel {
+				norm, ok := ids.NormalizeChannelID(c)
+				if !ok {
+					http.Error(w, "channel not found", http.StatusNotFound)
+					return
+				}
+				channel = norm
+			} else {
+				channel = c
+			}
 		}
 
 		// Reject upgrades for unknown channels with HTTP 404 BEFORE the

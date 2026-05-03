@@ -265,7 +265,11 @@ func TestHandlerRejectsUnknownChannel(t *testing.T) {
 	srv := httptest.NewServer(Handler(h, nil, cfg))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/ws?channel=missing-channel-id")
+	// Use a structurally-valid (26-char base32) channel id so the
+	// upgrade reaches ChannelLookup; a malformed id is rejected by the
+	// shared normalizer earlier with the same 404, but this test
+	// targets the lookup-driven branch.
+	resp, err := http.Get(srv.URL + "/ws?channel=01HMISSINGMISSINGMISSINGMI")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -346,7 +350,7 @@ func TestHandlerChannelLookupErrorReturns500(t *testing.T) {
 	srv := httptest.NewServer(Handler(h, nil, cfg))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/ws?channel=anything")
+	resp, err := http.Get(srv.URL + "/ws?channel=01HANYTHINGANYTHINGANYTHIN")
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -504,5 +508,78 @@ func TestHandlerBindsUserIDFromTicket(t *testing.T) {
 	}
 	if got := cs.channelForTesting(); got != defaultChannel {
 		t.Fatalf("channel: got %q want %q", got, defaultChannel)
+	}
+}
+
+// Audit #78 (info): the WS handler must upper-fold a non-sentinel
+// ?channel= value through the same normalizer the REST surface uses.
+// A lower-case ULID resolves the same channel as the canonical
+// upper-case form, and is passed to ChannelLookup and the hub in
+// upper-case so subscribers on /api/channels/{id}/messages and /ws
+// land on the same channel string.
+func TestHandlerLowercaseChannelIDFoldsToUpper(t *testing.T) {
+	h := hub.New()
+	const canonical = "01HABCDEFGHJKMNPQRSTVWXYZA"
+	lower := strings.ToLower(canonical)
+
+	var seen []string
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, id string) (bool, error) {
+			seen = append(seen, id)
+			return id == canonical, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?channel=" + lower
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, canonical, 1, 2*time.Second); err != nil {
+		t.Fatalf("subscriber on canonical channel: %v", err)
+	}
+	if got := h.SubscriberCount(lower); got != 0 {
+		t.Fatalf("lower-case channel must have no subscribers, got %d", got)
+	}
+	if len(seen) != 1 || seen[0] != canonical {
+		t.Fatalf("ChannelLookup ids: got %v want [%q]", seen, canonical)
+	}
+}
+
+// Audit #78 (info): a malformed channel id (not 26 chars / outside
+// the 0-9A-Z alphabet) is rejected with HTTP 404 BEFORE ChannelLookup
+// is invoked. The defaultChannel sentinel ("#general") is exempt and
+// is exercised by TestHandlerAcceptsLegacyDefaultChannelWithoutLookup.
+func TestHandlerMalformedChannelIDRejected(t *testing.T) {
+	h := hub.New()
+	called := false
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			called = true
+			return true, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws?channel=not-a-ulid!")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", resp.StatusCode)
+	}
+	if called {
+		t.Fatal("ChannelLookup invoked for malformed id; should be rejected by normalizer first")
 	}
 }
