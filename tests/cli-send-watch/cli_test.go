@@ -15,6 +15,27 @@ import (
 	"hackathon/apps/cli/cmd"
 )
 
+// safeBuffer is a mutex-guarded bytes.Buffer. cmd.Watch writes from a
+// goroutine while the test polls; bare bytes.Buffer is not safe across
+// goroutines and trips -race even when the writes happen-before reads
+// at the test's own polling cadence.
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 // System-level anchors for the AC IDs in
 // specs/plans/phase-0/feature-cli-send-watch.md. Deeper coverage lives in
 // apps/cli/cmd/*_test.go (which records protocol-level details). These tests
@@ -107,7 +128,7 @@ func TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine(t *testing.T) 
 	}
 	url := newFakeWS(t, rec)
 
-	var out bytes.Buffer
+	var out safeBuffer
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 

@@ -36,18 +36,22 @@ func TestJWTRejectsTamperedSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	// Flip one byte in the signature segment (last segment after the
-	// final '.').
+	// Flip a byte in the middle of the signature segment. Flipping the
+	// last char of an unpadded base64url HMAC signature is unreliable
+	// because the trailing char carries only 4 useful bits — substituting
+	// it for another char with the same high-4-bits decodes to the same
+	// signature bytes and Parse legitimately accepts it.
 	idx := strings.LastIndex(tok, ".")
 	if idx < 0 || idx == len(tok)-1 {
 		t.Fatalf("token has no signature segment: %q", tok)
 	}
-	last := tok[len(tok)-1]
+	mid := idx + 1 + (len(tok)-idx-1)/2
+	orig := tok[mid]
 	flipped := byte('A')
-	if last == 'A' {
+	if orig == 'A' {
 		flipped = 'B'
 	}
-	tampered := tok[:len(tok)-1] + string(flipped)
+	tampered := tok[:mid] + string(flipped) + tok[mid+1:]
 	if _, err := Parse(testKey, tampered, 0); !errors.Is(err, ErrJWTInvalid) {
 		t.Fatalf("Parse(tampered) = %v, want ErrJWTInvalid", err)
 	}
