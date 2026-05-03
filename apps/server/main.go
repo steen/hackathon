@@ -13,6 +13,7 @@ import (
 	"time"
 
 	appdb "hackathon/apps/server/internal/db"
+	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
@@ -68,7 +69,7 @@ func main() {
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           mux,
+		Handler:           httpx.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}

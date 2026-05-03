@@ -1,7 +1,7 @@
 # Feature: Body and WS read/send caps
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done
 
 ## Requirements covered
 - (security hardening; protects US-5 message flow and all REST endpoints from oversized payloads / floods)
