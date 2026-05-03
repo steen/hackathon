@@ -101,12 +101,12 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 			if ticket == "" {
 				// Same body + code for missing-vs-invalid so a probing
 				// client cannot distinguish the two arms (SEC-12).
-				httpapi.WriteError(w, httpapi.CodeUnauthorized, "invalid ws ticket", http.StatusUnauthorized)
+				httpapi.WriteError(w, http.StatusUnauthorized, httpapi.CodeUnauthorized, "invalid ws ticket")
 				return
 			}
 			uid, ok := ts.Redeem(ticket)
 			if !ok {
-				httpapi.WriteError(w, httpapi.CodeUnauthorized, "invalid ws ticket", http.StatusUnauthorized)
+				httpapi.WriteError(w, http.StatusUnauthorized, httpapi.CodeUnauthorized, "invalid ws ticket")
 				return
 			}
 			userID = uid

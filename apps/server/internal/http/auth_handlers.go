@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net"
 	stdhttp "net/http"
 	"regexp"
@@ -75,7 +76,8 @@ func (h *AuthHandlers) LookupUserInfo(ctx context.Context, userID string) (*auth
 // envelope with codes the CLI/web client can branch on.
 func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
-		WriteError(w, CodeMethodNotAllow, "method not allowed", stdhttp.StatusMethodNotAllowed)
+		w.Header().Set("Allow", stdhttp.MethodPost)
+		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
 	var req struct {
@@ -84,54 +86,57 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		InviteCode string `json:"invite_code"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		WriteError(w, CodeBadRequest, "invalid JSON body", stdhttp.StatusBadRequest)
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
 	}
 	if h.deps.InviteCode == "" {
-		WriteError(w, CodeForbidden, "registration is disabled", stdhttp.StatusForbidden)
+		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "registration is disabled")
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(h.deps.InviteCode)) != 1 {
-		WriteError(w, CodeForbidden, "invalid invite code", stdhttp.StatusForbidden)
+		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "invalid invite code")
 		return
 	}
 	username := strings.TrimSpace(req.Username)
 	if !usernameRe.MatchString(username) {
-		WriteError(w, CodeBadRequest, "username must be 3-32 chars: letters, digits, dash, underscore", stdhttp.StatusBadRequest)
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+			"username must be 3-32 chars: letters, digits, dash, underscore")
 		return
 	}
 	if err := auth.EnforcePolicy(req.Password); err != nil {
 		switch {
 		case errors.Is(err, auth.ErrPasswordTooShort):
-			WriteError(w, CodeBadRequest, "password must be at least 10 characters", stdhttp.StatusBadRequest)
+			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+				"password must be at least 10 characters")
 		case errors.Is(err, auth.ErrPasswordTooLong):
-			WriteError(w, CodeBadRequest, "password must not exceed 72 bytes", stdhttp.StatusBadRequest)
+			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+				"password must not exceed 72 bytes")
 		default:
-			WriteError(w, CodeBadRequest, "invalid password", stdhttp.StatusBadRequest)
+			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid password")
 		}
 		return
 	}
 	hash, err := auth.Hash(req.Password)
 	if err != nil {
-		WriteError(w, CodeInternal, "could not hash password", stdhttp.StatusInternalServerError)
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not hash password")
 		return
 	}
 	id := ids.NewULID()
 	if err := h.store.CreateUser(r.Context(), id, username, hash, h.deps.Now()); err != nil {
 		if errors.Is(err, ErrUsernameTaken) {
-			WriteError(w, CodeConflict, "username already taken", stdhttp.StatusConflict)
+			WriteError(w, stdhttp.StatusConflict, CodeConflict, "username already taken")
 			return
 		}
-		WriteError(w, CodeInternal, "could not create user", stdhttp.StatusInternalServerError)
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create user")
 		return
 	}
-	_ = h.store.LogAuthEvent(r.Context(), id, AuthEventRegister, clientIP(r), r.UserAgent())
+	h.logEvent(r.Context(), id, AuthEventRegister, clientIP(r), r.UserAgent())
 	tok, err := auth.Issue(h.deps.SigningKey, id, 0, h.deps.Now())
 	if err != nil {
-		WriteError(w, CodeInternal, "could not issue token", stdhttp.StatusInternalServerError)
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not issue token")
 		return
 	}
-	WriteOKStatus(w, stdhttp.StatusCreated, map[string]interface{}{
+	WriteOK(w, stdhttp.StatusCreated, map[string]interface{}{
 		"token": tok,
 		"user": map[string]string{
 			"id":       id,
@@ -151,7 +156,8 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // exactly this case).
 func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
-		WriteError(w, CodeMethodNotAllow, "method not allowed", stdhttp.StatusMethodNotAllowed)
+		w.Header().Set("Allow", stdhttp.MethodPost)
+		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
 	var req struct {
@@ -159,25 +165,28 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		WriteError(w, CodeBadRequest, "invalid JSON body", stdhttp.StatusBadRequest)
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
 	}
-	user, err := auth.AuthenticateLogin(func(username string) (*auth.User, error) {
-		return h.store.LookupForLogin(r.Context(), username)
-	}, req.Username, req.Password)
+	username := strings.TrimSpace(req.Username)
+	user, err := auth.AuthenticateLogin(func(u string) (*auth.User, error) {
+		return h.store.LookupForLogin(r.Context(), u)
+	}, username, req.Password)
 	if err != nil {
-		_ = h.store.LogAuthEvent(r.Context(), "", AuthEventLoginFailure, clientIP(r), r.UserAgent())
-		WriteError(w, CodeUnauthorized, auth.LoginErrorMessage, stdhttp.StatusUnauthorized)
+		h.logEvent(r.Context(), "", AuthEventLoginFailure, clientIP(r), r.UserAgent())
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, auth.LoginErrorMessage)
 		return
 	}
 	tok, err := auth.Issue(h.deps.SigningKey, user.ID, user.TokenVersion, h.deps.Now())
 	if err != nil {
-		WriteError(w, CodeInternal, "could not issue token", stdhttp.StatusInternalServerError)
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not issue token")
 		return
 	}
-	_ = h.store.LogAuthEvent(r.Context(), user.ID, AuthEventLoginSuccess, clientIP(r), r.UserAgent())
-	username, _ := h.lookupUsername(r, user.ID)
-	WriteOK(w, map[string]interface{}{
+	h.logEvent(r.Context(), user.ID, AuthEventLoginSuccess, clientIP(r), r.UserAgent())
+	if u, ok := h.lookupUsername(r, user.ID); ok {
+		username = u
+	}
+	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"token": tok,
 		"user": map[string]string{
 			"id":       user.ID,
@@ -189,12 +198,17 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // Me handles GET /api/me. Must be wrapped in auth.RequireJWT.
 func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
-		WriteError(w, CodeMethodNotAllow, "method not allowed", stdhttp.StatusMethodNotAllowed)
+		w.Header().Set("Allow", stdhttp.MethodGet)
+		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _ := auth.UserIDFromContext(r.Context())
+	uid, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
 	uname, _ := auth.UsernameFromContext(r.Context())
-	WriteOK(w, map[string]interface{}{
+	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"user": map[string]string{
 			"id":       uid,
 			"username": uname,
@@ -207,16 +221,21 @@ func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // for the caller (US-12).
 func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
-		WriteError(w, CodeMethodNotAllow, "method not allowed", stdhttp.StatusMethodNotAllowed)
+		w.Header().Set("Allow", stdhttp.MethodPost)
+		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _ := auth.UserIDFromContext(r.Context())
+	uid, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
 	if _, err := h.store.IncrementTokenVersion(r.Context(), uid); err != nil {
-		WriteError(w, CodeInternal, "could not invalidate token", stdhttp.StatusInternalServerError)
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not invalidate token")
 		return
 	}
-	_ = h.store.LogAuthEvent(r.Context(), uid, AuthEventLogout, clientIP(r), r.UserAgent())
-	WriteOK(w, map[string]interface{}{"ok": true})
+	h.logEvent(r.Context(), uid, AuthEventLogout, clientIP(r), r.UserAgent())
+	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{"ok": true})
 }
 
 // WSTicket handles POST /api/ws-ticket. Must be wrapped in
@@ -224,16 +243,29 @@ func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // caller; redemption happens at the WS upgrade.
 func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
-		WriteError(w, CodeMethodNotAllow, "method not allowed", stdhttp.StatusMethodNotAllowed)
+		w.Header().Set("Allow", stdhttp.MethodPost)
+		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _ := auth.UserIDFromContext(r.Context())
+	uid, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
 	tok, exp := h.deps.Tickets.Issue(uid)
-	_ = h.store.LogAuthEvent(r.Context(), uid, AuthEventTicketIssued, clientIP(r), r.UserAgent())
-	WriteOK(w, map[string]interface{}{
+	h.logEvent(r.Context(), uid, AuthEventTicketIssued, clientIP(r), r.UserAgent())
+	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"ticket":     tok,
 		"expires_at": exp.UTC().Format(time.RFC3339Nano),
 	})
+}
+
+// logEvent writes one auth_events row best-effort but surfaces a write
+// failure to the operator log so SEC-13 audit gaps are observable.
+func (h *AuthHandlers) logEvent(ctx context.Context, userID, kind, ip, ua string) {
+	if err := h.store.LogAuthEvent(ctx, userID, kind, ip, ua); err != nil {
+		log.Printf("auth_events insert failed kind=%s: %v", kind, err)
+	}
 }
 
 func (h *AuthHandlers) lookupUsername(r *stdhttp.Request, id string) (string, bool) {
@@ -246,10 +278,8 @@ func (h *AuthHandlers) lookupUsername(r *stdhttp.Request, id string) (string, bo
 
 // decodeJSON enforces strict decoding: unknown fields are rejected so
 // a typo in the client cannot silently bypass a required field check.
-// MaxBytesReader caps the body at 16 KiB per PRD §9 (the body-and-ws
-// caps feature will hoist this into shared middleware later).
+// The body cap (PRD §9 SEC-7) is applied globally by httpx.BodyCap.
 func decodeJSON(r *stdhttp.Request, dst interface{}) error {
-	r.Body = stdhttp.MaxBytesReader(nil, r.Body, 16*1024)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
@@ -272,5 +302,5 @@ func clientIP(r *stdhttp.Request) string {
 // function — exported as a package-level helper so main.go does not
 // need to import auth and httpapi separately to wire it.
 func WriteUnauthorized(w stdhttp.ResponseWriter, code, message string) {
-	WriteError(w, code, message, stdhttp.StatusUnauthorized)
+	WriteError(w, stdhttp.StatusUnauthorized, code, message)
 }
