@@ -16,3 +16,7 @@ bin/
 .DS_Store
 .idea/
 .vscode/
+
+# Claude Code agent runtime state (skills under .claude/skills/ remain tracked)
+.claude/worktrees/
+.claude/test-agent/
