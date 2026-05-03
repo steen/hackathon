@@ -1,9 +1,12 @@
 package http
 
 import (
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -42,6 +45,28 @@ func (s *statusRecorder) Write(b []byte) (int, error) {
 		s.wrote = true
 	}
 	return s.ResponseWriter.Write(b)
+}
+
+// Hijack forwards to the underlying ResponseWriter's Hijacker so this
+// middleware can wrap a handler that upgrades the connection (e.g. /ws).
+// Without this method, wrapping silently drops the Hijacker interface and
+// websocket.Accept fails.
+func (s *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := s.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	// Once hijacked, status is meaningless; the upgrade has taken over.
+	s.wrote = true
+	return h.Hijack()
+}
+
+// Flush forwards to the underlying ResponseWriter's Flusher so streaming
+// handlers (SSE, etc.) keep working through this middleware.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // AccessLog wraps next and emits one structured-ish log line per request.
