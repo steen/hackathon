@@ -10,12 +10,14 @@ import (
 	"net/http"
 )
 
+// Envelope is the {ok,data,error} response shape from PRD §10.
 type Envelope struct {
 	OK    bool        `json:"ok"`
 	Data  interface{} `json:"data"`
 	Error *ErrorBody  `json:"error"`
 }
 
+// ErrorBody is the user-safe error payload nested in Envelope.Error.
 type ErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

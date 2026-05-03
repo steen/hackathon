@@ -14,7 +14,7 @@ import (
 	"hackathon/apps/server/internal/wsapi"
 )
 
-func dialServer(t *testing.T, ctx context.Context) (*websocket.Conn, *hub.Hub, func()) {
+func dialServer(ctx context.Context, t *testing.T) (*websocket.Conn, *hub.Hub, func()) {
 	t.Helper()
 	h := hub.New()
 	srv := httptest.NewServer(wsapi.Handler(h))
@@ -40,7 +40,7 @@ func TestWSRejectsFrameOver64KiBClose1009(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, cleanup := dialServer(t, ctx)
+	conn, _, cleanup := dialServer(ctx, t)
 	defer cleanup()
 
 	oversize := bytes.Repeat([]byte("x"), int(wsapi.ReadLimitBytes)+1)
@@ -69,7 +69,7 @@ func TestWSRejectsMessageBodyOver4KiB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, cleanup := dialServer(t, ctx)
+	conn, _, cleanup := dialServer(ctx, t)
 	defer cleanup()
 
 	body := bytes.Repeat([]byte("x"), wsapi.MessageBodyLimit+1)
@@ -95,7 +95,7 @@ func TestWSSendRateLimitClosesPolicyViolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, _, cleanup := dialServer(t, ctx)
+	conn, _, cleanup := dialServer(ctx, t)
 	defer cleanup()
 
 	// Burst is 30; flooding well past it within a few ms drains the

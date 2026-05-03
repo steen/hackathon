@@ -9,12 +9,17 @@ import (
 	"github.com/coder/websocket"
 )
 
+// Watch dials url, then writes one line per inbound text frame to out until
+// ctx is cancelled or the connection closes.
 func Watch(ctx context.Context, url string, out io.Writer) error {
-	c, _, err := websocket.Dial(ctx, url, nil)
+	c, resp, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
 		return err
 	}
-	defer c.CloseNow()
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	defer func() { _ = c.CloseNow() }()
 
 	// Initiate the close handshake when the parent context is cancelled.
 	// Using a derived context bound to Watch's lifetime ensures this
@@ -23,7 +28,7 @@ func Watch(ctx context.Context, url string, out io.Writer) error {
 	defer closeCancel()
 	go func() {
 		<-closeCtx.Done()
-		c.Close(websocket.StatusNormalClosure, "")
+		_ = c.Close(websocket.StatusNormalClosure, "")
 	}()
 
 	for {

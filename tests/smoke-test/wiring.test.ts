@@ -26,11 +26,18 @@ describe("smoke-test: wiring + script structure", () => {
     expect(/go build .*\.\/apps\/cli/.test(body), "must build apps/cli (chatd)").toBe(true);
     // Two `chatd watch` processes
     const watchInvocations = body.match(/\bwatch\b/g) ?? [];
-    expect(watchInvocations.length, `expected at least 2 'watch' invocations in script, got ${watchInvocations.length}`).toBeGreaterThanOrEqual(2);
+    expect(
+      watchInvocations.length,
+      `expected at least 2 'watch' invocations in script, got ${String(watchInvocations.length)}`,
+    ).toBeGreaterThanOrEqual(2);
     // One `chatd send`
-    expect(/\bsend\s+"\$MSG"/.test(body) || /\bsend\b/.test(body), "must invoke chatd send").toBe(true);
+    expect(/\bsend\s+"\$MSG"/.test(body) || /\bsend\b/.test(body), "must invoke chatd send").toBe(
+      true,
+    );
     // Watcher-output assertion: greps the watcher output files for the message
-    expect(/grep -F.*\$MSG/.test(body), "must grep watcher output files for the sent message").toBe(true);
+    expect(/grep -F.*\$MSG/.test(body), "must grep watcher output files for the sent message").toBe(
+      true,
+    );
   });
 
   it("TestAC1_smoke_test_uses_debug_subs_for_deterministic_subscriber_readiness", () => {
@@ -47,9 +54,15 @@ describe("smoke-test: wiring + script structure", () => {
 
   it("TestAC2_smoke_test_script_uses_strict_mode_and_explicit_failure_output", () => {
     const body = smokeBody();
-    expect(/^set -euo pipefail$/m.test(body), "must use 'set -euo pipefail' for non-zero on first error").toBe(true);
+    expect(
+      /^set -euo pipefail$/m.test(body),
+      "must use 'set -euo pipefail' for non-zero on first error",
+    ).toBe(true);
     // The failure path must produce a clear stderr message — not just `exit 1`.
-    expect(/FAIL[^\n]*>&2/.test(body) || /echo[^\n]*FAIL[^\n]*>&2/.test(body), "must print a FAIL line to stderr on failure").toBe(true);
+    expect(
+      /FAIL[^\n]*>&2/.test(body) || /echo[^\n]*FAIL[^\n]*>&2/.test(body),
+      "must print a FAIL line to stderr on failure",
+    ).toBe(true);
   });
 
   it("TestAC3_smoke_test_script_traps_exit_and_kills_spawned_pids", () => {
@@ -58,7 +71,9 @@ describe("smoke-test: wiring + script structure", () => {
     expect(/trap\s+\w+\s+EXIT/.test(body), "must trap EXIT").toBe(true);
     expect(/trap\s+\w+\s+[A-Z ]*INT/.test(body), "must trap INT (so Ctrl-C cleans up)").toBe(true);
     // The cleanup function must kill the recorded PIDs.
-    expect(/SERVER_PID|WATCH1_PID|WATCH2_PID/.test(body), "must record PIDs to clean up").toBe(true);
+    expect(/SERVER_PID|WATCH1_PID|WATCH2_PID/.test(body), "must record PIDs to clean up").toBe(
+      true,
+    );
     expect(/\bkill\b/.test(body), "cleanup must invoke kill on the recorded PIDs").toBe(true);
   });
 
@@ -76,7 +91,7 @@ describe("smoke-test: wiring + script structure", () => {
 
   it("TestAC4_smoke_test_script_is_wired_into_root_package_json_test_script", () => {
     expect(existsSync(smokePath), "scripts/smoke.sh must exist").toBe(true);
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
     const testBody: string = pkg.scripts?.test ?? "";
     const directlyInvokes = /smoke\.sh\b/.test(testBody);
     const fansOut = /pnpm\s+(?:-r|--recursive)\b/.test(testBody);
@@ -89,6 +104,9 @@ describe("smoke-test: wiring + script structure", () => {
   it("TestAC5_smoke_test_script_is_executable_and_present", () => {
     expect(existsSync(smokePath), "scripts/smoke.sh must exist").toBe(true);
     const mode = statSync(smokePath).mode & 0o111;
-    expect(mode, "scripts/smoke.sh must have at least one execute bit set so 'bash scripts/smoke.sh' (or direct ./scripts/smoke.sh) works in CI").not.toBe(0);
+    expect(
+      mode,
+      "scripts/smoke.sh must have at least one execute bit set so 'bash scripts/smoke.sh' (or direct ./scripts/smoke.sh) works in CI",
+    ).not.toBe(0);
   });
 });
