@@ -50,7 +50,7 @@ Capture each open PR's file footprint (= conflict surface for this tick). Each a
 rtk gh issue list --state open --label epic --json number,title --limit 20
 ```
 
-Take the lowest-numbered open epic (or `phase-override`). Read its body.
+Take the lowest-numbered open epic (or `phase-override`). Read its body — specifically the `## Sub-issues` section, which lists sub-issues in **priority order** (the durable repo convention). The order in that list is what step 5 dispatches against, NOT numerical issue order.
 
 ### 4. Filter sub-issues for eligibility
 
@@ -66,7 +66,11 @@ If empty, **idle** — emit `references/idle-banner.md` and skip to step 12.
 
 ### 5. Plan the batch
 
-Lowest-numbered eligible sub-issue first; add more whose footprints are disjoint from the first AND from each other AND from every open PR. Cap at 3 subagents per tick.
+**Priority order from the epic's `## Sub-issues` list, not numerical order.** Take the first eligible item from the list as the primary; add more eligible items in list order whose footprints are disjoint from the primary AND from each other AND from every open PR. Cap at 3 subagents per tick.
+
+If the epic's body lacks a `## Sub-issues` section (older epics may), fall back to numerical order.
+
+If a sub-issue is explicitly flagged as gating ("must run first", "blocks the rest", or similar in the body / epic deliverables), dispatch it ALONE — don't add parallel work that the audit/gate may invalidate.
 
 For each, derive: `branch_name` (`feat/<slug>` or `fix/<slug>`), `closes_or_refs` (`Closes` or `Refs` for umbrella), `footprint` (explicit narrow paths), `spec_path` (from issue body, if any).
 
