@@ -45,18 +45,29 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
+| phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 4/5 | 1 | 0 | 0 |
+| phase-1 | [auth-internals](phase-1/auth-internals.md) | implemented | 4/5 | 1 | 0 | 0 |
+| phase-1 | [security-headers-and-sqlite-ensure-wiring](phase-1/security-headers-and-sqlite-ensure-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
+| phase-1 | [startup-config-checks](phase-1/startup-config-checks.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [auth-endpoints](phase-1/auth-endpoints.md) | implemented | 7/7 | 0 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
-**Phase-1 totals (so far):** 2 features analyzed of 11 spec'd · 11 ACs · 10 covered · 1 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` remains partial (access-log line missing IP).
+**Phase-1 totals (so far):** 7 features analyzed of 12 spec'd · 34 ACs · 27 covered · 3 partial · 0 missing · 4 deferred.
 
-`feature-auth-endpoints` (PR #38) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` was updated to drive register → login → ws-ticket → watch and exits 0 against the live binary.
+`feature-auth-endpoints` (PR #38) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary. `apps/server/main.go` now wires `cfg.JWTSecret` (validated by `feature-startup-config-checks`) into `httpapi.NewAuthHandlers.SigningKey` — this closes the `feature-auth-internals` AC-5 partial flag, which the next test-watch tick should re-promote.
 
-**Cross-feature observation worth surfacing:** `apps/server/main.go` now wires `cfg.JWTSecret` (validated by `feature-startup-config-checks`) into `httpapi.NewAuthHandlers.SigningKey`. This closes the `feature-auth-internals` AC-5 partial flag from PR #47 — the next test-watch tick should re-promote it.
+Notable phase-1 gaps:
+- `auth-internals` AC-5 partial: now satisfied at HEAD (cfg-validated secret threaded into auth.Issue/Parse via the auth-handlers wiring); awaiting next tick re-eval.
+- `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field (production-code fix; PR #32 findings flag it).
+- `sqlite-schema-and-ulid` AC-4 partial: schema permits ULIDs and `ids.NewULID()` is solid, but no shipped INSERT code path used it at the analyzed SHA — closed once `feature-channels-and-messages` (#42) lands.
+- `security-headers-and-sqlite-ensure-wiring`: spec landed as `planned` to track gaps the agent flagged earlier; impl not started.
 
-**Phase-1 sibling test-agent PRs in flight (not yet on main):** PR #37 (file-perms-and-headers — likely superseded by wiring spec), PR #40 (sqlite-schema-and-ulid 4/5), PR #43 (body-and-ws-caps 4/4), PR #47 (auth-internals 4/5 + security-headers wiring stub), PR #48 (startup-config-checks 5/5). Findings docs land in the index as their PRs merge.
+`feature-body-and-ws-caps` (PR #27) ships clean: WS read limit (64 KiB → close 1009), body cap (4 KiB), per-conn token bucket (close 1008), and REST 16 KiB cap (413). All four ACs covered by package-level tests with explicit library-constant guards.
+
+**Phase-1 sibling PRs in flight (not yet on main):** PR #37 tracks `file-perms-and-headers` (1/3, SecurityHeaders not wired — superseded by the new wiring spec).
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->

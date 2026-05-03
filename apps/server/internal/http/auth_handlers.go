@@ -15,16 +15,17 @@ import (
 
 	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/ids"
+	"hackathon/apps/server/internal/ratelimit"
 )
 
 // auth_events kinds — kept here as constants so test code can assert
 // against the same strings the handlers write.
 const (
-	AuthEventRegister      = "register"
-	AuthEventLoginSuccess  = "login_success"
-	AuthEventLoginFailure  = "login_failure"
-	AuthEventLogout        = "logout"
-	AuthEventTicketIssued  = "ws_ticket_issued"
+	AuthEventRegister     = "register"
+	AuthEventLoginSuccess = "login_success"
+	AuthEventLoginFailure = "login_failure"
+	AuthEventLogout       = "logout"
+	AuthEventTicketIssued = "ws_ticket_issued"
 )
 
 // usernameRe is the validation regex for new usernames. PRD §9 does
@@ -41,6 +42,10 @@ type AuthDeps struct {
 	SigningKey []byte
 	InviteCode string
 	Now        func() time.Time
+	// UserLimiter, when non-nil, gates /api/login on the per-username
+	// failure backoff (PRD §9). When nil, the per-username gate is
+	// skipped — useful for tests that exercise other code paths.
+	UserLimiter *ratelimit.UserLimiter
 }
 
 // AuthHandlers is the bag of http.HandlerFuncs the auth feature
@@ -59,6 +64,10 @@ func NewAuthHandlers(deps AuthDeps) *AuthHandlers {
 	}
 	return &AuthHandlers{deps: deps, store: newAuthStore(deps.DB)}
 }
+
+// AuditSink returns the audit-log sink the rate-limit middleware can
+// pass to IPRateLimit so rejected attempts land in auth_events.
+func (h *AuthHandlers) AuditSink() RateLimitAuditSink { return h.store }
 
 // LookupUserInfo is the auth.UserInfoLookup the JWT middleware needs.
 // Exposed so main.go can pass it into auth.RequireJWT without
@@ -169,13 +178,26 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	username := strings.TrimSpace(req.Username)
+	if h.deps.UserLimiter != nil {
+		if ok, retry := h.deps.UserLimiter.Allow(username); !ok {
+			h.store.LogRateLimited(r, "", clientIP(r))
+			writeRateLimited(w, retry)
+			return
+		}
+	}
 	user, err := auth.AuthenticateLogin(func(u string) (*auth.User, error) {
 		return h.store.LookupForLogin(r.Context(), u)
 	}, username, req.Password)
 	if err != nil {
+		if h.deps.UserLimiter != nil {
+			h.deps.UserLimiter.RegisterFailure(username)
+		}
 		h.logEvent(r.Context(), "", AuthEventLoginFailure, clientIP(r), r.UserAgent())
 		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, auth.LoginErrorMessage)
 		return
+	}
+	if h.deps.UserLimiter != nil {
+		h.deps.UserLimiter.Reset(username)
 	}
 	tok, err := auth.Issue(h.deps.SigningKey, user.ID, user.TokenVersion, h.deps.Now())
 	if err != nil {
