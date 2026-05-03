@@ -52,11 +52,14 @@ func (c *Client) Watch(ctx context.Context, opts WatchOptions) (<-chan Event, er
 	if err != nil {
 		return nil, fmt.Errorf("build ws url: %w", err)
 	}
-	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+	conn, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		HTTPClient: c.http,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ws dial: %w", err)
+	}
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
 	// Match wsapi.ReadLimitBytes — frames larger than this would have
 	// been truncated server-side anyway, so accepting them here would
