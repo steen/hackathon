@@ -40,8 +40,9 @@ export function useMessages(channelId: string | null): UseMessages {
 
     // openCount distinguishes the initial WS open (which already has
     // a fresh history fetch) from later reopens (which must catch up
-    // anything posted while the socket was down). Held in a ref so
-    // the listener closure sees mutations without re-binding.
+    // anything posted while the socket was down). Plain closure
+    // variable — the listener captures it for the lifetime of this
+    // effect, and the effect re-runs on channelId change.
     let openCount = 0;
 
     const mergeFetched = (fetched: Message[]): void => {
@@ -49,7 +50,10 @@ export function useMessages(channelId: string | null): UseMessages {
       setMessages((prev) => {
         if (fetched.length === 0) return prev;
         const seen = new Set(prev.map((p) => p.id));
-        const fresh = fetched.filter((m) => !seen.has(m.id));
+        // Server returns newest-first (ORDER BY id DESC). Reverse so
+        // multi-message catchups append in chronological order, matching
+        // the live-WS append path.
+        const fresh = fetched.filter((m) => !seen.has(m.id)).reverse();
         if (fresh.length === 0) return prev;
         return [...prev, ...fresh];
       });

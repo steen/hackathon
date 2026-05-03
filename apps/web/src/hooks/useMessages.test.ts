@@ -182,6 +182,59 @@ describe("useMessages", () => {
     expect(listMessagesMock).toHaveBeenLastCalledWith("C1", { limit: 50 });
   });
 
+  it("multi-message catchup lands in chronological order, not server (newest-first) order", async () => {
+    // Initial history.
+    listMessagesMock.mockResolvedValueOnce([msg("M1", "before-outage")]);
+    // Catchup mimics server: newest-first window. Hook must reverse the
+    // fresh additions so they read chronologically when appended.
+    listMessagesMock.mockResolvedValueOnce([
+      msg("M5", "during-outage-5"),
+      msg("M4", "during-outage-4"),
+      msg("M3", "during-outage-3"),
+      msg("M2", "during-outage-2"),
+      msg("M1", "before-outage"),
+    ]);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.connection).toBe("open");
+    });
+
+    await act(async () => {
+      FakeSocket.instances[0]?.forceClose();
+      await Promise.resolve();
+    });
+    await waitFor(
+      () => {
+        expect(FakeSocket.instances).toHaveLength(2);
+      },
+      { timeout: 2000 },
+    );
+    await act(async () => {
+      FakeSocket.instances[1]?.open();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(listMessagesMock).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual([
+        "M1",
+        "M2",
+        "M3",
+        "M4",
+        "M5",
+      ]);
+    });
+  });
+
   it("a failed catchup leaves the existing list intact", async () => {
     listMessagesMock.mockResolvedValueOnce([msg("M1", "hello")]);
     listMessagesMock.mockRejectedValueOnce(new Error("network down"));
