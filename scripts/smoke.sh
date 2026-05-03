@@ -104,10 +104,24 @@ WATCH1_PID=$!
 "$CHATD_BIN" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
 WATCH2_PID=$!
 
-# Phase-0 simplification: a brief sleep to let the WebSocket dials complete
-# and the hub register both subscribers before we publish. The hub does not
-# expose a subscriber-count endpoint yet.
-sleep 0.5
+# Wait for both watchers to register with the hub. Polling /debug/subs avoids
+# the race where a slow CI runner's WebSocket dial takes longer than a fixed
+# sleep and the publish below misses one or both subscribers. The %23 is a
+# URL-encoded '#' so curl doesn't truncate the query at a fragment.
+SUBS_URL="http://127.0.0.1:${PORT}/debug/subs?channel=%23general"
+subs_ready=0
+for _ in $(seq 1 50); do
+  count=$(curl -fsS "$SUBS_URL" 2>/dev/null || echo "")
+  if [[ "$count" == "2" ]]; then
+    subs_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ $subs_ready -ne 1 ]]; then
+  echo "[smoke] both watchers did not subscribe within 5s (last count: ${count:-<none>})" >&2
+  exit 1
+fi
 
 MSG="smoke-$$-$(date +%s%N)"
 echo "[smoke] sending message: ${MSG}"

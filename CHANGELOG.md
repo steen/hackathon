@@ -10,6 +10,15 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 16:30Z — Smoke-test follow-ups: deterministic readiness + bounded teardown
+
+### Added
+- `GET /debug/subs?channel=<name>` on the server returns the current subscriber count for the given channel as plain text. Internal-only (the `/debug/` prefix marks it as not part of the product API and not on the `{ok,data,error}` envelope contract); intended for CI scripts and tests to avoid sleep-based readiness races. Wired under the same mux as `/ws` in `apps/server/main.go`. Unit-tested in `apps/server/internal/wsapi/debug_handler_test.go`.
+
+### Changed
+- `scripts/smoke.sh` now polls `/debug/subs?channel=#general` (5s budget) until both watchers have registered before publishing, instead of `sleep 0.5`. Removes a CI flake on slow runners where the WebSocket dial took longer than the fixed sleep and the publish missed one or both subscribers.
+- `scripts/smoke.sh` `cleanup()` escalates SIGTERM to SIGKILL after a ~5s poll per pid, then `wait`s. Previously a wedged child that ignored SIGTERM (deadlock, blocked syscall, masked signal) would leave `wait` blocked until the workflow-level timeout, masking the failure and burning runner minutes. Pure bash — no `coreutils timeout` dependency.
+
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 
 ### Added
