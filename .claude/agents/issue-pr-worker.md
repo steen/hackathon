@@ -127,7 +127,14 @@ How:
    ## Out of scope
    <fence so the next worker doesn't widen>
    ```
-3. Replace the matching `SKIPPED` line in your report with `SKIPPED → filed as #<n>: <reason>`.
+3. **Attach as a native GitHub sub-issue** (so the parent epic's UI shows it, not just the textual reference):
+   ```bash
+   NEW=$(rtk gh issue create ... --json number --jq .number)        # capture number from create
+   NEW_ID=$(rtk gh api repos/steen/Hackathon/issues/$NEW --jq .id)  # numeric ID, not number
+   rtk gh api -X POST repos/steen/Hackathon/issues/<epic>/sub_issues -F sub_issue_id=$NEW_ID
+   ```
+   The `-F` (capital F) is required — the API rejects string IDs. Verify the link with `rtk gh api repos/steen/Hackathon/issues/<epic>/sub_issues --jq '.[].number'`.
+4. Replace the matching `SKIPPED` line in your report with `SKIPPED → filed as #<n>: <reason>`.
 
 When in doubt, file. A redundant issue is cheap; a lost defect rots.
 
