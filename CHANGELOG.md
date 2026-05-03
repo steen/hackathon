@@ -26,6 +26,16 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - PRD §10 sketches a richer WS protocol (`{type:subscribe|unsubscribe|send,channel_id}`); this PR ships only the query-param subscription form. `POST /api/channels/{id}/messages` is the canonical producer for new messages (persists + emits a `{"type":"message","data":<Message>}` JSON envelope). Inbound WS text frames are still rebroadcast verbatim per the phase-0 AC-3 contract — so subscribers may see two on-the-wire shapes today. A future feature will converge them by parsing WS frames through the same envelope and dropping the raw rebroadcast.
 - Per the previous changelog entry, auth endpoints live at `/api/...` rather than `/api/auth/...`; the new channels/messages endpoints follow the same convention. PRD §10 names them under `/api/channels` (no `/auth/` prefix), so this PR matches the PRD for its own surface.
 
+## 2026-05-03 18:00Z — Rate limits: per-IP login/register, per-username login backoff (phase 1) (#41)
+
+### Added
+- `apps/server/internal/ratelimit/iplimit.go` — token-bucket limiter keyed by IP, fronted by a bounded LRU so an attacker rotating source IPs cannot grow memory (PRD §14 risk). `LoginIPConfig` (burst 10 / 5 min) and `RegisterIPConfig` (burst 5 / 15 min) match PRD §9. `LoginIPConfig` is the source of truth for SEC-5 (the 11th login attempt within 5 min from one IP returns 429).
+- `apps/server/internal/ratelimit/userlimit.go` — per-username login-failure tracker with linear backoff (configurable Step + GraceFailures), capped at MaxDelay so a forgotten password cannot lock an account out (PRD §9: "without enabling lockout-DoS"). Username keys are case-folded so case-only variation cannot bypass the gate. Records age out after `ResetAfter`.
+- `apps/server/internal/http/middleware_ratelimit.go` — `IPRateLimit` middleware that consumes one token per request, writes the user-safe envelope on 429 (new `CodeRateLimited` error code), sets `Retry-After`, and writes one `auth_events` row (kind `rate_limited`) so rejections are observable per the spec AC.
+- `apps/server/internal/http/auth_handlers.go` — `Login` consults the per-username gate before authenticating, increments on failure, clears it on success. `AuthDeps` grows an optional `UserLimiter` so tests can opt in/out.
+- `apps/server/main.go` — wires both IP limiters and the username limiter onto `/api/login` (5-minute Retry-After) and `/api/register` (15-minute Retry-After).
+- Tests: `TestIPRateLimitBlocksEleventhLoginAttemptWithin5min` (SEC-5, name and assertion both pin the exact threshold), per-IP register burst limit, refill-over-time, LRU eviction, concurrent access, per-username backoff growth, MaxDelay cap, Reset on success, ResetAfter expiry, case-insensitivity, and the `auth_events` rate-limit audit row.
+
 ## 2026-05-03 17:50Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
 
 ### Added
