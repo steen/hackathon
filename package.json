@@ -5,6 +5,6 @@
     "dev": "pnpm -r --if-present run dev",
     "build": "pnpm -r --if-present run build",
     "smoke": "bash scripts/smoke.sh",
-    "test": "pnpm -r --if-present run test && bash scripts/smoke.sh"
+    "test": "bash scripts/smoke.sh && pnpm -r --if-present run test"
   }
 }
