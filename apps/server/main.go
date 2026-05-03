@@ -85,7 +85,9 @@ func run() error {
 	h := hub.New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
-	wsCfg := wsapi.Config{OriginPatterns: parseAllowedOrigins(os.Getenv(allowedOriginsEnv))}
+	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
+	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
+	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
 	var tickets *auth.TicketStore
 
 	if repository != nil {

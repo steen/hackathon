@@ -10,18 +10,51 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 17:50Z — Channels and messages endpoints (REST + WS) (phase 1) (#42)
+## 2026-05-03 16:18Z — Post-phase-1 cleanup: strict linters + envelope/limits consolidation (#51)
+
+### Added
+- `.golangci.yml`, `.prettierrc.json`, `.prettierignore`, `eslint.config.js` — strict lint configs (gosec, gocritic, revive, gofmt for Go; ESLint strict-type-checked + Prettier for TS) — and a new `lint` job in `.github/workflows/ci.yml` that gates every PR on them.
+- `apps/server/internal/http/limits.go` (+ `_test.go`) — the body-cap middleware and `RESTBodyLimit`/`MessageBodyLimit` constants previously living in the duplicate `internal/httpx` package.
+
+### Changed
+- `internal/httpx` deleted; its surface (`BodyCap`, `WriteMessageTooLarge`, `MessageBodyLimit`, `RESTBodyLimit`) is now part of `internal/http` so every handler imports one envelope helper package, not two with subtly different signatures. Production callers (`Recover`, `apps/server/main.go`) updated to the consolidated API.
+- `WriteJSON` is now a public helper alongside `WriteOK`/`WriteError` so callers that need a custom envelope shape don't have to assemble it from scratch.
+
+### Notes / known gaps
+- The `userID` from a successful WS ticket redemption is still `_ = userID` in `wsapi/handler.go`. Binding it onto per-conn metadata is a hub-level change (feature, not cleanup) and stays a follow-up.
+
+## 2026-05-03 14:57Z — WS hardening: origin check + ws-ticket redemption (phase 1) (#39)
+
+### Added
+- `apps/server/internal/wsapi/handler.go` — `Handler` signature changed to `Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config)`. When `ts` is non-nil, every `/ws` upgrade must present a `?ticket=<hex>` query parameter that `TicketStore.Redeem` accepts; failures return HTTP 401 with the PRD §10 `{ok, data, error}` envelope *before* the WebSocket handshake (RFC 6455 close codes only exist post-upgrade). Same-origin enforcement is delegated to `coder/websocket.Accept`, which compares `Host` to `Origin` by default; `CHAT_ALLOWED_ORIGINS` (comma-separated) is forwarded as `OriginPatterns` for reverse-proxy deploys (PRD §9). Mismatched origins yield HTTP 403.
+- `apps/server/internal/wsapi/handler_test.go` — coverage for SEC-12 (`TestHandlerTicketSingleUse`: first redeem succeeds, second redeem rejects with 401), missing-ticket and invalid-ticket rejection (both 401, identical envelope so probing cannot distinguish), and the cross-origin/same-origin pair (`TestHandlerRejectsCrossOriginUpgrade` forges an `Origin: https://evil.example` against the httptest server's host and asserts 403; the same-origin counterpart guards against accidental over-restriction).
+- `apps/server/main.go` — wires the ticket store and origin patterns into `wsapi.Handler` after the auth-endpoints block runs (so `tickets` is populated when `CHAT_DB_PATH` is set). Adds `parseAllowedOrigins` to split `CHAT_ALLOWED_ORIGINS` and drop empty entries (a stray trailing comma must not become a wildcard); the parsed count is logged at startup so a `CHAT_ALLOWED_ORIGIN`-singular typo surfaces as `parsed 0 origin pattern(s)` instead of silently falling back to same-origin-only.
+- `apps/server/main_test.go` — table test for `parseAllowedOrigins` covering empty input, single + multi-entry, leading/trailing commas, whitespace trimming, and the all-commas edge case.
+
+### Changed
+- `scripts/smoke.sh` — mints a fresh ws-ticket per WS dial (each watcher and the sender) instead of reusing one ticket three times. SEC-12 makes tickets single-use; the prior wiring would fail on the second redeem now that the upgrader enforces it.
+
+### Notes / known gaps
+- Channel-validation (`{type:"error", code:"CHANNEL_NOT_FOUND"}` per the spec) requires the typed inbound WS frame contract from `feature-channels-and-messages.md`, which has not merged yet. The hook is `readLoop` in `apps/server/internal/wsapi/handler.go` — when that feature introduces channel IDs on the wire, the lookup-and-error-frame goes there. Coordination point flagged in the feature spec rather than silently dropped.
+- `userID` from a successful redeem is not yet bound onto per-connection state (the hub does not carry per-conn metadata in phase-0). A `TODO(channels-and-messages)` at the redemption site marks the seam for the next feature.
+
+## 2026-05-03 18:30Z — Channels and messages endpoints (REST + WS) (phase 1) (#42)
 
 ### Added
 - `apps/server/internal/repo/channels.go` — `Channel` row type plus `ListChannels`, `GetChannel`, `CreateChannel`. `CreateChannel` maps SQLite's UNIQUE-constraint error on `channels.name` to a typed `ErrChannelNameTaken` so handlers can return a 409 without inspecting driver-specific error text.
 - `apps/server/internal/repo/messages.go` — `Message` row type plus `InsertMessage` and `ListMessages`. Pagination uses the message ULID as a cursor (ULIDs are lex-sortable, so `id < ?` paired with `ORDER BY id DESC` returns the next-older page without a separate `created_at` index round-trip). `MaxMessagesLimit = 200`, `DefaultMessagesLimit = 50`; the repo caps absurd `limit` values rather than letting them through.
 - `apps/server/internal/http/channels_handlers.go` — `GET /api/channels` (list) and `POST /api/channels` (create). Channel name validation is `^[a-z0-9][a-z0-9-]{0,39}$` — lowercase only avoids the Slack-style "is `#General` the same as `#general`?" foot-gun. The handler uses Go 1.22+ ServeMux pattern matching (`{id}`); a tight `channelIDFromPath` validator rejects any non-26-char or non-Crockford-base32 path segment before it reaches the DB.
 - `apps/server/internal/http/messages_handlers.go` — `GET /api/channels/{id}/messages?before=&limit=` (paginated history, newest-first) and `POST /api/channels/{id}/messages` (persist + broadcast). The POST path inserts the row first, then broadcasts the persisted record so a client can never see a WS message that a subsequent history fetch would not return. Body cap is 4 KiB (PRD §9); empty/whitespace bodies return 400.
-- `apps/server/internal/wsapi/handler.go` — `/ws` now honors a `?channel=<id>` query parameter and subscribes the upgraded connection to that hub channel. Default stays `#general` so the phase-0 smoke flow keeps round-tripping.
+- `apps/server/internal/wsapi/handler.go` — `/ws` now honors a `?channel=<id>` query parameter and subscribes the upgraded connection to that hub channel. Default stays `#general` so the phase-0 smoke flow keeps round-tripping. The PRD's `{type:subscribe,...}` frame protocol is intentionally not implemented yet — query-param subscription is the minimum the channels feature needs and a frame protocol can layer on top without breaking the wire.
 - `apps/server/main.go` wires `ChannelsHandlers` + `MessagesHandlers` against the existing repository and hub when `CHAT_DB_PATH` is set, behind the same `auth.RequireJWT` middleware as the rest of the `/api/*` surface.
+- New error code `not_found` in `errors.go`, used by the messages handlers when a channel id does not resolve.
 - Tests carrying US-3, US-4, US-5, US-6 IDs across `apps/server/internal/repo/*_test.go` and `apps/server/internal/http/*_test.go`. End-to-end coverage in `ws_broadcast_test.go` stands up a real `httptest.Server` with `/api/*` and `/ws` on the same hub and asserts a POSTed message arrives at a connected WS subscriber as a `{"type":"message","data":<Message>}` frame.
 
-## 2026-05-03 17:45Z — Rate limits: per-IP login/register, per-username login backoff (phase 1) (#41)
+### Notes / known gaps
+- PRD §10 sketches a richer WS protocol (`{type:subscribe|unsubscribe|send,channel_id}`); this PR ships only the query-param subscription form. `POST /api/channels/{id}/messages` is the canonical producer for new messages (persists + emits a `{"type":"message","data":<Message>}` JSON envelope). Inbound WS text frames are still rebroadcast verbatim per the phase-0 AC-3 contract — so subscribers may see two on-the-wire shapes today. A future feature will converge them by parsing WS frames through the same envelope and dropping the raw rebroadcast.
+- Per the previous changelog entry, auth endpoints live at `/api/...` rather than `/api/auth/...`; the new channels/messages endpoints follow the same convention. PRD §10 names them under `/api/channels` (no `/auth/` prefix), so this PR matches the PRD for its own surface.
+
+## 2026-05-03 18:00Z — Rate limits: per-IP login/register, per-username login backoff (phase 1) (#41)
 
 ### Added
 - `apps/server/internal/ratelimit/iplimit.go` — token-bucket limiter keyed by IP, fronted by a bounded LRU so an attacker rotating source IPs cannot grow memory (PRD §14 risk). `LoginIPConfig` (burst 10 / 5 min) and `RegisterIPConfig` (burst 5 / 15 min) match PRD §9. `LoginIPConfig` is the source of truth for SEC-5 (the 11th login attempt within 5 min from one IP returns 429).
@@ -31,42 +64,31 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - `apps/server/main.go` — wires both IP limiters and the username limiter onto `/api/login` (5-minute Retry-After) and `/api/register` (15-minute Retry-After).
 - Tests: `TestIPRateLimitBlocksEleventhLoginAttemptWithin5min` (SEC-5, name and assertion both pin the exact threshold), per-IP register burst limit, refill-over-time, LRU eviction, concurrent access, per-username backoff growth, MaxDelay cap, Reset on success, ResetAfter expiry, case-insensitivity, and the `auth_events` rate-limit audit row.
 
-## 2026-05-03 17:40Z — WS hardening: origin check + ws-ticket redemption (phase 1) (#39)
+## 2026-05-03 17:50Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
 
 ### Added
-- `apps/server/internal/wsapi/handler.go` — `Handler` signature changed to `Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config)`. When `ts` is non-nil, every `/ws` upgrade must present a `?ticket=<hex>` query parameter that `TicketStore.Redeem` accepts; failures return HTTP 401 *before* the WebSocket handshake (RFC 6455 close codes only exist post-upgrade). Same-origin enforcement is delegated to `coder/websocket.Accept`, which compares `Host` to `Origin` by default; `CHAT_ALLOWED_ORIGINS` (comma-separated) is forwarded as `OriginPatterns` for reverse-proxy deploys (PRD §9). Mismatched origins yield HTTP 403.
-- `apps/server/internal/wsapi/handler_test.go` — coverage for SEC-12 (`TestHandlerTicketSingleUse`: first redeem succeeds, second redeem rejects with 401), missing-ticket and invalid-ticket rejection (both 401, identical envelope so probing cannot distinguish), and the cross-origin/same-origin pair (`TestHandlerRejectsCrossOriginUpgrade` forges an `Origin: https://evil.example` against the httptest server's host and asserts 403; the same-origin counterpart guards against accidental over-restriction).
-- `apps/server/main.go` — wires the ticket store and origin patterns into `wsapi.Handler` after the auth-endpoints block runs (so `tickets` is populated when `CHAT_DB_PATH` is set). Adds `parseAllowedOrigins` to split `CHAT_ALLOWED_ORIGINS` and drop empty entries (a stray trailing comma must not become a wildcard).
-
-### Changed
-- `scripts/smoke.sh` — mints a fresh ws-ticket per WS dial (each watcher and the sender) instead of reusing one ticket three times. SEC-12 makes tickets single-use; the prior wiring would fail on the second redeem the moment the server started enforcing it.
-
-### Notes / known gaps
-- Channel-validation (`{type:"error", code:"CHANNEL_NOT_FOUND"}` per the spec) requires the typed inbound WS frame contract from `feature-channels-and-messages.md`, which has not merged yet. The hook is `readLoop` in `apps/server/internal/wsapi/handler.go` — when that feature introduces channel IDs on the wire, the lookup-and-error-frame goes there. Coordination point flagged in the feature spec rather than silently dropped.
-- `userID` from a successful redeem is not yet bound onto per-connection state (the hub does not carry per-conn metadata in phase-0). The same `readLoop` site will adopt it alongside the channel scoping.
-
-## 2026-05-03 17:35Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
-
-### Added
-- `apps/server/internal/http` — new package owning the JSON envelope helpers and the auth HTTP handlers (the package shadows `net/http` deliberately; call sites import it as `httpapi`):
-  - `envelope.go`: `WriteOK` / `WriteError` and the PRD §10 `{ok, data, error}` envelope shape with a small enum of stable `error.code` values (`bad_request`, `unauthorized`, `forbidden`, `conflict`, `internal`, …).
-  - `auth_handlers.go`: `POST /api/register` (invite-code gated, applies `auth.EnforcePolicy`, hashes via bcrypt, mints a JWT at `tv=0`), `POST /api/login` (delegates to `auth.AuthenticateLogin` so SEC-3/SEC-4 stay in one place), `GET /api/me`, `POST /api/logout` (bumps `users.token_version` to invalidate every previously-issued JWT — US-12), `POST /api/ws-ticket` (issues a 30s, single-use ticket bound to the caller — SEC-12). Every endpoint writes a row to `auth_events` (SEC-13).
+- `apps/server/internal/http` — auth HTTP handlers and a small `Code*` enum on top of the existing envelope helpers:
+  - `auth_handlers.go`: `POST /api/register` (invite-code gated, applies `auth.EnforcePolicy`, hashes via bcrypt, mints a JWT at `tv=0`), `POST /api/login` (delegates to `auth.AuthenticateLogin` so SEC-3/SEC-4 stay in one place), `GET /api/me`, `POST /api/logout` (bumps `users.token_version` to invalidate every previously-issued JWT — US-12), `POST /api/ws-ticket` (issues a 30s, single-use ticket bound to the caller — SEC-12). Every endpoint writes a row to `auth_events` (SEC-13); insert failures are surfaced via `log.Printf` so audit gaps are operator-visible.
   - `auth_store.go`: SQL helpers for `users` and `auth_events` written in this package (parameterized statements only, per PRD §6) since `internal/repo` is frozen by its parent PR.
-  - Strict JSON decoding (`DisallowUnknownFields`) and a 16 KiB body cap via `http.MaxBytesReader` so a typo-bearing or oversized client request fails loud at the boundary instead of silently bypassing a required field.
+  - Strict JSON decoding (`DisallowUnknownFields`) on every endpoint; the global 16 KiB body cap is provided by `httpx.BodyCap` from PR #27.
+  - 405 responses now include the `Allow` header per RFC 9110.
 - `apps/server/internal/auth/tickets.go` — in-memory `TicketStore` (`Issue` / `Redeem`) keyed on a 32-byte hex token; `Redeem` deletes before returning so a second call cannot succeed even under contention (SEC-12 race rider). 30s TTL; clock injectable for tests. Tests cover single-use semantics, expiry boundary, unknown-ticket, and 50-goroutine contention with exactly-one-winner.
 - `apps/server/internal/auth/middleware.go` — `RequireJWT` extracts a `Bearer` token, performs a two-phase parse (subject extraction → DB lookup → re-parse against the row's current `token_version`) so a deleted-user token cannot be distinguished from a bad signature via status code, then decorates the request context with `user_id` + `username`. Companion `jwt_subject.go` carries the unverified-subject helper rather than touching the parent PR's `jwt.go`.
-- `apps/server/main.go` — when `CHAT_DB_PATH` is set, wires the auth handlers + `RequireJWT` middleware onto the mux. `CHAT_JWT_SECRET` is required on this path (full secret-strength validation lands with the startup-checks feature).
+- `apps/server/main.go` — when `CHAT_DB_PATH` is set, wires the auth handlers + `RequireJWT` middleware onto the mux. JWT secret strength is enforced by `config.Validate` (#28) at startup.
 - `apps/cli/main.go` + `apps/cli/cmd/url.go` — chatd accepts `--ws-ticket TICKET` and appends it as `?ticket=…` on the WebSocket URL. Forwarding only; the WS upgrader does not yet redeem the ticket (that's the ws-hardening feature). Wiring is in place so the smoke script can already pass tickets end-to-end.
-- `scripts/smoke.sh` — now runs through `register → login → ws-ticket` against the real HTTP API (curl + python3 JSON parse, no jq dep), then hands the ticket to `chatd watch` / `chatd send`. The phase-0 fan-out assertion stays unchanged. Each smoke invocation is hermetic: `CHAT_DB_PATH` lives in the temp work dir, and `CHAT_JWT_SECRET` + `CHAT_INVITE_CODE` are scoped to the script.
+- `scripts/smoke.sh` — now runs through `register → login → ws-ticket` against the real HTTP API (curl + python3 JSON parse, no jq dep), then hands the ticket to `chatd watch` / `chatd send`. The phase-0 fan-out assertion stays unchanged. Each smoke invocation is hermetic: `CHAT_DB_PATH` lives in the temp work dir, and per-run `CHAT_JWT_SECRET` + `CHAT_INVITE_CODE` are generated via `openssl rand -hex` so no fake-secret literal lives in git.
 - Tests covering US-1, US-2, US-11, US-12, SEC-3, SEC-4, SEC-12, SEC-13: register success / wrong invite / bad username / short password / duplicate; login success / wrong password / byte-identical envelope vs unknown-user; `/api/me` for valid + post-logout (US-12); `auth_events` row counts for register/login_success/login_failure/logout (SEC-13); ws-ticket single-use, expiry boundary, concurrent redemption (SEC-12).
-
-### Fixed
-- `tests/cli-send-watch/cli_test.go` — wrap the test buffer in a mutex (`safeBuffer`) so the polling read in the test does not race the `cmd.Watch` goroutine's `Fprintln`. Without this, `go test -race ./...` failed on this preexisting test even with no auth-endpoint changes touched.
-- `apps/server/internal/auth/jwt_test.go` `TestJWTRejectsTamperedSignature` — flip a byte in the *middle* of the signature segment instead of the last char. The trailing char of an unpadded base64url 32-byte HMAC encodes only 4 useful bits; substituting it for another char with the same high-4-bits decoded to the same signature bytes and the assertion legitimately failed (~25% flake rate on `-count=20`).
 
 ### Notes / known gaps
 - PRD §10 names the auth routes under `/api/auth/...`; the feature spec and this PR mount them at `/api/...`. Following the feature spec is intentional — flagged here so the channels/messages feature can revisit the prefix decision.
 - PRD §9 describes an `auth_events` row as `(id, user_id, username, event, source_ip, user_agent, created_at)` but the on-disk migration (parent PR #29) shipped `(id, user_id, kind, ip, ua, at)`. The endpoints log against the migration shape per the explicit instruction in the feature spec; if PRD-shaped columns are wanted, a migration in the parent (sqlite-schema) feature is the right place.
+
+## 2026-05-03 17:45Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
+
+### Added
+- `apps/server/internal/config` package: loads `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOW_PUBLIC_BIND` from env and runs `Validate()` once at startup. Refuses to boot when the JWT secret is missing, shorter than 32 bytes, non-ASCII, a single repeated character, low-entropy (fewer than 5 distinct bytes), or matches a dev-default denylist (`change-me`, `secret`, `dev`, `password`, `hackathon`, etc., padded variants included). Refuses to bind a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1`. Refuses to start without an invite code while registration is enabled.
+- `apps/server/main.go` calls `config.Validate()` before any HTTP setup; failures print a non-secret error to stderr and exit 1, success logs each check that passed by name. The validated `cfg.ListenAddr` is now what the server actually binds (with optional `CHAT_SERVER_PORT` overriding only the port) so the SEC-2 loopback enforcement has runtime effect, not just log effect.
+- Tests in `apps/server/internal/config/config_test.go` covering SEC-1 (missing/short/denylisted/repeated/low-entropy/non-ASCII secret), SEC-2 (loopback default, public-bind override, malformed addr), and US-11 startup invite-code enforcement. A leakage test asserts no error message echoes the secret value.
 
 ## 2026-05-03 17:30Z — Auth internals: bcrypt + JWT + constant-time login (phase 1) (#33)
 
@@ -78,12 +100,6 @@ This changelog is intentionally **high-level**: meaningful product, architectura
   - `constants.go`: policy thresholds, JWT TTL/issuer, and the precomputed dummy bcrypt hash. The hash was generated once with `bcrypt.GenerateFromPassword([]byte("never-matches"), bcrypt.DefaultCost)` and pasted as a const so package init does no work.
 - Tests carry SEC-3 (timing within tolerance, sanity check) and SEC-4 (byte-identical error text) IDs where applicable.
 - `go.mod` picks up `github.com/golang-jwt/jwt/v5` and `golang.org/x/crypto`.
-## 2026-05-03 17:30Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
-
-### Added
-- `apps/server/internal/config` package: loads `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOW_PUBLIC_BIND` from env and runs `Validate()` once at startup. Refuses to boot when the JWT secret is missing, shorter than 32 bytes, non-ASCII, a single repeated character, low-entropy (fewer than 5 distinct bytes), or matches a dev-default denylist (`change-me`, `secret`, `dev`, `password`, `hackathon`, etc., padded variants included). Refuses to bind a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1`. Refuses to start without an invite code while registration is enabled.
-- `apps/server/main.go` calls `config.Validate()` before any HTTP setup; failures print a non-secret error to stderr and exit 1, success logs each check that passed by name. The validated `cfg.ListenAddr` is now what the server actually binds (with optional `CHAT_SERVER_PORT` overriding only the port) so the SEC-2 loopback enforcement has runtime effect, not just log effect.
-- Tests in `apps/server/internal/config/config_test.go` covering SEC-1 (missing/short/denylisted/repeated/low-entropy/non-ASCII secret), SEC-2 (loopback default, public-bind override, malformed addr), and US-11 startup invite-code enforcement. A leakage test asserts no error message echoes the secret value.
 
 ## 2026-05-03 17:15Z — Body and WebSocket size/rate caps (phase 1) (#27)
 

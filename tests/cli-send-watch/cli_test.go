@@ -15,27 +15,6 @@ import (
 	"hackathon/apps/cli/cmd"
 )
 
-// safeBuffer is a mutex-guarded bytes.Buffer. cmd.Watch writes from a
-// goroutine while the test polls; bare bytes.Buffer is not safe across
-// goroutines and trips -race even when the writes happen-before reads
-// at the test's own polling cadence.
-type safeBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (s *safeBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.Write(p)
-}
-
-func (s *safeBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.buf.String()
-}
-
 // System-level anchors for the AC IDs in
 // specs/plans/phase-0/feature-cli-send-watch.md. Deeper coverage lives in
 // apps/cli/cmd/*_test.go (which records protocol-level details). These tests
@@ -122,13 +101,34 @@ func TestAC1_CliSendWatch_SendWritesPayloadAsTextFrameAndExitsZero(t *testing.T)
 	}
 }
 
+// syncBuf is a goroutine-safe wrapper around bytes.Buffer. cmd.Watch writes
+// from its read goroutine while the test polls String() — bare bytes.Buffer
+// is not safe for concurrent use, so unprotected sharing trips the race
+// detector even when the visible behavior is correct.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
 func TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine(t *testing.T) {
 	rec := &recordingHandler{
 		emit: [][]byte{[]byte("one"), []byte("two"), []byte("three")},
 	}
 	url := newFakeWS(t, rec)
 
-	out := &safeBuffer{}
+	var out syncBuf
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -136,7 +136,7 @@ func TestAC2_CliSendWatch_WatchPrintsEveryReceivedFrameOnePerLine(t *testing.T) 
 	// won't do on its own) or when ctx is cancelled. Run it in a goroutine
 	// and cancel after the expected output appears.
 	done := make(chan error, 1)
-	go func() { done <- cmd.Watch(ctx, url, out) }()
+	go func() { done <- cmd.Watch(ctx, url, &out) }()
 
 	deadline := time.Now().Add(2 * time.Second)
 	want := "one\ntwo\nthree\n"

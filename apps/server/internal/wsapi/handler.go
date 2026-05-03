@@ -83,8 +83,9 @@ func (c *connSubscriber) close() {
 // When ts is non-nil, the handler enforces SEC-12: every upgrade must
 // present a ?ticket=<hex> query parameter that TicketStore.Redeem
 // accepts. The redemption happens before the WebSocket handshake so a
-// rejection is a plain HTTP 401 (RFC 6455 only defines close codes
-// after a successful upgrade — pre-upgrade failures cannot use 1008).
+// rejection is a 401 with the PRD §10 envelope (RFC 6455 only defines
+// close codes after a successful upgrade — pre-upgrade failures cannot
+// use 1008).
 //
 // When ts is nil, ticket enforcement is skipped. This branch exists
 // for the phase-0 smoke wiring and for tests that exercise the hub
@@ -94,11 +95,11 @@ func (c *connSubscriber) close() {
 // which compares Host to Origin by default and additionally honors
 // any patterns in cfg.OriginPatterns. A mismatch yields HTTP 403.
 //
-// The connection subscribes to defaultChannel by default; passing
-// ?channel=<id> overrides it. The query-param subscription is the
-// minimum the channels-and-messages feature needs; the PRD's typed
-// {type:subscribe,...} frame protocol can layer on top later without
-// breaking this contract.
+// Each connection subscribes to one channel for its lifetime:
+// defaultChannel by default, or the value of the ?channel= query
+// parameter when present (channels-and-messages feature). The PRD's
+// typed {type:subscribe,...} frame protocol can layer on top later
+// without breaking this contract.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
@@ -108,12 +109,14 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		if ts != nil {
 			ticket := r.URL.Query().Get("ticket")
 			if ticket == "" {
-				http.Error(w, "missing ws ticket", http.StatusUnauthorized)
+				// Same body + code for missing-vs-invalid so a probing
+				// client cannot distinguish the two arms (SEC-12).
+				http.Error(w, "invalid ws ticket", http.StatusUnauthorized)
 				return
 			}
 			uid, ok := ts.Redeem(ticket)
 			if !ok {
-				http.Error(w, "invalid or expired ws ticket", http.StatusUnauthorized)
+				http.Error(w, "invalid ws ticket", http.StatusUnauthorized)
 				return
 			}
 			userID = uid
@@ -121,6 +124,14 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 
 		channel := defaultChannel
 		if c := r.URL.Query().Get("channel"); c != "" {
+			// Cap the channel-key length — a 1 MB query string would
+			// otherwise sit in the subscriber map for the lifetime of
+			// the connection. 64 chars covers a 26-char ULID plus
+			// padding for `#general`-style legacy names.
+			if len(c) > 64 {
+				http.Error(w, "channel parameter too long", http.StatusBadRequest)
+				return
+			}
 			channel = c
 		}
 
@@ -131,7 +142,11 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(ReadLimitBytes)
 
-		_ = userID // userID will land on the per-connection state once channels-and-messages merges; SEC requires the redemption itself, which has already happened.
+		// TODO(channels-and-messages): bind userID onto a per-connection
+		// state struct so messages.user_id writes can attribute the
+		// sender. The redemption above already satisfies SEC-12; this
+		// TODO is the seam for the next feature, not a security gap.
+		_ = userID
 
 		sub := newConnSubscriber()
 		h.Subscribe(channel, sub)
@@ -165,6 +180,14 @@ func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel str
 			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
 			return
 		}
+		// Phase-0 AC-3 contract: inbound WS frames are rebroadcast to
+		// every subscriber of the same channel. Phase-1 added a parallel
+		// REST producer (`POST /api/channels/{id}/messages`) which emits
+		// a `{"type":"message","data":<Message>}` envelope; the two
+		// shapes coexist on the wire today. A future feature will
+		// converge them by parsing inbound frames through the same
+		// envelope, but removing this raw rebroadcast now would regress
+		// the phase-0 AC.
 		h.Broadcast(channel, data)
 	}
 }
