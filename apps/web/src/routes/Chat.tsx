@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
+import { usePresence } from "../hooks/usePresence.js";
 import { getClient } from "../api.js";
 
 function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
@@ -28,6 +29,7 @@ export function Chat(): React.JSX.Element {
   const channelsState = useChannels(true);
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
   const messagesState = useMessages(activeChannel);
+  const presenceState = usePresence(true);
   const [draft, setDraft] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -93,11 +95,14 @@ export function Chat(): React.JSX.Element {
             </li>
           ))}
         </ul>
-        {/* TODO(#69): online-users list driven by GET /api/presence + presence WS events.
-            api-client surfaces PresenceEvent today; the GET endpoint is not yet wrapped
-            in api-client and the server route lands with #69. Leaving this empty rather
-            than fabricating a stub. */}
-        <div className="presence" aria-label="online users (pending #69)" />
+        <h2>Online</h2>
+        <ul className="presence" aria-label="online users" data-testid="presence-list">
+          {presenceState.users.map((u) => (
+            <li key={u.id} data-testid={`presence-user-${u.id}`}>
+              {u.username.length > 0 ? u.username : u.id}
+            </li>
+          ))}
+        </ul>
       </aside>
       <main className="messages">
         <header className="messages__header">
