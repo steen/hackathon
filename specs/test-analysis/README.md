@@ -36,19 +36,19 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T13:35:37Z
-**Analyzed commit:** `c3e7e99`
+**Last updated:** 2026-05-03T14:06:50Z
+**Analyzed commit:** `4902b5f`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
 | phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
-| phase-0 | [smoke-test](phase-0/smoke-test.md) | stub | 0/5 | 1 | 0 | 4 |
+| phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 14 covered · 1 partial · 0 missing · 4 deferred.
+**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
 
-The deferred ACs all belong to `smoke-test`, which gates on `scripts/smoke.sh` being written (the script's runtime behavior IS the test). All Phase-0 *implementation* ACs are now covered.
+Phase-0 is now fully covered. PR #18 closed the last gaps by adding `apps/cli/main.go` (the `chatd` binary) and `scripts/smoke.sh` (the system smoke test wired into `package.json` `test`).
 
 **Phases 1–3:** specs exist (`specs/plans/phase-{1,2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once Phase-1 implementation commits start landing on `main`.
 <!-- AGENT-INDEX-END -->
