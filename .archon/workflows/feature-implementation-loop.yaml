@@ -243,6 +243,24 @@ nodes:
       fi
 
       BRANCH="feat/$SLUG"
+
+      # Commit any outstanding implementation work. The TDD/E2E loops edit files
+      # but don't commit; without this the branch would be empty and gh pr create
+      # would fail with "No commits between main and feat/<slug>".
+      git add -A
+      if git diff --cached --quiet; then
+        echo "no staged changes to commit"
+      else
+        git commit -m "feat($SLUG): $FEATURE_NAME"
+      fi
+
+      # Refuse to push an empty branch.
+      AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+      if [ "$AHEAD" -eq 0 ]; then
+        echo "ERROR: branch $BRANCH has no commits ahead of origin/main — nothing to PR" >&2
+        exit 1
+      fi
+
       git push -u origin "$BRANCH"
 
       BODY_FILE="$(mktemp)"
