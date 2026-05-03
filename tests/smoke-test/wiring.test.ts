@@ -47,8 +47,8 @@ describe("smoke-test: wiring + script structure", () => {
     // reaches 2 (5s budget). Catches a regression where someone reverts to a
     // sleep-based wait.
     const body = smokeBody();
-    expect(/\/debug\/subs/.test(body), "must poll /debug/subs to wait for subscribers").toBe(true);
-    expect(/channel=%23general/.test(body), "must poll /debug/subs with URL-encoded #general").toBe(true);
+    expect(body.includes("/debug/subs"), "must poll /debug/subs to wait for subscribers").toBe(true);
+    expect(body.includes("channel=%23general"), "must poll /debug/subs with URL-encoded #general").toBe(true);
     expect(/EXPECTED_SUBS=\s*2\b/.test(body), "must wait for exactly 2 subscribers (one per watcher)").toBe(true);
   });
 
