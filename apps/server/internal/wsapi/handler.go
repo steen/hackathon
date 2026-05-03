@@ -16,6 +16,21 @@ import (
 const (
 	defaultChannel = "#general"
 	sendBuffer     = 64
+
+	// ReadLimitBytes caps a single inbound WS frame (PRD §9, SEC-6).
+	// Hitting this causes the library to close with StatusMessageTooBig (1009).
+	ReadLimitBytes int64 = 64 * 1024
+
+	// SendRateBurst / SendRatePerSec implement the per-connection send
+	// rate limit from PRD §9: 10 msg/s, burst 30. Excess inbound frames
+	// drop the connection with StatusPolicyViolation (1008).
+	SendRateBurst  = 30
+	SendRatePerSec = 10.0
+
+	// MessageBodyLimit caps the decoded chat-message body (PRD §9, SEC-8).
+	// Mirrors httpx.MessageBodyLimit; the WS path enforces it independently
+	// so wsapi has no HTTP-side dependency.
+	MessageBodyLimit = 4 * 1024
 )
 
 // connSubscriber bridges hub.Subscriber to a websocket.Conn via a buffered
@@ -63,6 +78,7 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 			return
 		}
 		defer conn.CloseNow()
+		conn.SetReadLimit(ReadLimitBytes)
 
 		sub := newConnSubscriber()
 		h.Subscribe(defaultChannel, sub)
@@ -73,11 +89,11 @@ func Handler(h *hub.Hub) http.HandlerFunc {
 		defer cancel()
 
 		go writeLoop(ctx, conn, sub)
-		readLoop(ctx, conn, h, defaultChannel)
+		readLoop(ctx, conn, h, defaultChannel, newTokenBucket(SendRateBurst, SendRatePerSec))
 	}
 }
 
-func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel string) {
+func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel string, bucket *tokenBucket) {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
@@ -86,6 +102,14 @@ func readLoop(ctx context.Context, conn *websocket.Conn, h *hub.Hub, channel str
 				return
 			}
 			log.Printf("ws read: %v", err)
+			return
+		}
+		if len(data) > MessageBodyLimit {
+			_ = conn.Close(websocket.StatusMessageTooBig, "message body exceeds 4 KiB limit")
+			return
+		}
+		if !bucket.allow() {
+			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
 			return
 		}
 		h.Broadcast(channel, data)
