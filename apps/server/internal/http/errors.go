@@ -21,17 +21,29 @@ type ErrorBody struct {
 	Message string `json:"message"`
 }
 
-// WriteOK serializes data inside a success envelope. data may be nil — the
-// envelope still ships data: null, ok: true, error: null so clients can rely
-// on all three keys being present.
-func WriteOK(w http.ResponseWriter, data interface{}) {
-	writeJSON(w, http.StatusOK, Envelope{OK: true, Data: data, Error: nil})
+// Error codes used across the auth surface. Kept as a small enum so
+// clients can branch on code rather than parse Message.
+const (
+	CodeBadRequest      = "bad_request"
+	CodeUnauthorized    = "unauthorized"
+	CodeForbidden       = "forbidden"
+	CodeConflict        = "conflict"
+	CodeInternal        = "internal"
+	CodeMethodNotAllow  = "method_not_allowed"
+	CodeUnsupportedType = "unsupported_media_type"
+)
+
+// WriteOK serializes data inside a success envelope at the given status.
+// data may be nil — the envelope still ships data: null, ok: true,
+// error: null so clients can rely on all three keys being present.
+func WriteOK(w http.ResponseWriter, status int, data interface{}) {
+	writeJSON(w, status, Envelope{OK: true, Data: data, Error: nil})
 }
 
 // WriteError serializes a user-safe error envelope. message must be safe to
 // surface to a remote client — no SQL text, stack frames, or file paths. The
 // caller is responsible for logging the underlying detail server-side.
-func WriteError(w http.ResponseWriter, code, message string, status int) {
+func WriteError(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, Envelope{
 		OK:    false,
 		Data:  nil,

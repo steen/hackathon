@@ -36,20 +36,22 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:42:24Z
-**Analyzed commit:** `7e3010d`
+**Last updated:** 2026-05-03T14:56:48Z
+**Analyzed commit:** `f765726`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
 | phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
-| phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
+| phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 4/5 | 1 | 0 | 0 |
 | phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | partial | 1/3 | 2 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
-**Phase-1 totals (so far):** 2 features analyzed of 10 spec'd · 7 ACs · 4 covered · 3 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial (access-log line omits IP). AC-2 and AC-3 of `file-perms-and-headers` are partial: the `SecurityHeaders` middleware ships and is unit-tested, but `apps/server/main.go` does not wrap its mux with it, so live responses still don't carry the headers.
+**Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred. PR #25 added a 6th AC to `server-ws-hub` (the new `/debug/subs` endpoint), fully covered by `apps/server/internal/wsapi/debug_handler_test.go`.
+
+**Phase-1 totals (so far):** 3 features analyzed of 10 spec'd · 12 ACs · 8 covered · 4 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (production gap, not a test gap). AC-4 of `sqlite-schema-and-ulid` is partial because the schema permits ULIDs (TEXT PRIMARY KEY) and `ids.NewULID()` exists with strong tests, but no shipped INSERT code path uses it yet — `repo.Repo` is a constructor-only stub; firms up once `feature-channels-and-messages` lands. AC-2 and AC-3 of `file-perms-and-headers` are partial: the `SecurityHeaders` middleware ships and is unit-tested, but `apps/server/main.go` does not wrap its mux with it, so live responses still don't carry the headers.
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->

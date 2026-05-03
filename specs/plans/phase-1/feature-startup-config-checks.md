@@ -1,7 +1,7 @@
 # Feature: Startup config checks (JWT secret, bind, invite)
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done (PR pending)
 
 ## Requirements covered
 - (security hardening that must land in Phase 1; supports the safety implied by US-11 invite gating and overall hosting posture)
