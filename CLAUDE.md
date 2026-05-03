@@ -30,5 +30,8 @@ Say so with a reason. Don't fold under social pressure — change your mind only
 ## Comments
 Default to none. Add one only when the *why* is non-obvious. Never narrate the change.
 
+## No hardcoded secrets
+Never commit secrets — JWT signing keys, invite codes, API tokens, passwords, private keys, session cookies, OAuth client secrets, DB credentials. Read them from env vars or a secret store at runtime. Test fixtures must use obviously-fake placeholders (e.g. `test-secret-32-bytes-min-aaaaaaaa`), never values that could be mistaken for real ones. If you spot a hardcoded secret in existing code while working, surface it and fix it — do not leave it.
+
 ## Go module layout
 Single root `go.mod` with module name `hackathon`. There is no `go.work` and no per-app `go.mod`. Imports use the form `hackathon/<path>` (e.g. `hackathon/apps/server/internal/hub`). Do NOT introduce per-app modules or hardcode any GitHub coordinate (`github.com/...`) — the module name is intentionally unrelated to the repo's hosting URL so it survives org renames.

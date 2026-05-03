@@ -45,10 +45,11 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
 | phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | partial | 1/3 | 2 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred. (PRs #25, #32, #35 are open and rework totals once merged; this index reflects current `main`.)
-**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 3 ACs · 1 covered · 2 partial · 0 missing · 0 deferred. The 2 partials are AC-2 and AC-3 of `file-perms-and-headers`: the `SecurityHeaders` middleware ships and is unit-tested, but `apps/server/main.go` doesn't wrap its mux with it, so live responses still don't carry the headers. PR #32 separately tracks `logging-and-error-envelope` (3/4, AC-1 partial).
+**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
+**Phase-1 totals (so far):** 2 features analyzed of 10 spec'd · 7 ACs · 4 covered · 3 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial (access-log line omits IP). AC-2 and AC-3 of `file-perms-and-headers` are partial: the `SecurityHeaders` middleware ships and is unit-tested, but `apps/server/main.go` does not wrap its mux with it, so live responses still don't carry the headers.
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
