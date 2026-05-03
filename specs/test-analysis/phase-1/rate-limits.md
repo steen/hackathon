@@ -14,7 +14,7 @@ deferred: 0
 # Test analysis: Rate limits (per-IP login/register, per-username login backoff)
 
 **Spec:** `specs/plans/phase-1/feature-rate-limits.md`
-**Implementation status:** implemented — `apps/server/internal/ratelimit/{iplimit,userlimit}.go` ship a token-bucket limiter (LRU-bounded) and a per-username failure tracker; `apps/server/internal/http/middleware_ratelimit.go` wraps `/api/login` and `/api/register` via `IPRateLimit` middleware; the login handler consults the user limiter before authenticating, increments on failure, resets on success. main.go wires both limiters with the configs `LoginIPConfig` (10/5min) and `RegisterIPConfig` (5/15min) and `LoginUserConfig` (2 free attempts → 500ms steps capped at 2s). 18 tests across the three test files, all passing.
+**Implementation status:** implemented — `apps/server/internal/ratelimit/{iplimit,userlimit}.go` ship a token-bucket limiter (LRU-bounded) and a per-username failure tracker; `apps/server/internal/http/middleware_ratelimit.go` wraps `/api/login` and `/api/register` via `IPRateLimit` middleware; the login handler consults the user limiter before authenticating, increments on failure, resets on success. main.go wires both limiters with the configs `LoginIPConfig` (10/5min) and `RegisterIPConfig` (5/15min) and `LoginUserConfig` (2 free attempts → 500ms steps capped at 2s). 17 tests across the three test files (6 + 6 + 5), all passing.
 
 ## Acceptance criteria
 
