@@ -7,7 +7,8 @@
     "build": "pnpm -r --if-present run build",
     "smoke": "bash scripts/smoke.sh",
     "test": "bash scripts/smoke.sh && pnpm -r --if-present run test",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
+    "check:workspace-exports": "node scripts/check-workspace-exports.mjs",
     "format:check": "prettier --check ."
   },
   "devDependencies": {

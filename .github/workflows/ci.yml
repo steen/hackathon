@@ -77,6 +77,17 @@ jobs:
       - name: Install JS deps
         run: pnpm install --frozen-lockfile
 
+      # Invariant: in-repo TS packages must lint-resolve from source.
+      # CI runs install -> lint without any build step, so any
+      # packages/*/package.json that points main/types/exports at ./dist/
+      # would let consumers' lint pass falsely (or fail with unsafe-any
+      # after the fact, as in PR #84). This check fails the lint job
+      # before ESLint runs, naming the offending package.
+      - name: Check workspace exports resolve from source
+        run: pnpm run check:workspace-exports
+
+      # `pnpm run lint` is `eslint . --max-warnings 0`. Any error- or
+      # warning-level violation fails the job.
       - name: ESLint
         run: pnpm run lint
 

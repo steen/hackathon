@@ -45,5 +45,15 @@ For any work split across multiple parallel agents:
 
 Ditto for cleanup: drift fixes go in their own PR (or the dedicated cleanup PR), not snuck into a feature.
 
+## TS workspace conventions
+In-repo TypeScript packages under `packages/*` must be lint- and typecheck-resolvable **from source**, with no prior `pnpm build` required. CI runs `pnpm install --frozen-lockfile` then `pnpm run lint` directly — any `packages/*/package.json` whose `main`/`types`/`exports` point at `./dist/...` produces `any`-typed imports in consumers and either fails the type-aware lint pass or passes it falsely (this is what bit PR #84).
+
+Rules:
+
+- New `packages/*/package.json` files set `main`, `types`, and every `exports` entry to `./src/index.ts` (or another `./src/*.ts` file). Do not point at `./dist/`.
+- If a package genuinely needs a built artifact for an external consumer, gate that behavior behind a separate `publishConfig` block — never the default fields.
+- `scripts/check-workspace-exports.mjs` enforces this; it runs in the CI lint job before ESLint and fails on any `./dist/`-pointing entry. Run `pnpm run check:workspace-exports` locally before pushing a new package.
+- `pnpm run lint` uses `eslint . --max-warnings 0` so warnings fail CI alongside errors. Don't downgrade rules to silence a single file — fix the file.
+
 ## Go module layout
 Single root `go.mod` with module name `hackathon`. There is no `go.work` and no per-app `go.mod`. Imports use the form `hackathon/<path>` (e.g. `hackathon/apps/server/internal/hub`). Do NOT introduce per-app modules or hardcode any GitHub coordinate (`github.com/...`) — the module name is intentionally unrelated to the repo's hosting URL so it survives org renames.
