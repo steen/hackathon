@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:27:13Z
-**Analyzed commit:** `8013612`
+**Last updated:** 2026-05-03T15:24:52Z
+**Analyzed commit:** `440d18f`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -46,11 +46,18 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
+| phase-1 | [auth-internals](phase-1/auth-internals.md) | implemented | 4/5 | 1 | 0 | 0 |
+| phase-1 | [security-headers-and-sqlite-ensure-wiring](phase-1/security-headers-and-sqlite-ensure-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
 
 **Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
-**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 4 ACs · 3 covered · 1 partial · 0 missing · 0 deferred.
+**Phase-1 totals (so far):** 3 features analyzed of 11 spec'd · 13 ACs · 7 covered · 2 partial · 0 missing · 4 deferred.
 
-Phase-1 implementation is starting (PR #24 shipped `feature-logging-and-error-envelope`). The other 9 phase-1 features still have specs but no implementation; the agent will write per-feature findings docs as each lands. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (the spec lists it explicitly) — see the per-feature findings for details.
+Notable phase-1 gaps:
+- `auth-internals` AC-5 partial: signing-key-from-config wiring belongs to `feature-startup-config-checks` (not yet implemented).
+- `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field (production-code fix; PR #32 findings flag it).
+- `security-headers-and-sqlite-ensure-wiring`: spec landed as `planned` to track gaps the agent flagged earlier; impl not started.
 
-**Phases 2–3:** specs exist; the agent will pick them up once their implementation commits start landing on `main`.
+**Phase-1 sibling test-agent PRs in flight (not yet on main):** PR #37 tracks `file-perms-and-headers` (1/3, 2 partial — superseded by the new wiring spec); PR #40 tracks `sqlite-schema-and-ulid` (4/5, AC-4 partial); PR #43 tracks `body-and-ws-caps` (4/4 covered). Findings docs land in the index as their PRs merge.
+
+**Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet.
 <!-- AGENT-INDEX-END -->
