@@ -66,6 +66,10 @@ function startProxy({ distDir, fixtureBaseUrl }) {
   const fixturePort = fixture.port ? Number.parseInt(fixture.port, 10) : 80;
 
   const handleProxy = (req, res) => {
+    // Rewriting Host to the fixture address leaves Origin = proxy URL on
+    // the upgrade path, so the Go server's same-origin check would 403.
+    // runWeb.mjs sets CHAT_ALLOWED_ORIGINS=<proxy origin> to extend
+    // OriginPatterns; if you change that wiring, expect cross-origin 403s.
     const opts = {
       host: fixtureHost,
       port: fixturePort,
