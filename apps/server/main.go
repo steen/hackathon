@@ -33,6 +33,11 @@ const (
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
+	// maxHeaderBytes caps total request-header memory per connection. Default
+	// is 1 MiB; this surface uses bearer tokens (~300 bytes) and no cookies,
+	// so 16 KiB is comfortably above legitimate traffic and bounds the
+	// slow-header DoS surface paired with readHeaderTimeout.
+	maxHeaderBytes = 16 * 1024
 )
 
 func main() {
@@ -161,6 +166,7 @@ func run() error {
 		Handler:           httpapi.SecurityHeaders(httpapi.RequestIDMiddleware(httpapi.AccessLog(httpapi.Recover(httpapi.BodyCap(mux))))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
