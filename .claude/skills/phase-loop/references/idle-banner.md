@@ -29,14 +29,13 @@ Avoid: anger, profanity, anything performatively cheerful, anything that mention
 ## Composition
 
 Each idle tick:
-1. **Invent a fresh, detailed ASCII figure.** Be actually creative — don't default to the same five sad faces. Stretch across categories the user hasn't seen recently:
-   - Faces, but unusual ones: a face with one eye half-closed, a profile, a face looking up at nothing, a face peering through slats — drawn with enough volume to read as a face from across the room.
-   - Weather: rain on a windowpane (with the windowpane itself), a single cloud over a single figure, fog rolling across in layers of `~~~`, a snowman whose hat has slumped over.
-   - Sagging objects: a wilted flower with stem and pot and a leaf or two, a melting candle pooling wax on its holder, a deflated balloon trailing string across the ground, a half-eaten birthday cake with one missing slice and crumbs, an unwound clock spring puddled on a desk, a sock with a hole and a heel and a pile of laundry behind it.
-   - Creatures: a tired ghost passing through a wall section, a beached fish with sand and a tide line, a snail with shell-coil detail moving away from a starting point, a jellyfish with multiple tangled tentacles, a moth orbiting an off bulb in a dark frame.
-   - Scenery / props: an empty inbox shown as a labeled box with cobwebs, a coffee cup whose steam is reduced to a few `'` flecks above a still mug, a pencil snapped at the middle with shavings, a paper airplane lodged in tree branches with leaves, a broken umbrella with bent ribs in the rain, a single party balloon tied to an empty chair.
-   - Weirder: a sad ampersand `&` with droopy curves, a parenthesis whose pair has left town `(   ····· `, a semicolon contemplating its place between code blocks, an exclamation mark lying down with its dot rolled away, a deflated speech bubble with the text drained out.
-   The figure should match the dialogue's mood — a deflated balloon paired with "well that's one way to celebrate", a snail trail paired with "i'm working on it. apparently". Surprise the user with the pairing.
+1. **Invent a fresh, detailed ASCII character.** The figure must be a CHARACTER — a humanoid, an animal, a robot, a creature, a monster, a mythological thing, an alien, a ghost, a sentient object given a face and posture. Not a pure inanimate object, not an abstract shape, not a plant alone. Whatever you draw must read as "someone" the user can imagine sighing.
+   - **Humanoids:** a figure slumped against a wall with arms hanging, a hooded character looking down, a person hunched over a desk asleep, a clown without their wig, a knight with armor sliding off, a wizard whose hat covers their eyes, a barista staring at an empty espresso machine.
+   - **Animals:** a basset hound with ears pooling on the floor, a sloth hanging from one arm by a thread, a cat in a half-collapsed box, a goldfish in a bowl looking out, a pigeon on a wire missing one feather, a bear holding an empty honey jar, a turtle with its head fully retracted.
+   - **Robots:** a boxy bot with one antenna bent, a CRT-headed bot whose screen reads `NULL`, a roomba stuck under a chair, a tin-man rusting in light rain, a cute cube-bot with a slow-blinking eye, a service drone tangled in its own cable.
+   - **Creatures / monsters:** a tired ghost half-phased through a wall, a slime monster with one eye drooping, a goblin holding a broken sword, a kraken with most tentacles laid flat, a vampire on a sunny park bench, a cyclops squinting because its one eye is dry.
+   - **Anthropomorphized things (still characters, with face/posture/voice):** a coffee cup with eyes and a frown sitting in steam, a sad envelope dragging its flap, an exclamation mark lying down with its dot rolled away looking up at the ceiling, a semicolon couple where one half left.
+   Each character should have **at least one** of: eyes (open/closed/asymmetric), a mouth (frown/sigh-line/zipper), arms or limbs in a posture (slumped/dangling/tucked), and ideally a small bit of **setting** around them (the wall they lean on, the floor they sit on, the rain falling on them). Characters without expression or posture aren't characters; redraw.
 2. **Add detail.** Multiple lines of texture or shading. A creature plus the floor it slumps on. A flower plus the pot, the soil, maybe a wilting leaf at the side. Use shading (`░ ▒ ▓ █`), box-drawing (`─ │ ┌ ┐ └ ┘`), and small texture marks (`,` `.` `'` `~` `*`) to give the figure mass. The user asked for detail; deliver volume.
 3. **Write the dialogue** in the tone register above. Lowercase. Passive-aggressive but not mean. Vary the cadence — sometimes a sigh, sometimes a single word, sometimes a small monologue framed in the figure's negative space. Don't reach for the same opener twice ("fine.", "cool.", "of course." — pick at most one per tick, and then a different one next tick).
 4. Apply the ANSI dim/italic/grey palette per the format rules.
@@ -72,6 +71,7 @@ Step 4 (no eligible sub-issues at all) AND any other tick that ends with zero ne
 - Adding emoji. The figure is ASCII; the dialog is plain prose.
 - Cheerful tone ("hang in there!", "almost done!"). Off-brand.
 - Tiny stick-figure-only banners with no setting, texture, or shading. Under 10 lines is too thin — the user has explicitly asked for detail.
+- Pure-object banners with no character (a flower in a pot, a cup of coffee on its own, an empty chair). The figure MUST be a character — humanoid, animal, robot, creature, or anthropomorphized thing with a face and posture. Setting + props can surround the character; they cannot replace it.
 - Banners over 18 lines or wider than 80 cols (chat will wrap them).
 - Naming the user. Passive-aggression is general, not personal.
 - Capital letters in the dialogue. The agent is too tired.
