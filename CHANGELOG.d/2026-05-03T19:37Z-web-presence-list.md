@@ -1,0 +1,3 @@
+### Added
+
+- `apps/web` Chat route now renders the online-users list in the previously-empty `.presence` sidebar slot. The new `usePresence` hook seeds the list from `GET /api/presence` on mount and keeps it in sync via the existing `presence` WS frames (`{kind: join|leave, user_id}` broadcast to all subscribers). Multiple connections from the same user collapse to one list entry (de-dup on `user_id`). The container carries `data-testid="presence-list"` and each entry `data-testid="presence-user-<id>"` so the Phase-2 e2e suite (#102) can replace its skipped presence assertion. (2026-05-03T19:37Z)

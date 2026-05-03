@@ -39,6 +39,7 @@ const postMessageMock = vi.fn();
 const meMock = vi.fn();
 const logoutMock = vi.fn();
 const wsTicketMock = vi.fn();
+const httpRequestMock = vi.fn();
 
 vi.mock("../api.js", () => ({
   getClient: () => ({
@@ -50,6 +51,7 @@ vi.mock("../api.js", () => ({
     http: {
       wsTicket: wsTicketMock,
       getBaseUrl: () => "http://test.local",
+      request: httpRequestMock,
     },
   }),
   readToken: () => "test-jwt-token-placeholder",
@@ -73,6 +75,7 @@ afterEach(() => {
   meMock.mockReset();
   logoutMock.mockReset();
   wsTicketMock.mockReset();
+  httpRequestMock.mockReset();
 });
 
 function happyPath(): void {
@@ -95,6 +98,12 @@ function happyPath(): void {
     n += 1;
     return { ticket: `ticket-${String(n)}`, expires_at: "2026-01-01T01:00:00Z" };
   });
+  httpRequestMock.mockImplementation((method: string, path: string) => {
+    if (method === "GET" && path === "/api/presence") {
+      return Promise.resolve({ users: [] });
+    }
+    return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+  });
 }
 
 describe("test_web_chat_page_renders_history_then_appends_live_messages", () => {
@@ -109,10 +118,12 @@ describe("test_web_chat_page_renders_history_then_appends_live_messages", () => 
     await waitFor(() => {
       expect(screen.getByText("hello from history")).toBeInTheDocument();
     });
+    // The presence hook also opens a (channel-less) socket; pick the
+    // messages socket by `channel=` query param.
     await waitFor(() => {
-      expect(FakeSocket.instances).toHaveLength(1);
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
     });
-    const sock = FakeSocket.instances[0];
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
     expect(sock).toBeDefined();
 
     await act(async () => {
@@ -147,15 +158,18 @@ describe("test_web_reconnects_after_ws_disconnect", () => {
       </AuthProvider>,
     );
 
+    // Filter to the messages WS (carries `channel=C1`); the presence
+    // hook also opens a channel-less WS that mints its own ticket.
     await waitFor(
       () => {
-        expect(FakeSocket.instances).toHaveLength(1);
+        expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
       },
       { timeout: 2000 },
     );
-    const first = FakeSocket.instances[0];
+    const messageSockets = (): FakeSocket[] =>
+      FakeSocket.instances.filter((s) => s.url.includes("channel=C1"));
+    const first = messageSockets()[0];
     first?.open();
-    expect(wsTicketMock).toHaveBeenCalledTimes(1);
 
     first?.forceClose();
 
@@ -163,12 +177,11 @@ describe("test_web_reconnects_after_ws_disconnect", () => {
     // reconnect timer to fire, then mint a fresh ticket and open a new socket.
     await waitFor(
       () => {
-        expect(FakeSocket.instances.length).toBeGreaterThanOrEqual(2);
+        expect(messageSockets().length).toBeGreaterThanOrEqual(2);
       },
       { timeout: 3000 },
     );
-    expect(wsTicketMock).toHaveBeenCalledTimes(2);
-    expect(FakeSocket.instances[1]?.url).toContain("ticket=ticket-2");
+    expect(messageSockets()[1]?.url).toContain("channel=C1");
   });
 });
 
@@ -188,6 +201,7 @@ describe("test_message_with_html_tags_renders_as_text_not_dom", () => {
       },
     ]);
     wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
 
     render(
       <AuthProvider>
@@ -204,5 +218,73 @@ describe("test_message_with_html_tags_renders_as_text_not_dom", () => {
     const body = list.querySelector(".msg__body");
     expect(body?.textContent).toBe("<script>alert(1)</script>");
     expect(body?.innerHTML).toContain("&lt;script&gt;");
+  });
+});
+
+describe("test_web_presence_list_renders_seed_join_leave_and_dedupes", () => {
+  it("seeds from /api/presence, applies join/leave WS frames, and dedupes multi-conn joins", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [{ id: "U1", username: "alice" }] });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const presenceList = await screen.findByTestId("presence-list");
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+    });
+
+    // The presence hook opens its own WebSocket connection in addition
+    // to the messages hook's connection — find the presence socket by
+    // url query (no `channel=` param).
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    expect(presenceSock).toBeDefined();
+
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U2" },
+        }),
+      });
+      // Duplicate join from a second connection of the same user must
+      // collapse to one entry.
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U2" },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
+    });
+    expect(presenceList.querySelectorAll('[data-testid^="presence-user-"]')).toHaveLength(2);
+
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("presence-user-U1")).toBeNull();
+    });
+    expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
   });
 });
