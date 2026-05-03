@@ -83,7 +83,38 @@ rtk gh pr checks <pr-number>
 
 Even with a green local mirror, double-check. If red despite a green mirror: pull `rtk gh run view --log-failed`, diagnose the divergence, fix the root cause **and** the local-mirror script that missed it. Common gotchas live in `_shared/ci-mirror-policy.md`.
 
-### 8. Report back
+### 8. File follow-up sub-issues for defects you can't handle here
+
+Before reporting back, look at every item that would land in `SKIPPED` or that surfaced as a real defect blocking your work. For each one that needs **future code changes outside this PR's footprint**, file a GitHub sub-issue on the parent epic.
+
+What qualifies (file an issue):
+- An acceptance criterion you couldn't satisfy because the implementation it depends on doesn't exist yet (e.g. a UI surface to assert against, an api-client method, a server endpoint).
+- A bug or gap you discovered in code OUTSIDE your footprint while doing this work (drive-bys go in their own PR per `CLAUDE.md`; the issue captures it).
+- A flaky test you had to `test.skip` with a TODO — the issue tracks restoring it under a stable approach.
+- A footprint-creep request the supervisor would reject — file the larger work as its own issue.
+
+What does NOT qualify (do not file):
+- A test you decided was bad value (e.g. you opted not to test bootstrap glue). That's a judgment call, document it in `UNVERIFIED`.
+- An item the spec explicitly defers ("Out of scope" / "Deferred" sections of the issue body).
+- Anything a quick search shows is already an open issue. Run `rtk gh issue list --state open --search "<keywords>"` first.
+
+How to file:
+
+1. Read the current issue's body — find the `Parent: #<N>` line. That's the epic. If the issue is itself an epic (label `epic`), then it IS the parent.
+2. `rtk gh issue create --title "Phase X — <short imperative>" --label task --body "<body>"` where the body has:
+   - First line: `Parent: #<epic>`
+   - Second line: `Source: <one-line describing the source — "defect surfaced while reviewing PR #<your-pr>" or "AC blocked by ..." or similar>`
+   - `## Context` — what you encountered, with file paths + line numbers cited from your worktree (read first, don't fabricate).
+   - `## What's needed` — bulleted, narrow. Don't pre-design the fix; describe the gap.
+   - `## Tests` — what the follow-up should add, especially anything you `test.skip`'d that should become a real assertion.
+   - `## Out of scope` — fence the work so the next worker doesn't widen.
+3. After filing, replace the matching `SKIPPED` entry in your report with `SKIPPED → filed as #<new-issue>: <one-line reason>`.
+
+Title convention: match the existing repo style (`Phase 2 — <imperative>`, no trailing period). Tone: declarative, short, no marketing words.
+
+If you're unsure whether something qualifies, file it. A redundant issue is cheap to close; a lost defect rots.
+
+### 9. Report back
 
 ```
 PR_URL: <url>
