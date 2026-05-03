@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T16:08:49Z
-**Analyzed commit:** `ec3e7a1`
+**Last updated:** 2026-05-03T16:34:51Z
+**Analyzed commit:** `39ce98d`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -55,10 +55,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [access-log-fields-and-wiring](phase-1/access-log-fields-and-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
 | phase-1 | [rate-limits](phase-1/rate-limits.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [auth-endpoint-paths-align-with-prd](phase-1/auth-endpoint-paths-align-with-prd.md) | stub | 0/4 | 0 | 0 | 4 |
+| phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | stub | 0/5 | 0 | 0 | 5 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
-**Phase-1 totals (so far):** 10 features analyzed of 13 spec'd · 46 ACs · 31 covered · 3 partial · 0 missing · 12 deferred.
+**Phase-1 totals (so far):** 11 features analyzed of 14 spec'd · 51 ACs · 31 covered · 3 partial · 0 missing · 17 deferred.
+
+`feature-ws-userid-binding-and-channel-existence-check` (new this run) is the third planned-only follow-up stub spec, exists to close `feature-ws-hardening` AC-3 (partial) and AC-4 (deferred) flagged in PR #58. Reframes AC-4 as a pre-upgrade HTTP 404 + envelope rather than the originally-promised "typed error frame" (which would require typed inbound WS frames; out of scope per the new spec). All 5 ACs deferred until impl PR ships.
 
 `feature-auth-endpoints` (PR #38) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary. The signing-key wiring is *behaviorally* sound (`config.Validate` enforces the strength rules at startup, then the handler reads `CHAT_JWT_SECRET` independently) but `apps/server/main.go` does not thread `cfg.JWTSecret` directly into `NewAuthHandlers.SigningKey` — the env var is read twice. The `feature-auth-internals` AC-5 partial flag should stay until that chain is concrete; see `auth-endpoints.md` cross-feature note.
 
