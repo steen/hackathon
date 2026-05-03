@@ -93,3 +93,32 @@ jobs:
 
       - name: Prettier check
         run: pnpm run format:check
+
+  e2e:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.draft != true }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm --filter web exec playwright install --with-deps chromium
+
+      - name: e2e (CLI + web)
+        run: pnpm e2e
