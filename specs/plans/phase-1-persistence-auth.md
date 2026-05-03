@@ -14,7 +14,7 @@ Phase 0
 - [x] SQLite schema (`migrations/0001_init.sql`) including `users.token_version` and `auth_events` table.
 - [x] ULID generation.
 - [x] `internal/auth`: bcrypt + JWT with `tv` claim; constant-time login path; password length policy.
-- [ ] Auth endpoints: register (invite-code gated) / login / me / logout / ws-ticket.
+- [x] Auth endpoints: register (invite-code gated) / login / me / logout / ws-ticket.
 - [ ] Channels endpoints; messages endpoints (REST + WS).
 - [ ] Hardening that must land in Phase 1 (not Phase 3):
 - [ ] Startup checks: JWT secret length + dev-default denylist; non-loopback bind requires `CHAT_ALLOW_PUBLIC_BIND=1`; registration requires `CHAT_INVITE_CODE`.

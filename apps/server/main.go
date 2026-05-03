@@ -12,8 +12,10 @@ import (
 	"syscall"
 	"time"
 
+	"hackathon/apps/server/internal/auth"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/hub"
+	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
 )
@@ -22,6 +24,8 @@ const (
 	defaultPort       = 8080
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
+	jwtSecretEnv      = "CHAT_JWT_SECRET"
+	inviteCodeEnv     = "CHAT_INVITE_CODE"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
@@ -61,6 +65,30 @@ func main() {
 	h := hub.New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", wsapi.Handler(h))
+
+	if repository != nil {
+		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
+		if len(jwtSecret) == 0 {
+			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
+		}
+		tickets := auth.NewTicketStore()
+		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
+			DB:         repository.DB(),
+			Tickets:    tickets,
+			SigningKey: jwtSecret,
+			InviteCode: os.Getenv(inviteCodeEnv),
+		})
+		require := auth.RequireJWT(auth.MiddlewareConfig{
+			SigningKey:        jwtSecret,
+			Lookup:            ah.LookupUserInfo,
+			WriteUnauthorized: httpapi.WriteUnauthorized,
+		})
+		mux.HandleFunc("/api/register", ah.Register)
+		mux.HandleFunc("/api/login", ah.Login)
+		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
+		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
+		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
+	}
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
