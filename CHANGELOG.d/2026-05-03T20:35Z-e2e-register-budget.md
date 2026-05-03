@@ -1,0 +1,1 @@
+- server: per-IP register rate-limit accepts `CHAT_REGISTER_BURST` and `CHAT_REGISTER_REFILL` env overrides. Production default (Burst=5/15min, PRD §9) stays unchanged when env vars are unset; the e2e harness sets them so a single source IP can run many flows back-to-back without 429. (#114)
