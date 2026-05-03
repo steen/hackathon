@@ -56,11 +56,12 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [rate-limits](phase-1/rate-limits.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [auth-endpoint-paths-align-with-prd](phase-1/auth-endpoint-paths-align-with-prd.md) | stub | 0/4 | 0 | 0 | 4 |
 | phase-1 | [channels-and-messages](phase-1/channels-and-messages.md) | partial | 1/6 | 5 | 0 | 0 |
+| phase-1 | [ws-hardening](phase-1/ws-hardening.md) | partial | 2/4 | 1 | 0 | 1 |
 | phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | stub | 0/5 | 0 | 0 | 5 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
-**Phase-1 totals (so far):** 12 features analyzed of 14 spec'd · 57 ACs · 32 covered · 8 partial · 0 missing · 17 deferred.
+**Phase-1 totals (so far):** 13 features analyzed of 14 spec'd · 61 ACs · 34 covered · 9 partial · 0 missing · 18 deferred.
 
 `feature-ws-userid-binding-and-channel-existence-check` (new this run) is the third planned-only follow-up stub spec, exists to close `feature-ws-hardening` AC-3 (partial) and AC-4 (deferred) flagged in PR #58. Reframes AC-4 as a pre-upgrade HTTP 404 + envelope rather than the originally-promised "typed error frame" (which would require typed inbound WS frames; out of scope per the new spec). All 5 ACs deferred until impl PR ships.
 
@@ -71,7 +72,8 @@ Notable phase-1 gaps:
 - `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field — the new `access-log-fields-and-wiring` stub spec exists to close it. When the impl PR lands, AC-1 should re-promote.
 - `sqlite-schema-and-ulid` AC-4 partial: schema permits ULIDs and `ids.NewULID()` is solid, but no shipped INSERT code path used it at the analyzed SHA — closed at the contract level by `feature-channels-and-messages` (#42); next analysis tick should re-promote to covered.
 - `channels-and-messages` AC-1 through AC-5 partial: handlers + repo + WS broadcast all ship with strong unit + integration tests at the analyzed SHA `000a530`. AC-6 (auth required) is the one cleanly-covered AC. **Wiring gap closed by PR #42 on main** (`ch.Routes(mux, require, msg)` is now in `apps/server/main.go`); re-evaluate at next analysis tick.
-- `security-headers-and-sqlite-ensure-wiring`, `access-log-fields-and-wiring`, `auth-endpoint-paths-align-with-prd`: stub specs tracking unimplemented follow-ups (middleware chain wiring × 2, PRD path realignment × 1). All three deferred until the implementation PRs land.
+- `ws-hardening` AC-3 partial + AC-4 deferred: handler extracts userID from ticket but stashes it in `_ = userID` with a TODO (the new `feature-ws-userid-binding-and-channel-existence-check` follow-up plan tracks both); AC-4 typed-channel-not-found frame waits on a typed inbound WS frame contract that `feature-channels-and-messages` was meant to introduce but didn't (still raw byte rebroadcast).
+- `security-headers-and-sqlite-ensure-wiring`, `access-log-fields-and-wiring`, `auth-endpoint-paths-align-with-prd`, `ws-userid-binding-and-channel-existence-check`: stub specs tracking unimplemented follow-ups. All deferred until the implementation PRs land.
 
 `feature-rate-limits` (PR #41) ships clean: per-IP token-bucket on `/api/login` (10/5min) and `/api/register` (5/15min) with bounded LRU; per-username linear backoff (2 free → 500ms steps capped at 2s, 5min idle eviction, case-insensitive); 429 envelope + RFC-7231 `Retry-After`; rejection rows in `auth_events`. 17 tests across the three test files.
 

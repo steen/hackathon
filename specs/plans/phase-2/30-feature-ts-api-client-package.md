@@ -4,7 +4,7 @@
 **Status:** planned
 
 ## Requirements covered
-- (foundation for US-9; the web app in `feature-web-app.md` consumes this package)
+- (foundation for US-9; the web app in `40-feature-web-app.md` consumes this package)
 
 ## Acceptance criteria
 - A TypeScript package at `packages/api-client` exports typed functions for the same server endpoints exposed by the Go client.

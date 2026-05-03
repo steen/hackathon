@@ -4,7 +4,7 @@
 **Status:** planned
 
 ## Requirements covered
-- (supports US-10; see `feature-single-binary-demo-verified.md` for the full single-binary verification)
+- (supports US-10; see `40-feature-single-binary-demo-verified.md` for the full single-binary verification)
 
 ## Acceptance criteria
 - The Vite production build of `apps/web` is embedded into the Go server binary using `embed.FS`.
