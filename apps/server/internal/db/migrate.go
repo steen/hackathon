@@ -119,6 +119,9 @@ func applyOne(ctx context.Context, sqlDB *sql.DB, name, body string) error {
 		return fmt.Errorf("db: begin tx for %q: %w", name, err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Migration files are run as a single multi-statement Exec. modernc/sqlite
+	// supports this; if the driver is ever swapped (mattn/go-sqlite3, etc.) the
+	// runner will need to either keep that property or split files at the ";".
 	if _, err := tx.ExecContext(ctx, body); err != nil {
 		return fmt.Errorf("db: apply %q: %w", name, err)
 	}
