@@ -1,12 +1,12 @@
 ---
 feature: logging-and-error-envelope
 phase: phase-1
-analyzed_at: 2026-05-03T14:27:13Z
-analyzed_commit: 8013612749226341ad515582320d35baa00ae5d4
-implementation_status: partial
+analyzed_at: 2026-05-03T17:26:50Z
+analyzed_commit: fa60bfdd928918ed6813ff04b1c947e66dd78758
+implementation_status: implemented
 total_acs: 4
-covered: 3
-partial: 1
+covered: 4
+partial: 0
 missing: 0
 deferred: 0
 ---
@@ -14,13 +14,13 @@ deferred: 0
 # Test analysis: Access-log middleware and user-safe error envelope
 
 **Spec:** `specs/plans/phase-1/feature-logging-and-error-envelope.md`
-**Implementation status:** partial — `apps/server/internal/http/{middleware,errors}.go` ship the envelope, request-ID context, access log, and panic recovery. The access log line, however, omits two fields the spec requires (see AC-1 below). All in-package tests pass at this SHA.
+**Implementation status:** implemented — `apps/server/internal/http/{middleware,errors}.go` ship the envelope, request-ID context, access log, and panic recovery. AC-1's missing fields (`IP` and `user_id`) were closed by `feature-access-log-fields-and-wiring` (gap-A in `fa60bfd`); both fields now ship and the chain is wired in main.go.
 
 ## Acceptance criteria
 
 | AC | Statement (verbatim from spec) | Status | Test reference |
 |----|-------------------------------|--------|----------------|
-| AC-1 | Access-log middleware logs method, path, status, latency, IP, and user ID (if known). | partial | `apps/server/internal/http/middleware_test.go::TestAccessLogRecordsMethodPathStatusLatencyAndRequestID` (covers method, path, status, latency, request_id; **does not** cover IP — and the impl's log line `"access method=%s path=%s status=%d latency_ms=%d request_id=%s"` does not emit IP either). |
+| AC-1 | Access-log middleware logs method, path, status, latency, IP, and user ID (if known). | covered | `apps/server/internal/http/middleware_test.go::TestAccessLogRecordsMethodPathStatusLatencyAndRequestID` + `TestAccessLogRecordsRemoteIPHostPortion` (added by gap-A) + `TestAccessLogRecordsUserIDFromContext` + `TestAccessLogUserIDRendersDashWhenUnset` (empty `user_id` rendered as `-` to keep `key=value` parsing unambiguous). The Printf format now includes `remote_ip=%s user_id=%s` per `apps/server/internal/http/middleware.go:103`. |
 | AC-2 | Sensitive query parameters (`token`, `ticket`) are stripped/redacted from logged URLs. | covered | `apps/server/internal/http/middleware_test.go::TestAccessLogStripsTokenQueryParam_SEC11` + `TestAccessLogStripsTicketQueryParam_SEC11` + `TestAccessLogRedactsRepeatedAndEncodedKeys` (handles repeated keys + percent-encoding edge cases). |
 | AC-3 | Every JSON response uses the envelope `{ ok, data, error }` per PRD §6 with the documented null/non-null pairing. | covered | `apps/server/internal/http/errors_test.go::TestErrorEnvelopeShapeIsConsistent` (3 subtests covering ok-with-data, ok-with-nil-data, and error shapes; explicitly asserts JSON keys are physically present, not merely Go zero-values). |
 | AC-4 | Internal error details are not exposed to clients but are logged on the server side with a request ID. | covered | `apps/server/internal/http/middleware_test.go::TestPanicRecoveryReturnsGenericEnvelopeAndLogsInternally` (asserts the panic value never reaches the response body; verifies the server log captures it with `request_id=`). |

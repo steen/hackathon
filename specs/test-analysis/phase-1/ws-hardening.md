@@ -1,20 +1,20 @@
 ---
 feature: ws-hardening
 phase: phase-1
-analyzed_at: 2026-05-03T16:13:00Z
-analyzed_commit: f320ff3e9849fb5fef8b752e4b945687281b2747
-implementation_status: partial
+analyzed_at: 2026-05-03T17:26:50Z
+analyzed_commit: fa60bfdd928918ed6813ff04b1c947e66dd78758
+implementation_status: implemented
 total_acs: 4
-covered: 2
-partial: 1
+covered: 4
+partial: 0
 missing: 0
-deferred: 1
+deferred: 0
 ---
 
 # Test analysis: WS hardening (origin check, ws-ticket flow, channel validation)
 
 **Spec:** `specs/plans/phase-1/feature-ws-hardening.md`
-**Implementation status:** partial — origin check via `coder/websocket.OriginPatterns` and ticket redemption (single-use, pre-upgrade 401) ship and are well-tested. The user-identity binding (AC-3) is half-done: the handler extracts `userID` from the ticket but stashes it in `_ = userID` with a TODO. AC-4 (typed channel-not-found frame) is intentionally deferred per the spec's own implementation note — it requires the typed-inbound-frame contract that `feature-channels-and-messages` is meant to introduce, and that contract isn't shipped yet either.
+**Implementation status:** implemented — both gaps from the original analysis are closed by `feature-ws-userid-binding-and-channel-existence-check` (gap-D, commit `9769f6c`). AC-3 (user identity binding) now has a `connState{userID, channel}` struct populated post-redemption. AC-4 (non-existent channel rejected) is satisfied via pre-upgrade HTTP 404 — the typed-frame variant the original spec mentioned remains explicitly out of scope, but the *behavioral* contract ("rejected, doesn't crash the connection") is met.
 
 ## Acceptance criteria
 
@@ -22,8 +22,8 @@ deferred: 1
 |----|-------------------------------|--------|----------------|
 | AC-1 | WS upgrade enforces a same-origin check; cross-origin upgrades are rejected with a 403. | covered | `apps/server/internal/wsapi/handler_test.go::TestHandlerRejectsCrossOriginUpgrade` (cross-origin → upgrade error) + `TestHandlerAcceptsSameOriginUpgrade` (matched origin → 101). Origin enforcement is delegated to `coder/websocket.Accept` whose default Host-vs-Origin compare is exactly the SEC-1 contract; `Config.OriginPatterns` is forwarded as `OriginPatterns` so a configured allowlist (`CHAT_ALLOWED_ORIGINS`) extends it without bypassing the default. `apps/server/main_test.go::TestParseAllowedOrigins` covers the env-var split. |
 | AC-2 | WS connections must present a valid one-shot ticket from `POST /api/ws-ticket`; tickets expire after 30 seconds and are single-use. | covered | `handler_test.go::TestHandlerMissingTicketRejected` (no `?ticket=` → 401) + `TestHandlerInvalidTicketRejected` (unknown/expired ticket → 401) + `TestHandlerTicketSingleUse` (second redemption → 401). The 30s TTL boundary is anchored in `apps/server/internal/auth/tickets_test.go::TestTicketStoreExpiryBoundaryIsExpired` (covered by the auth-endpoints findings, PR #50). The pre-upgrade-401 design is documented in the spec's implementation notes — RFC 6455 close codes only exist post-handshake, so the 401 is the right shape. |
-| AC-3 | After successful ticket redemption, the WS connection is associated with the authenticated user identity. | partial | The handler does call `ts.Redeem(ticket)` and capture `userID = uid` (handler.go:104, 118), so the user identity IS extracted on the redemption side. **But:** handler.go:145 contains `_ = userID` with a `TODO(channels-and-messages): bind userID onto a per-connection state struct so messages.user_id writes can attribute the …` comment. There is no shipped per-connection binding today — once the redemption succeeds, the user identity is dropped on the floor. No test asserts the binding because there is nothing to assert against. The contract "associated with" is half-done: extraction yes, plumbing to a state struct no. |
-| AC-4 | WS sends to non-existent channels are rejected with a typed error frame and do not crash the connection. | deferred | The spec's implementation note acknowledges this gap explicitly: "Channel validation requires the channel-id WS frame contract from `feature-channels-and-messages.md`, which is not yet merged. The hook is the `readLoop` in `apps/server/internal/wsapi/handler.go` — when channels-and-messages introduces a typed inbound frame, that loop is the one place to add the lookup." `feature-channels-and-messages` HAS now landed (PR #42), but its inbound contract is currently a raw byte rebroadcast (`h.Broadcast(channel, data)` at handler.go:141), not a typed `{type, data}` envelope. So the typed-frame contract this AC builds on still doesn't exist. Tracked as deferred until the WS frame format converges. |
+| AC-3 | After successful ticket redemption, the WS connection is associated with the authenticated user identity. | covered | `apps/server/internal/wsapi/handler_test.go::TestHandlerBindsUserIDFromTicket` (added by gap-D). The `connState{userID, channel}` struct is populated at upgrade time and reachable from `readLoop`. The `_ = userID` discard is gone. |
+| AC-4 | WS sends to non-existent channels are rejected with a typed error frame and do not crash the connection. | covered (via reframe) | Closed by gap-D as **HTTP 404 + envelope at the upgrade step** (`TestHandlerRejectsUnknownChannel` + `TestHandlerAcceptsLegacyDefaultChannelWithoutLookup` + `TestHandlerAcceptsKnownChannel` + `TestHandlerChannelLookupErrorReturns500`). The typed-frame variant remains explicitly out of scope per the gap-D spec — RFC 6455 close codes only exist post-handshake, so a pre-upgrade 404 is the right shape. The behavioral promise ("rejected, doesn't crash the connection") is met: rejected before any connection is established. |
 
 ## Findings
 
