@@ -10,6 +10,40 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 17:30Z — Auth internals: bcrypt + JWT + constant-time login (phase 1) (#33)
+
+### Added
+- `apps/server/internal/auth` — package holding the password and JWT primitives the auth endpoints will plug into:
+  - `password.go`: `Hash`, `Verify`, `EnforcePolicy`, `VerifyDummy`. Verify collapses every failure mode (wrong password, malformed hash) into a single `ErrInvalidPassword` so callers cannot leak the failure arm. `EnforcePolicy` rejects passwords shorter than 10 bytes (PRD §9) and longer than 72 bytes (bcrypt input limit; rejecting beats silent truncation).
+  - `jwt.go`: `Issue` and `Parse` for HS256 tokens with a `tv` (token-version) claim. `Parse` checks signature, issuer, expiry, and that the token's `tv` equals the user's current `token_version` — bumping the row's counter on logout invalidates every previously-issued JWT (US-12), no deny-list table needed.
+  - `login.go`: `AuthenticateLogin(lookup, username, password)`. When the username is unknown, the code still runs bcrypt against a precomputed dummy hash so the response time stays in the same ballpark as a real wrong-password attempt and an attacker cannot enumerate accounts via timing (PRD §9, SEC-3). Both failure arms return the byte-identical `LoginErrorMessage` (SEC-4).
+  - `constants.go`: policy thresholds, JWT TTL/issuer, and the precomputed dummy bcrypt hash. The hash was generated once with `bcrypt.GenerateFromPassword([]byte("never-matches"), bcrypt.DefaultCost)` and pasted as a const so package init does no work.
+- Tests carry SEC-3 (timing within tolerance, sanity check) and SEC-4 (byte-identical error text) IDs where applicable.
+- `go.mod` picks up `github.com/golang-jwt/jwt/v5` and `golang.org/x/crypto`.
+
+## 2026-05-03 17:15Z — Body and WebSocket size/rate caps (phase 1) (#27)
+
+### Added
+- `apps/server/internal/httpx`: `Envelope` / `WriteError` matching the PRD §10 `{ok, data, error}` shape, plus a `BodyCap` middleware that caps every REST request at 16 KiB and writes a 413 `body_too_large` envelope on overflow (PRD §11 SEC-7). `WriteMessageTooLarge` provides the canonical 400 envelope for the REST chat-message path (SEC-8). `BodyCap` is wired into the global mux in `apps/server/main.go` so SEC-7 fires on every REST request.
+- `apps/server/internal/wsapi`: per-connection `SetReadLimit(64 KiB)` so the library closes oversize frames with WebSocket close code `1009` (SEC-6); 4 KiB cap on decoded message bodies (SEC-8 WS path) closes with `1009`; per-connection token bucket (10 msg/s, burst 30) closes flooding clients with `1008` (PRD §9). Body-size check runs before the rate-limit deduction so closed-on-oversize frames don't burn a token.
+- Tests assert the actual close codes observed by the client (`websocket.CloseStatus`), not just that the connection ended.
+
+## 2026-05-03 17:00Z — SQLite schema + ULID generation + migration runner (phase 1) (#29)
+
+### Added
+- `migrations/0001_init.sql` — baseline schema for `users` (with `token_version` for US-12 server-side JWT revocation), `channels`, `messages`, and `auth_events`. Indexes on `messages(channel_id, created_at)` and `auth_events(user_id, at)` to support paginated history and audit queries.
+- `migrations/embed.go` — `embed.FS` of every `*.sql` migration sibling, exposed as `migrations.FS`. The package lives under `migrations/` so `go:embed` (which cannot escape its own package directory) can reach the files at the canonical PRD §6 location.
+- `apps/server/internal/db` — `Apply`/`ApplyFS` migration runner (records applied filenames in a `schema_migrations` table, idempotent on re-run, transactional per file) and `Open` helper that opens via `modernc.org/sqlite` with WAL + FK-on pragmas. Reuses `EnsureFile` from #26 to create the SQLite file at `0600` per PRD §9.
+- `apps/server/internal/ids` — `NewULID()` wrapping `oklog/ulid/v2` with a `LockedMonotonicReader` so concurrent callers stay strictly increasing within the same millisecond.
+- `apps/server/internal/repo` — `repo.Repo` data-access façade with `New(*sql.DB)`. Concrete accessors land in later phase-1 features.
+- `apps/server/main.go` now opens the DB and applies migrations before accepting connections when `CHAT_DB_PATH` is set. Gating on the env var keeps the phase-0 `scripts/smoke.sh` boot path file-free until later phase-1 features (auth, channels, messages) require persistence.
+
+## 2026-05-03 16:45Z — Security headers middleware + SQLite 0600 file perms (phase 1) (#26)
+
+### Added
+- `apps/server/internal/http/headers_middleware.go` (SEC-10) sets `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, and `X-Frame-Options` on every response. The CSP literal is held verbatim from PRD §9 in a single constant; tests assert byte-for-byte equality with the PRD string and that all four headers appear on 200, 404, and 500 paths.
+- `apps/server/internal/db/perms.go` (SEC-14) exposes `EnsureFile` which pre-creates the SQLite database file with mode `0600` and chmods existing files to `0600` (covers cases where the process umask widened a freshly created file). Test asserts `os.Stat` returns `0600`.
+
 ## 2026-05-03 16:30Z — Smoke-test follow-ups: deterministic readiness + bounded teardown (#25)
 
 ### Added
