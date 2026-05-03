@@ -131,6 +131,12 @@ func run() error {
 			Hub:  h,
 		})
 		ch.Routes(mux, require, msg)
+
+		presence := httpapi.NewPresenceHandlers(httpapi.PresenceDeps{
+			Hub: h,
+			DB:  repository.DB(),
+		})
+		mux.Handle("GET /api/presence", require(http.HandlerFunc(presence.List)))
 	}
 
 	mux.HandleFunc("/ws", wsapi.Handler(h, tickets, wsCfg))
