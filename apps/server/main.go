@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"hackathon/apps/server/internal/config"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/wsapi"
 )
@@ -25,6 +26,16 @@ const (
 )
 
 func main() {
+	cfg := config.Load()
+	checks, err := cfg.Validate()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "config: %v\n", err)
+		os.Exit(1)
+	}
+	for _, ch := range checks {
+		log.Printf("config check ok: %s", ch.Name)
+	}
+
 	port, err := resolvePort(os.Getenv(portEnv))
 	if err != nil {
 		log.Fatalf("config: %v", err)
