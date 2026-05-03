@@ -93,15 +93,15 @@ func (f *fixture) dispatch(path string, w stdhttp.ResponseWriter, r *stdhttp.Req
 		WriteUnauthorized: WriteUnauthorized,
 	})
 	switch path {
-	case "/api/register":
+	case "/api/auth/register":
 		f.handlers.Register(w, r)
-	case "/api/login":
+	case "/api/auth/login":
 		f.handlers.Login(w, r)
-	case "/api/me":
+	case "/api/auth/me":
 		require(stdhttp.HandlerFunc(f.handlers.Me)).ServeHTTP(w, r)
-	case "/api/logout":
+	case "/api/auth/logout":
 		require(stdhttp.HandlerFunc(f.handlers.Logout)).ServeHTTP(w, r)
-	case "/api/ws-ticket":
+	case "/api/auth/ws-ticket":
 		require(stdhttp.HandlerFunc(f.handlers.WSTicket)).ServeHTTP(w, r)
 	default:
 		stdhttp.NotFound(w, r)
@@ -145,7 +145,7 @@ func TestRegisterCreatesUserWithInviteCode(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
 
-	rr := f.post(t, "/api/register", map[string]string{
+	rr := f.post(t, "/api/auth/register", map[string]string{
 		"username":    "alice",
 		"password":    "correct-horse-battery",
 		"invite_code": "INVITE-OK",
@@ -178,7 +178,7 @@ func TestRegisterRejectsMissingOrWrongInviteCode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rr := f.post(t, "/api/register", map[string]string{
+			rr := f.post(t, "/api/auth/register", map[string]string{
 				"username":    "alice",
 				"password":    "correct-horse-battery",
 				"invite_code": tc.code,
@@ -197,7 +197,7 @@ func TestRegisterRejectsMissingOrWrongInviteCode(t *testing.T) {
 func TestRegisterRejectsBadUsername(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
-	rr := f.post(t, "/api/register", map[string]string{
+	rr := f.post(t, "/api/auth/register", map[string]string{
 		"username":    "no spaces!",
 		"password":    "correct-horse-battery",
 		"invite_code": "INVITE-OK",
@@ -210,7 +210,7 @@ func TestRegisterRejectsBadUsername(t *testing.T) {
 func TestRegisterRejectsShortPassword(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
-	rr := f.post(t, "/api/register", map[string]string{
+	rr := f.post(t, "/api/auth/register", map[string]string{
 		"username":    "alice",
 		"password":    "short",
 		"invite_code": "INVITE-OK",
@@ -228,10 +228,10 @@ func TestRegisterRejectsDuplicateUsername(t *testing.T) {
 		"password":    "correct-horse-battery",
 		"invite_code": "INVITE-OK",
 	}
-	if rr := f.post(t, "/api/register", body, ""); rr.Code != stdhttp.StatusCreated {
+	if rr := f.post(t, "/api/auth/register", body, ""); rr.Code != stdhttp.StatusCreated {
 		t.Fatalf("first register: %d", rr.Code)
 	}
-	rr := f.post(t, "/api/register", body, "")
+	rr := f.post(t, "/api/auth/register", body, "")
 	if rr.Code != stdhttp.StatusConflict {
 		t.Fatalf("second register: got %d want 409", rr.Code)
 	}
@@ -243,7 +243,7 @@ func TestLoginReturnsTokenForValidCredentials(t *testing.T) {
 	defer f.close()
 	registerOK(t, f, "alice", "correct-horse-battery")
 
-	rr := f.post(t, "/api/login", map[string]string{
+	rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice",
 		"password": "correct-horse-battery",
 	}, "")
@@ -259,7 +259,7 @@ func TestLoginRejectsWrongPassword(t *testing.T) {
 	defer f.close()
 	registerOK(t, f, "alice", "correct-horse-battery")
 
-	rr := f.post(t, "/api/login", map[string]string{
+	rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice",
 		"password": "wrong-password-here",
 	}, "")
@@ -278,8 +278,8 @@ func TestLoginUnknownUserAndWrongPasswordReturnIdenticalEnvelope(t *testing.T) {
 	defer f.close()
 	registerOK(t, f, "alice", "correct-horse-battery")
 
-	a := f.post(t, "/api/login", map[string]string{"username": "alice", "password": "wrong-password-here"}, "")
-	b := f.post(t, "/api/login", map[string]string{"username": "nobody", "password": "anything-at-all"}, "")
+	a := f.post(t, "/api/auth/login", map[string]string{"username": "alice", "password": "wrong-password-here"}, "")
+	b := f.post(t, "/api/auth/login", map[string]string{"username": "nobody", "password": "anything-at-all"}, "")
 	if a.Code != b.Code {
 		t.Fatalf("status differ: %d vs %d", a.Code, b.Code)
 	}
@@ -288,13 +288,13 @@ func TestLoginUnknownUserAndWrongPasswordReturnIdenticalEnvelope(t *testing.T) {
 	}
 }
 
-// US-2 — /api/me returns the caller for a valid token.
+// US-2 — /api/auth/me returns the caller for a valid token.
 func TestMeReturnsCurrentUserForValidToken(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
 
-	rr := f.get(t, "/api/me", tok)
+	rr := f.get(t, "/api/auth/me", tok)
 	if rr.Code != stdhttp.StatusOK {
 		t.Fatalf("status: got %d want 200; body=%s", rr.Code, rr.Body.String())
 	}
@@ -308,22 +308,22 @@ func TestMeReturnsCurrentUserForValidToken(t *testing.T) {
 func TestMeRejectsMissingBearer(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
-	rr := f.get(t, "/api/me", "")
+	rr := f.get(t, "/api/auth/me", "")
 	if rr.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("status: got %d want 401", rr.Code)
 	}
 }
 
-// US-12 — /api/me rejects a token after logout.
+// US-12 — /api/auth/me rejects a token after logout.
 func TestMeRejectsTokenAfterLogout(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
 
-	if rr := f.post(t, "/api/logout", nil, tok); rr.Code != stdhttp.StatusOK {
+	if rr := f.post(t, "/api/auth/logout", nil, tok); rr.Code != stdhttp.StatusOK {
 		t.Fatalf("logout: %d", rr.Code)
 	}
-	rr := f.get(t, "/api/me", tok)
+	rr := f.get(t, "/api/auth/me", tok)
 	if rr.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("post-logout /me status: got %d want 401", rr.Code)
 	}
@@ -336,7 +336,7 @@ func TestLogoutIncrementsTokenVersion(t *testing.T) {
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
 	tvBefore := tokenVersion(t, f, "alice")
 
-	if rr := f.post(t, "/api/logout", nil, tok); rr.Code != stdhttp.StatusOK {
+	if rr := f.post(t, "/api/auth/logout", nil, tok); rr.Code != stdhttp.StatusOK {
 		t.Fatalf("logout: %d", rr.Code)
 	}
 	tvAfter := tokenVersion(t, f, "alice")
@@ -348,7 +348,7 @@ func TestLogoutIncrementsTokenVersion(t *testing.T) {
 func TestWSTicketRequiresAuth(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
-	rr := f.post(t, "/api/ws-ticket", nil, "")
+	rr := f.post(t, "/api/auth/ws-ticket", nil, "")
 	if rr.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("status: got %d want 401", rr.Code)
 	}
@@ -360,7 +360,7 @@ func TestWSTicketIsSingleUse(t *testing.T) {
 	defer f.close()
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
 
-	rr := f.post(t, "/api/ws-ticket", nil, tok)
+	rr := f.post(t, "/api/auth/ws-ticket", nil, tok)
 	if rr.Code != stdhttp.StatusOK {
 		t.Fatalf("issue ticket: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -383,7 +383,7 @@ func TestWSTicketReturnsExpiresAtInRFC3339(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
-	rr := f.post(t, "/api/ws-ticket", nil, tok)
+	rr := f.post(t, "/api/auth/ws-ticket", nil, tok)
 	e := mustEnvelope(t, rr)
 	exp, _ := e.Data["expires_at"].(string)
 	if _, err := time.Parse(time.RFC3339Nano, exp); err != nil {
@@ -398,12 +398,12 @@ func TestAuthEventsRecordsRegisterLoginLogoutKinds(t *testing.T) {
 	defer f.close()
 
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
-	if rr := f.post(t, "/api/login", map[string]string{
+	if rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "correct-horse-battery",
 	}, ""); rr.Code != stdhttp.StatusOK {
 		t.Fatalf("login: %d", rr.Code)
 	}
-	if rr := f.post(t, "/api/logout", nil, tok); rr.Code != stdhttp.StatusOK {
+	if rr := f.post(t, "/api/auth/logout", nil, tok); rr.Code != stdhttp.StatusOK {
 		t.Fatalf("logout: %d", rr.Code)
 	}
 
@@ -438,7 +438,7 @@ func TestAuthEventsRecordsWSTicketIssued(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
 	tok := registerOK(t, f, "alice", "correct-horse-battery")
-	if rr := f.post(t, "/api/ws-ticket", nil, tok); rr.Code != stdhttp.StatusOK {
+	if rr := f.post(t, "/api/auth/ws-ticket", nil, tok); rr.Code != stdhttp.StatusOK {
 		t.Fatalf("ws-ticket: %d", rr.Code)
 	}
 	var n int
@@ -456,7 +456,7 @@ func TestAuthEventsRecordsLoginFailure(t *testing.T) {
 	f := newFixture(t)
 	defer f.close()
 	registerOK(t, f, "alice", "correct-horse-battery")
-	rr := f.post(t, "/api/login", map[string]string{
+	rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "wrong-password-here",
 	}, "")
 	if rr.Code != stdhttp.StatusUnauthorized {
@@ -476,7 +476,7 @@ func TestAuthEventsRecordsLoginFailure(t *testing.T) {
 
 func registerOK(t *testing.T, f *fixture, username, password string) string {
 	t.Helper()
-	rr := f.post(t, "/api/register", map[string]string{
+	rr := f.post(t, "/api/auth/register", map[string]string{
 		"username":    username,
 		"password":    password,
 		"invite_code": "INVITE-OK",
@@ -505,12 +505,12 @@ func TestMiddlewareRejectsMalformedBearer(t *testing.T) {
 
 	bad := []string{"", "Token foo", "Bearer", "Bearer ", "bearer\n"}
 	for _, h := range bad {
-		req := httptest.NewRequest(stdhttp.MethodGet, "/api/me", nil)
+		req := httptest.NewRequest(stdhttp.MethodGet, "/api/auth/me", nil)
 		if h != "" {
 			req.Header.Set("Authorization", h)
 		}
 		rr := httptest.NewRecorder()
-		f.dispatch("/api/me", rr, req)
+		f.dispatch("/api/auth/me", rr, req)
 		if rr.Code != stdhttp.StatusUnauthorized {
 			t.Errorf("Authorization=%q: got %d want 401", h, rr.Code)
 		}

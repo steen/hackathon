@@ -10,6 +10,17 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 17:06Z — Phase-1 follow-up gaps: access log + SecurityHeaders + auth-path rename + WS user binding
+
+### Changed
+- **Auth endpoints renamed (BREAKING wire change):** `/api/register`, `/api/login`, `/api/me`, `/api/logout`, `/api/ws-ticket` → `/api/auth/<verb>` per PRD §10. CLI clients and any reverse-proxy rules pointing at the old paths must update.
+- HTTP middleware chain in `apps/server/main.go` now wraps mux with `SecurityHeaders → RequestIDMiddleware → AccessLog → Recover → BodyCap → mux`. Every response — including error envelopes — now carries the SEC-10 headers; every access log line carries `request_id`, `remote_ip` (host portion of `r.RemoteAddr`), and `user_id` (empty when unauthenticated).
+- `wsapi.Handler` binds the redeemed-ticket `userID` onto per-connection state (was a `_ = userID` TODO) and rejects WS upgrades for unknown channels with HTTP 404 before the WebSocket handshake. Legacy `#general` continues to work without a DB lookup.
+
+### Notes
+- `X-Forwarded-For` is intentionally still NOT honored: `CHAT_TRUSTED_PROXY` (PRD §9 / §11) is unwired. Access log uses raw `r.RemoteAddr` host. A dedicated rate-limit-IP-trust PR will plug the parser into both the access log and `auth_handlers.go`'s `clientIP` TODO.
+- This entry edits `CHANGELOG.md` directly because the per-PR `CHANGELOG.d/` precursor (referenced in CLAUDE.md "Parallel work") has not landed yet (`diary/2026-05-03T1600Z-phase-1-handoff.md` lists the directory move as planned-not-done). When that precursor merges, this entry should migrate to a fragment.
+
 ## 2026-05-03 16:18Z — Post-phase-1 cleanup: strict linters + envelope/limits consolidation (#51)
 
 ### Added

@@ -8,7 +8,7 @@
 
 ## Acceptance criteria
 - WS upgrade enforces a same-origin check; cross-origin upgrades are rejected with a 403.
-- WS connections must present a valid one-shot ticket from `POST /api/ws-ticket`; tickets expire after 30 seconds and are single-use.
+- WS connections must present a valid one-shot ticket from `POST /api/auth/ws-ticket`; tickets expire after 30 seconds and are single-use.
 - After successful ticket redemption, the WS connection is associated with the authenticated user identity.
 - WS sends to non-existent channels are rejected with a typed error frame and do not crash the connection.
 

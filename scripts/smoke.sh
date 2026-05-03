@@ -126,7 +126,7 @@ SMOKE_USER="smoke-$$-$(date +%s)"
 SMOKE_PASS="smoke-password-1234567890"
 
 echo "[smoke] register ${SMOKE_USER}"
-REG_RESP=$(curl -fsS -X POST "${API_URL}/api/register" \
+REG_RESP=$(curl -fsS -X POST "${API_URL}/api/auth/register" \
   -H 'Content-Type: application/json' \
   -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\",\"invite_code\":\"${SMOKE_INVITE_CODE}\"}")
 TOKEN=$(printf '%s' "$REG_RESP" | json_get token)
@@ -136,7 +136,7 @@ if [[ -z "$TOKEN" ]]; then
 fi
 
 echo "[smoke] login ${SMOKE_USER}"
-LOGIN_RESP=$(curl -fsS -X POST "${API_URL}/api/login" \
+LOGIN_RESP=$(curl -fsS -X POST "${API_URL}/api/auth/login" \
   -H 'Content-Type: application/json' \
   -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\"}")
 TOKEN=$(printf '%s' "$LOGIN_RESP" | json_get token)
@@ -149,7 +149,7 @@ fi
 # one per connection rather than caching a value the server will reject
 # on second use.
 mint_ticket() {
-  curl -fsS -X POST "${API_URL}/api/ws-ticket" \
+  curl -fsS -X POST "${API_URL}/api/auth/ws-ticket" \
     -H "Authorization: Bearer ${TOKEN}" | json_get ticket
 }
 

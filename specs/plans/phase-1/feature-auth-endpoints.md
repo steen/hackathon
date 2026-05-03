@@ -10,11 +10,11 @@
 - US-12 — As a user, I want logout to actually invalidate my token server-side, so a stolen token stops working when I notice.
 
 ## Acceptance criteria
-- `POST /api/register` requires a valid invite code (`CHAT_INVITE_CODE`) and creates a user with a hashed password (US-1, US-11).
-- `POST /api/login` returns a JWT including a `tv` claim on success; constant-time on failure (US-2).
-- `GET /api/me` returns the current user when given a valid bearer token; 401 otherwise.
-- `POST /api/logout` increments the user's `token_version`, invalidating all outstanding tokens (US-12).
-- `POST /api/ws-ticket` issues a one-shot, 30-second ticket bound to the user, redeemable once at WS upgrade (see `feature-ws-hardening.md`).
+- `POST /api/auth/register` requires a valid invite code (`CHAT_INVITE_CODE`) and creates a user with a hashed password (US-1, US-11).
+- `POST /api/auth/login` returns a JWT including a `tv` claim on success; constant-time on failure (US-2).
+- `GET /api/auth/me` returns the current user when given a valid bearer token; 401 otherwise.
+- `POST /api/auth/logout` increments the user's `token_version`, invalidating all outstanding tokens (US-12).
+- `POST /api/auth/ws-ticket` issues a one-shot, 30-second ticket bound to the user, redeemable once at WS upgrade (see `feature-ws-hardening.md`).
 - All auth endpoints write entries to `auth_events`.
 - `scripts/smoke.sh` continues to exit 0 after this feature lands.
 

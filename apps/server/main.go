@@ -113,11 +113,11 @@ func run() error {
 		})
 		loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
 		registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())
-		mux.Handle("/api/register", registerRL(http.HandlerFunc(ah.Register)))
-		mux.Handle("/api/login", loginRL(http.HandlerFunc(ah.Login)))
-		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
-		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
-		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
+		mux.Handle("/api/auth/register", registerRL(http.HandlerFunc(ah.Register)))
+		mux.Handle("/api/auth/login", loginRL(http.HandlerFunc(ah.Login)))
+		mux.Handle("/api/auth/me", require(http.HandlerFunc(ah.Me)))
+		mux.Handle("/api/auth/logout", require(http.HandlerFunc(ah.Logout)))
+		mux.Handle("/api/auth/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
 
 		ch := httpapi.NewChannelsHandlers(httpapi.ChannelsDeps{
 			Repo: repository,

@@ -15,7 +15,7 @@
 ## Implementation steps
 1. Create `apps/server/internal/ratelimit/iplimit.go` with a token-bucket limiter keyed by IP, including a small LRU to bound memory.
 2. Create `apps/server/internal/ratelimit/userlimit.go` with a per-username backoff tracker (failures, next-allowed-at).
-3. Add HTTP middleware that applies the IP limiter to `/api/login` and `/api/register`.
+3. Add HTTP middleware that applies the IP limiter to `/api/auth/login` and `/api/auth/register`.
 4. Inside the login handler, consult the per-username tracker before authenticating; on failure, increment.
 5. Reset per-username state on successful login.
 

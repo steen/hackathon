@@ -1,6 +1,6 @@
 // Package ratelimit holds the per-IP token-bucket limiter and the
-// per-username login-failure backoff used to harden /api/login and
-// /api/register against brute force / abuse (PRD §9, SEC-5).
+// per-username login-failure backoff used to harden /api/auth/login and
+// /api/auth/register against brute force / abuse (PRD §9, SEC-5).
 //
 // Both types are concurrency-safe and clock-injectable so tests can
 // exercise time-based behavior without sleeping.
@@ -28,7 +28,7 @@ type IPLimiterConfig struct {
 	Now      func() time.Time
 }
 
-// LoginIPConfig is the shared default for /api/login: 10 attempts per 5
+// LoginIPConfig is the shared default for /api/auth/login: 10 attempts per 5
 // minutes from one source IP. SEC-5 requires the 11th attempt to be
 // rejected, which is what Burst=10 + Refill=5min produces (the bucket
 // starts full at 10 and only refills 1 token every 30s).
@@ -36,7 +36,7 @@ func LoginIPConfig() IPLimiterConfig {
 	return IPLimiterConfig{Burst: 10, Refill: 5 * time.Minute, Capacity: 4096}
 }
 
-// RegisterIPConfig is the shared default for /api/register: 5 attempts
+// RegisterIPConfig is the shared default for /api/auth/register: 5 attempts
 // per 15 minutes from one source IP. PRD §9.
 func RegisterIPConfig() IPLimiterConfig {
 	return IPLimiterConfig{Burst: 5, Refill: 15 * time.Minute, Capacity: 4096}

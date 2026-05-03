@@ -7,14 +7,14 @@
 - US-8 — As a scripter, I want a CLI command, so I can pipe automated notifications into chat.
 
 ## Acceptance criteria
-- `chatd register <username>` prompts for password and invite code, calls `POST /api/register`, stores the returned token. Exits 0 on success.
+- `chatd register <username>` prompts for password and invite code, calls `POST /api/auth/register`, stores the returned token. Exits 0 on success.
 - `chatd login` prompts for username and password, stores token in `$XDG_CONFIG_HOME/chatd/config.json` (or platform equivalent).
 - `chatd channels` lists channels.
 - `chatd history <channel> [--limit N] [--before ID]` prints prior messages.
 - `chatd watch <channel>` streams new messages to stdout, with reconnect on disconnect.
 - `chatd send <channel> <message>` posts a message; supports stdin input when `<message>` is `-`.
 - `chatd whoami` prints the current authenticated username (or exits non-zero with a clear message if not logged in).
-- `chatd logout` clears the stored token from the config file and calls the server `POST /api/logout` to invalidate the token server-side. Exits 0 on success.
+- `chatd logout` clears the stored token from the config file and calls the server `POST /api/auth/logout` to invalidate the token server-side. Exits 0 on success.
 - All commands authenticate via the stored token and re-use the `packages/go-client` library.
 - `--server` flag and `CHAT_SERVER` env var override the default base URL.
 
