@@ -4,6 +4,8 @@ Maintenance and per-feature implementation is driven by Claude Code subagents an
 
 Some Phase-0 features have a deeper `feature-name/test-plan.md` next to the feature file. This is a per-feature exception for AC-tagged exhaustive test specs and is not the convention for other phases.
 
+Phase-2 and Phase-3 feature files use a numeric prefix (`10-`, `20-`, `30-`…) that encodes implementation order. Insert a new feature by picking an unused number between its neighbours (e.g. `15-feature-foo.md` between `10-` and `20-`); only renumber when the spacing runs out. Phase-0 and Phase-1 are frozen and keep the un-prefixed names.
+
 | Phase | Title | Status | Plan |
 |-------|-------|--------|------|
 | 0 | Walking skeleton, system test ready | planned | [phase-0-walking-skeleton-system-test-ready](phase-0-walking-skeleton-system-test-ready.md) |
@@ -41,18 +43,18 @@ Features:
 Status: planned · [Phase plan](phase-2-web-ui-shared-clients.md)
 
 Features:
-- [`packages/go-client` (HTTP + WS client)](phase-2/feature-go-client-package.md)
-- [CLI full command set (channels, history, login, watch, send)](phase-2/feature-cli-full-commands.md)
-- [`packages/api-client` (TypeScript HTTP + WS + shared types)](phase-2/feature-ts-api-client-package.md)
-- [`apps/web` (Vite + React + TS chat page)](phase-2/feature-web-app.md)
-- [Presence (online users)](phase-2/feature-presence.md)
+- [10 — `packages/go-client` (HTTP + WS client)](phase-2/10-feature-go-client-package.md)
+- [20 — CLI full command set (channels, history, login, watch, send)](phase-2/20-feature-cli-full-commands.md)
+- [30 — `packages/api-client` (TypeScript HTTP + WS + shared types)](phase-2/30-feature-ts-api-client-package.md)
+- [40 — `apps/web` (Vite + React + TS chat page)](phase-2/40-feature-web-app.md)
+- [50 — Presence (online users)](phase-2/50-feature-presence.md)
 
 ## Phase 3: Polish, demo
 Status: planned · [Phase plan](phase-3-polish-demo.md)
 
 Features:
-- [README quick start](phase-3/feature-readme-quick-start.md)
-- [Embedded web build into Go binary](phase-3/feature-embedded-web-build.md)
-- [Seed `#general` channel](phase-3/feature-seed-general-channel.md)
-- [Single-binary demo path verified](phase-3/feature-single-binary-demo-verified.md)
-- [CHANGELOG entry for `0.1.0`](phase-3/feature-changelog-entry.md)
+- [10 — README quick start](phase-3/10-feature-readme-quick-start.md)
+- [20 — Embedded web build into Go binary](phase-3/20-feature-embedded-web-build.md)
+- [30 — Seed `#general` channel](phase-3/30-feature-seed-general-channel.md)
+- [40 — Single-binary demo path verified](phase-3/40-feature-single-binary-demo-verified.md)
+- [50 — CHANGELOG entry for `0.1.0`](phase-3/50-feature-changelog-entry.md)

@@ -56,4 +56,4 @@ This plan calls for aligning the live paths with PRD §10 before the Phase-2 cli
 ## Risks
 
 - A reverse proxy or environment variable somewhere assumes the old paths — none observed in the repo today, but worth a `grep -ri '/api/register'` sweep before the change lands.
-- The Phase 2 `packages/api-client` and `packages/go-client` plans (`feature-go-client-package.md`, `feature-ts-api-client-package.md`) do not yet pin path strings; aligning before they implement avoids a coordinated change later.
+- The Phase 2 `packages/api-client` and `packages/go-client` plans (`10-feature-go-client-package.md`, `30-feature-ts-api-client-package.md`) do not yet pin path strings; aligning before they implement avoids a coordinated change later.

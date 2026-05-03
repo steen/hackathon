@@ -21,8 +21,11 @@ Phase 2
 - clean clone → `pnpm dev` → full demo flow under 5 minutes.
 
 ## Features
-- [README quick start](phase-3/feature-readme-quick-start.md)
-- [Embedded web build](phase-3/feature-embedded-web-build.md)
-- [Seed #general](phase-3/feature-seed-general-channel.md)
-- [Single-binary demo path verified](phase-3/feature-single-binary-demo-verified.md)
-- [CHANGELOG 0.1.0 entry](phase-3/feature-changelog-entry.md)
+
+Implementation order is encoded in the filename prefix (10, 20, 30…). Insert new features by picking an unused number between neighbours (e.g. `15-`).
+
+- [10 — README quick start](phase-3/10-feature-readme-quick-start.md)
+- [20 — Embedded web build](phase-3/20-feature-embedded-web-build.md)
+- [30 — Seed #general](phase-3/30-feature-seed-general-channel.md)
+- [40 — Single-binary demo path verified](phase-3/40-feature-single-binary-demo-verified.md)
+- [50 — CHANGELOG 0.1.0 entry](phase-3/50-feature-changelog-entry.md)

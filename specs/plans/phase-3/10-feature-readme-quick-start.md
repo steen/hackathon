@@ -10,7 +10,7 @@
 - `README.md` includes a "Quick start" section that takes a clean clone to a running app in under 5 minutes (matches Phase 3 validation criterion).
 - Quick start documents required env vars (`CHAT_INVITE_CODE`, `JWT_SECRET`, `CHAT_SERVER`, `CHAT_ALLOW_PUBLIC_BIND`).
 - Quick start shows: `pnpm install` → `pnpm dev` → open browser → register with invite code → send a message.
-- Mentions the single-binary build (`feature-single-binary-demo-verified.md`) and points the reader to it.
+- Mentions the single-binary build (`40-feature-single-binary-demo-verified.md`) and points the reader to it.
 
 ## Implementation steps
 1. Draft README sections: project intro, quick start (dev), single-binary build, env-var reference, troubleshooting.

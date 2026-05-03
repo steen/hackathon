@@ -4,7 +4,7 @@
 **Status:** planned
 
 ## Requirements covered
-- (foundation for US-8; the CLI in `feature-cli-full-commands.md` consumes this package)
+- (foundation for US-8; the CLI in `20-feature-cli-full-commands.md` consumes this package)
 
 ## Acceptance criteria
 - A reusable Go package at `packages/go-client` (part of the single-root `hackathon` module, imported as `hackathon/packages/go-client`) exposes typed methods for: `Login`, `Register`, `Me`, `Logout`, `ListChannels`, `CreateChannel`, `ListMessages`, `PostMessage`, `WsTicket`, and `Watch` (returns a stream of inbound events).
