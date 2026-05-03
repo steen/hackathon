@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T16:34:51Z
-**Analyzed commit:** `39ce98d`
+**Last updated:** 2026-05-03T17:26:50Z
+**Analyzed commit:** `fa60bfd`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -46,39 +46,40 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
-| phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
-| phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 4/5 | 1 | 0 | 0 |
+| phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [auth-internals](phase-1/auth-internals.md) | implemented | 4/5 | 1 | 0 | 0 |
-| phase-1 | [security-headers-and-sqlite-ensure-wiring](phase-1/security-headers-and-sqlite-ensure-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
+| phase-1 | [security-headers-and-sqlite-ensure-wiring](phase-1/security-headers-and-sqlite-ensure-wiring.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [startup-config-checks](phase-1/startup-config-checks.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [auth-endpoints](phase-1/auth-endpoints.md) | implemented | 7/7 | 0 | 0 | 0 |
-| phase-1 | [access-log-fields-and-wiring](phase-1/access-log-fields-and-wiring.md) | stub | 0/4 | 0 | 0 | 4 |
+| phase-1 | [access-log-fields-and-wiring](phase-1/access-log-fields-and-wiring.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [rate-limits](phase-1/rate-limits.md) | implemented | 4/4 | 0 | 0 | 0 |
-| phase-1 | [auth-endpoint-paths-align-with-prd](phase-1/auth-endpoint-paths-align-with-prd.md) | stub | 0/4 | 0 | 0 | 4 |
-| phase-1 | [channels-and-messages](phase-1/channels-and-messages.md) | partial | 1/6 | 5 | 0 | 0 |
-| phase-1 | [ws-hardening](phase-1/ws-hardening.md) | partial | 2/4 | 1 | 0 | 1 |
-| phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | stub | 0/5 | 0 | 0 | 5 |
-| phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | partial | 1/3 | 2 | 0 | 0 |
+| phase-1 | [auth-endpoint-paths-align-with-prd](phase-1/auth-endpoint-paths-align-with-prd.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-1 | [channels-and-messages](phase-1/channels-and-messages.md) | implemented | 6/6 | 0 | 0 | 0 |
+| phase-1 | [ws-hardening](phase-1/ws-hardening.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | implemented | 3/3 | 0 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
-**Phase-1 totals (so far):** 14 features analyzed of 14 spec'd · 64 ACs · 35 covered · 11 partial · 0 missing · 18 deferred.
+**Phase-1 totals:** 14 features analyzed of 14 spec'd · 64 ACs · 63 covered · 1 partial · 0 missing · 0 deferred.
 
-`feature-ws-userid-binding-and-channel-existence-check` (new this run) is the third planned-only follow-up stub spec, exists to close `feature-ws-hardening` AC-3 (partial) and AC-4 (deferred) flagged in PR #58. Reframes AC-4 as a pre-upgrade HTTP 404 + envelope rather than the originally-promised "typed error frame" (which would require typed inbound WS frames; out of scope per the new spec). All 5 ACs deferred until impl PR ships.
+**Coordinated follow-up batch landed in `fa60bfd`:** the four planned-only stub specs (gap-A `access-log-fields-and-wiring`, gap-B `security-headers-and-sqlite-ensure-wiring`, gap-C `auth-endpoint-paths-align-with-prd`, gap-D `ws-userid-binding-and-channel-existence-check`) all closed in one PR set. Each one was tracked here at 0/N deferred; all four re-promote to N/N implemented at this SHA. The closure also transitively re-promotes three parent features whose ACs depended on the same wiring chain:
 
-`feature-auth-endpoints` (PR #38) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary. The signing-key wiring is *behaviorally* sound (`config.Validate` enforces the strength rules at startup, then the handler reads `CHAT_JWT_SECRET` independently) but `apps/server/main.go` does not thread `cfg.JWTSecret` directly into `NewAuthHandlers.SigningKey` — the env var is read twice. The `feature-auth-internals` AC-5 partial flag should stay until that chain is concrete; see `auth-endpoints.md` cross-feature note.
+- `logging-and-error-envelope` AC-1 (was partial: missing `remote_ip` + `user_id`) → covered by `middleware.go:103`'s extended Printf format from gap-A.
+- `file-perms-and-headers` AC-2 + AC-3 (was partial: `SecurityHeaders` defined but not on the live mux) → covered by `main.go:154`'s outermost `SecurityHeaders` wrap from gap-B.
+- `ws-hardening` AC-3 + AC-4 (was partial + deferred: `_ = userID` discard + no channel-existence check) → covered by `connState{userID, channel}` + pre-upgrade-404 path from gap-D. AC-4 is now anchored on the pre-upgrade HTTP 404 + envelope (the originally-promised typed-frame variant stays explicitly out of scope per the gap-D spec).
+- `channels-and-messages` AC-1 through AC-5 (were partial: handlers tested via httptest but routes never registered on the live mux) → covered by `main.go:133`'s `ch.Routes(mux, require, msg)` call.
+- `sqlite-schema-and-ulid` AC-4 (was partial: schema permits ULIDs but no shipped INSERT site used `NewULID()`) → covered by the now-live `channels_handlers.go:77` and `messages_handlers.go:138` INSERT call sites.
 
-Notable phase-1 gaps:
-- `auth-internals` AC-5 partial: behaviorally satisfied but main.go reads `CHAT_JWT_SECRET` directly twice instead of threading `cfg.JWTSecret` through; AC-5 stays `partial` on a strict reading of "loaded from config".
-- `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field — the new `access-log-fields-and-wiring` stub spec exists to close it. When the impl PR lands, AC-1 should re-promote.
-- `sqlite-schema-and-ulid` AC-4 partial: schema permits ULIDs and `ids.NewULID()` is solid, but no shipped INSERT code path used it at the analyzed SHA — closed at the contract level by `feature-channels-and-messages` (#42); next analysis tick should re-promote to covered.
-- `channels-and-messages` AC-1 through AC-5 partial: handlers + repo + WS broadcast all ship with strong unit + integration tests at the analyzed SHA `000a530`. AC-6 (auth required) is the one cleanly-covered AC. **Wiring gap closed by PR #42 on main** (`ch.Routes(mux, require, msg)` is now in `apps/server/main.go`); re-evaluate at next analysis tick.
-- `ws-hardening` AC-3 partial + AC-4 deferred: handler extracts userID from ticket but stashes it in `_ = userID` with a TODO (the new `feature-ws-userid-binding-and-channel-existence-check` follow-up plan tracks both); AC-4 typed-channel-not-found frame waits on a typed inbound WS frame contract that `feature-channels-and-messages` was meant to introduce but didn't (still raw byte rebroadcast).
-- `security-headers-and-sqlite-ensure-wiring`, `access-log-fields-and-wiring`, `auth-endpoint-paths-align-with-prd`, `ws-userid-binding-and-channel-existence-check`: stub specs tracking unimplemented follow-ups. All deferred until the implementation PRs land.
+**Remaining phase-1 gap (one AC):**
+- `auth-internals` AC-5 partial: behaviorally satisfied but `apps/server/main.go` reads `CHAT_JWT_SECRET` directly twice (in `config.Validate` and in `NewAuthHandlers.SigningKey`) instead of threading `cfg.JWTSecret` through to the handler. AC-5 stays `partial` on a strict reading of "loaded from config" until the cfg→handler chain is concrete.
 
-`feature-rate-limits` (PR #41) ships clean: per-IP token-bucket on `/api/login` (10/5min) and `/api/register` (5/15min) with bounded LRU; per-username linear backoff (2 free → 500ms steps capped at 2s, 5min idle eviction, case-insensitive); 429 envelope + RFC-7231 `Retry-After`; rejection rows in `auth_events`. 17 tests across the three test files.
+`feature-rate-limits` (PR #41) ships clean: per-IP token-bucket on `/api/auth/login` (10/5min) and `/api/auth/register` (5/15min) with bounded LRU; per-username linear backoff (2 free → 500ms steps capped at 2s, 5min idle eviction, case-insensitive); 429 envelope + RFC-7231 `Retry-After`; rejection rows in `auth_events`. 17 tests across the three test files. (Note the `/api/auth/<verb>` paths after gap-C's path-alignment closure.)
 
-**Phase-1 sibling PRs in flight (not yet on main):** none — `file-perms-and-headers` (1/3, SecurityHeaders not wired) lands with this PR; the wiring gap is superseded by the `security-headers-and-sqlite-ensure-wiring` stub spec.
+`feature-auth-endpoints` (PR #38, paths aligned by gap-C) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary.
+
+**Phase-1 sibling PRs in flight (not yet on main):** none — phase-1 closes here modulo the single `auth-internals` AC-5 partial flag.
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
