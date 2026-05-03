@@ -15,7 +15,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       "/api": { target: "http://127.0.0.1:8080", changeOrigin: true },
-      "/ws": { target: "http://127.0.0.1:8080", changeOrigin: true, ws: true },
+      // No changeOrigin on /ws: keep Host as localhost:5173 so coder/websocket's
+      // default Host-vs-Origin same-origin check passes without forcing devs to
+      // also set CHAT_ALLOWED_ORIGINS=http://localhost:5173.
+      "/ws": { target: "http://127.0.0.1:8080", ws: true },
     },
   },
 });
