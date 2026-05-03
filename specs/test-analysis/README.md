@@ -57,10 +57,10 @@ Generated automatically — leave this section alone; the agent rewrites it.
 
 **Phase-1 totals (so far):** 7 features analyzed of 12 spec'd · 34 ACs · 27 covered · 3 partial · 0 missing · 4 deferred.
 
-`feature-auth-endpoints` (PR #38) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary. `apps/server/main.go` now wires `cfg.JWTSecret` (validated by `feature-startup-config-checks`) into `httpapi.NewAuthHandlers.SigningKey` — this closes the `feature-auth-internals` AC-5 partial flag, which the next test-watch tick should re-promote.
+`feature-auth-endpoints` (PR #38) ships clean with 25+ in-package tests across the 5 endpoints + ticket store + middleware + auth-events recording. `scripts/smoke.sh` drives register → login → ws-ticket → watch and exits 0 against the live binary. The signing-key wiring is *behaviorally* sound (`config.Validate` enforces the strength rules at startup, then the handler reads `CHAT_JWT_SECRET` independently) but `apps/server/main.go` does not thread `cfg.JWTSecret` directly into `NewAuthHandlers.SigningKey` — the env var is read twice. The `feature-auth-internals` AC-5 partial flag should stay until that chain is concrete; see `auth-endpoints.md` cross-feature note.
 
 Notable phase-1 gaps:
-- `auth-internals` AC-5 partial: now satisfied at HEAD (cfg-validated secret threaded into auth.Issue/Parse via the auth-handlers wiring); awaiting next tick re-eval.
+- `auth-internals` AC-5 partial: behaviorally satisfied (config.Validate runs and the env-read secret is the same one the handler uses) but main.go reads `CHAT_JWT_SECRET` directly twice instead of threading `cfg.JWTSecret` through; AC-5 stays `partial` on a strict reading of "loaded from config".
 - `logging-and-error-envelope` AC-1 partial: access-log line missing `IP` field (production-code fix; PR #32 findings flag it).
 - `sqlite-schema-and-ulid` AC-4 partial: schema permits ULIDs and `ids.NewULID()` is solid, but no shipped INSERT code path used it at the analyzed SHA — closed once `feature-channels-and-messages` (#42) lands.
 - `security-headers-and-sqlite-ensure-wiring`: spec landed as `planned` to track gaps the agent flagged earlier; impl not started.
