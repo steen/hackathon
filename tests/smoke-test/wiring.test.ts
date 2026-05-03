@@ -30,10 +30,11 @@ describe("smoke-test: wiring + script structure", () => {
       watchInvocations.length,
       `expected at least 2 'watch' invocations in script, got ${String(watchInvocations.length)}`,
     ).toBeGreaterThanOrEqual(2);
-    // One `chatd send`
-    expect(/\bsend\s+"\$MSG"/.test(body) || /\bsend\b/.test(body), "must invoke chatd send").toBe(
-      true,
-    );
+    // One `chatd send <channel> <msg>` — phase-2 CLI takes a channel id.
+    expect(
+      /\bsend\b\s+"\$CHANNEL_ID"\s+"\$MSG"/.test(body) || /\bsend\b/.test(body),
+      "must invoke chatd send",
+    ).toBe(true);
     // Watcher-output assertion: greps the watcher output files for the message
     expect(/grep -F.*\$MSG/.test(body), "must grep watcher output files for the sent message").toBe(
       true,
@@ -43,16 +44,16 @@ describe("smoke-test: wiring + script structure", () => {
   it("TestAC1_smoke_test_uses_debug_subs_for_deterministic_subscriber_readiness", () => {
     // The script must NOT use a fixed sleep to wait for both watchers to
     // register with the hub — that race was the original flake. Per the spec
-    // risks section it polls /debug/subs?channel=#general until the count
-    // reaches 2 (5s budget). Catches a regression where someone reverts to a
+    // risks section it polls /debug/subs?channel=<id> until the count reaches
+    // 2 (5s budget). Catches a regression where someone reverts to a
     // sleep-based wait.
     const body = smokeBody();
     expect(body.includes("/debug/subs"), "must poll /debug/subs to wait for subscribers").toBe(
       true,
     );
     expect(
-      body.includes("channel=%23general"),
-      "must poll /debug/subs with URL-encoded #general",
+      body.includes("channel=${CHANNEL_ID}") || body.includes("channel=%23general"),
+      "must poll /debug/subs with the channel the watchers subscribed to",
     ).toBe(true);
     expect(
       /EXPECTED_SUBS=\s*2\b/.test(body),
