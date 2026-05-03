@@ -1,21 +1,24 @@
 ---
 name: test-pr
-description: Open a pull request for the test-analysis agent's branch. Composes a clear PR title and a what/why body that summarizes findings + new tests. Returns the PR URL. Invoked by `/test-watch`, also runnable standalone if a branch is ready.
+description: Open a pull request for the independent E2E test agent's branch. Composes a clear PR title and a what/why body that summarizes the single feature's E2E tests + findings. Returns the PR URL. Invoked by `/test-watch`, also runnable standalone if a branch is ready.
 user-invocable: true
 allowed-tools: [Read, Bash, Glob]
 ---
 
-# /test-pr — open the PR for a test-analysis run
+# /test-pr — open the PR for an E2E-test run
 
 You open a GitHub PR for a branch produced by `/test-watch`. The branch is already pushed; you compose the title + body and call `gh pr create`.
+
+Each PR covers **one feature's E2E tests** (per the orchestrator's one-feature-per-tick rule) plus the updated findings docs.
 
 ## Arguments
 
 `$ARGUMENTS` is a free-form instruction from the orchestrator. Expected to provide, at minimum:
 - Worktree path (defaults to current working directory if not given).
 - Branch name (defaults to current branch in the worktree if not given).
-- Findings paths (optional — discoverable by listing `specs/test-analysis/*/*.md` modified in this branch).
-- Counts (optional — discoverable by reading the findings front-matter).
+- Feature implemented this tick: `<phase>/<slug>` (required when invoked by orchestrator; inferable from the diff when standalone — exactly one `tests/e2e/<phase>/<slug>/` directory should have new files).
+- Findings path (optional — discoverable by listing `specs/test-analysis/<phase>/<slug>.md` modified in this branch).
+- Counts (optional — discoverable by reading the findings front-matter and the test-run output).
 
 When called directly by a human, infer the same values from `git status` + the worktree.
 
@@ -27,19 +30,20 @@ When called directly by a human, infer the same values from `git status` + the w
 
 ## Inferring counts
 
-Walk every modified `specs/test-analysis/*/*.md` in the diff (`git diff --name-only origin/main...HEAD`):
+Walk every modified `specs/test-analysis/<phase>/<slug>.md` in the diff (`git diff --name-only origin/main...HEAD`):
 - Read the YAML frontmatter (`total_acs`, `covered`, `partial`, `missing`, `deferred`, `implementation_status`, `feature`, `phase`).
-- Sum the totals across all files.
-- Count newly-added test files: `git diff --name-only --diff-filter=A origin/main...HEAD -- 'tests/**'`.
-- Count modified test files: `git diff --name-only --diff-filter=M origin/main...HEAD -- 'tests/**'`.
+- Count newly-added E2E test files: `git diff --name-only --diff-filter=A origin/main...HEAD -- 'tests/e2e/**'`.
+- Count modified E2E test files: `git diff --name-only --diff-filter=M origin/main...HEAD -- 'tests/e2e/**'`.
 
 Also capture the test-run results from the most recent invocation if available (the orchestrator should pass them via `$ARGUMENTS`; otherwise, omit that section).
 
 ## PR title
 
-Format: `test: phase analysis <YYYY-MM-DD> — <N> new tests across <M> features`
+Format: `test(e2e): <feature-slug> — <N> new E2E tests (<F> failing)` (under 70 chars).
 
-If only one feature was touched: `test: <feature-slug> — <N> new tests` (under 70 chars).
+If failing == 0: `test(e2e): <feature-slug> — <N> new E2E tests`.
+
+For findings-only refresh runs (rare — orchestrator step 8b): `test: refresh E2E coverage analysis at <short-SHA>`.
 
 ## PR body
 
@@ -48,37 +52,44 @@ Use this template, fill in placeholders. Do not include filler ("This PR…", "W
 ```markdown
 ## Summary
 
-Automated test-analysis run against `<full SHA of base origin/main at start of run>`.
+Independent E2E coverage for `<phase>/<feature-slug>`, written against `<full SHA of base origin/main at start of run>`.
 
-- **Features analyzed:** <M>
+- **Spec:** [`specs/plans/<phase>/feature-<slug>.md`](specs/plans/<phase>/feature-<slug>.md)
+- **Implementation status:** <implemented | partial | stub | unknown>
 - **Acceptance criteria:** <T> total · <covered> covered · <partial> partial · <missing> missing · <deferred> deferred
-- **New tests:** <added> added · <modified> modified
-- **Test run:** <pass | fail with N failures | not run>
+- **E2E tests this PR:** <added> added · <modified> modified
+- **Test run:** <all passing | N failing | N skipped (deferred)>
 
-## What
+## What this PR adds
 
-For each feature with new or modified tests, one bullet:
-- `<phase>/<feature-slug>` (status: <implementation_status>) — added <K> tests covering AC-<list>; deferred AC-<list>. See [findings](specs/test-analysis/<phase>/<slug>.md).
+For each new or modified test file, one bullet:
+- `tests/e2e/<phase>/<slug>/<file>` — covers AC-<list>. <One-line summary of what the test boots and asserts.>
 
-## Why
+For deferred tests:
+- `tests/e2e/<phase>/<slug>/<file>::<TestName>` — skipped pending `<concrete impl gap, e.g. "apps/web exists">`.
 
-For each feature, a one-line motivation drawn from the spec's goal/value section. If the spec doesn't have one, say so.
+## Why these tests
 
-- `<phase>/<feature-slug>` — <verbatim goal sentence from spec, or "spec lacks goal section">
+One-line motivation drawn from the spec's goal/value section, plus the rationale for the chosen E2E shape.
 
-## Findings docs
+- **Coverage gap closed:** <which ACs were missing before this PR>.
+- **Spec goal:** <verbatim goal sentence from spec, or "spec lacks goal section">.
+- **E2E shape:** <e.g. "Boots apps/server with random secrets in t.TempDir(), drives /api/auth/* via net/http, asserts envelope shape and SQLite-side audit rows.">
 
-- `specs/test-analysis/<phase>/<slug>.md` — <one-line summary>
-- `specs/test-analysis/README.md` — index
+## Failing E2E tests (if any)
 
-## Caveats
+Each failing test is a real signal that the implementation does not satisfy the AC at this SHA. The agent does NOT modify production code to make them pass — that's a deliberate choice that goes to a human reviewer.
 
-- <Any failing tests, with file:test-name and one-line reason. Frame as "test reveals real gap, do not silently fix.">
-- <Any deferred ACs whose impl is still a stub.>
-- <Any AC whose interpretation was uncertain.>
+- `tests/e2e/<phase>/<slug>/<file>::<TestName>` — AC-N: <one-line reason from output>. <Suggested next step: fix impl in apps/X / refine the test / amend the spec.>
 
-🤖 Generated by the test-analysis agent (`.claude/skills/test-watch`).
+## Findings doc
+
+- [`specs/test-analysis/<phase>/<slug>.md`](specs/test-analysis/<phase>/<slug>.md) — full coverage table + per-AC notes.
+
+🤖 Generated by the independent E2E test agent (`.claude/skills/test-watch`).
 ```
+
+Omit the "Failing E2E tests" section entirely if there are none. Omit the deferred sub-list if there are none.
 
 ## Open the PR
 

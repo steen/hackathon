@@ -1,13 +1,15 @@
 ---
 name: test-watch
-description: Orchestrator for the test-analysis agent. One tick — checks lock, pulls main, decides whether there's new work, and if so runs analyze → implement → PR in an isolated worktree. Designed to be fired by `/loop 90s /test-watch`.
+description: Orchestrator for the independent E2E test agent. One tick — checks lock, pulls main, decides whether there's new work, and if so runs analyze → pick one feature → implement → PR in an isolated worktree. The agent writes E2E tests under `tests/e2e/<phase>/<feature-slug>/` that drive the production system end-to-end. Designed to be fired by `/loop 90s /test-watch`.
 user-invocable: true
 allowed-tools: [Read, Write, Edit, Bash, Skill]
 ---
 
 # /test-watch — orchestrator tick
 
-You are the orchestrator for the test-analysis agent. Each invocation is ONE tick. Most ticks should be a silent no-op. Only do real work when there is a new commit on `origin/main` since the last analyzed commit.
+You are the orchestrator for the independent E2E test agent. Each invocation is ONE tick. Most ticks should be a silent no-op. Only do real work when there is a new commit on `origin/main` since the last analyzed commit, OR when the previous analysis identified a feature with missing ACs that hasn't been implemented yet.
+
+The agent owns `tests/e2e/<phase>/<feature-slug>/` exclusively. It writes black-box tests that boot real binaries and drive them via real HTTP/WS clients. It does NOT touch in-package tests, scaffold tests, or any production code. Each tick implements tests for **one feature** — keeps PRs small and reviewable.
 
 All git work happens in a dedicated worktree at `.claude/worktrees/test-agent` so the user's primary working tree, branch, and staged changes are never touched.
 
@@ -27,13 +29,15 @@ Run these steps in order. Bail immediately on any step that says "exit silently"
 
 If `STATE_FILE` does not exist, create its parent dir and write:
 ```json
-{"in_progress": false, "started_at": null, "last_analyzed_commit": null, "last_pr_url": null}
+{"in_progress": false, "started_at": null, "last_complete_commit": null, "last_pr_url": null}
 ```
+
+(The legacy field `last_analyzed_commit` from earlier versions of this skill should be migrated to `last_complete_commit` on first read — they have different semantics now: this one only advances when EVERY feature is fully covered, not just whenever analysis runs.)
 
 Read it. Schema:
 - `in_progress` (bool) — concurrency guard
 - `started_at` (ISO-8601 string or null) — when the current cycle began
-- `last_analyzed_commit` (sha or null) — last `origin/main` SHA we analyzed
+- `last_complete_commit` (sha or null) — last `origin/main` SHA at which analysis showed zero missing ACs across every feature (used to skip analysis when nothing has moved)
 - `last_pr_url` (string or null) — PR opened by the most recent successful run
 
 ### 2. Concurrency guard
@@ -54,11 +58,19 @@ Inside the worktree:
 - `git -C "$WORKTREE" fetch --quiet origin main`
 - Capture `ORIGIN_SHA=$(git -C "$WORKTREE" rev-parse origin/main)`
 
-If `ORIGIN_SHA == state.last_analyzed_commit`: **exit silently** (nothing new on main).
+If `ORIGIN_SHA == state.last_complete_commit`: **exit silently** (every feature was fully covered the last time we analyzed at this SHA — nothing has moved since).
+
+Then enumerate open agent PRs so the picker doesn't double-write a feature that's already in review:
+```
+gh pr list --state open --search 'head:test-analysis/' --json number,headRefName,title
+```
+Parse the title of each open PR for the `<phase>/<feature-slug>` token (the title format is `test(e2e): <slug> — …` per `/test-pr`). Capture this set as `BUSY_FEATURES`.
+
+If unable to query GitHub, log one chat line (`test-watch: gh pr list failed; proceeding without busy-feature filter`) and continue with `BUSY_FEATURES = {}` — the worst case is a duplicate PR that a human can close.
 
 ### 5. Acquire lock
 
-Write state with `in_progress=true`, `started_at=<now ISO-8601>`. Keep `last_analyzed_commit` and `last_pr_url` unchanged.
+Write state with `in_progress=true`, `started_at=<now ISO-8601>`. Keep `last_complete_commit` and `last_pr_url` unchanged.
 
 From this point on, EVERY exit path (success or error) MUST clear `in_progress` and update `started_at=null` before returning.
 
@@ -87,38 +99,64 @@ If a branch with that name already exists locally (e.g., a prior failed run), ap
 
 Invoke the `test-analyze` skill, passing `$WORKTREE` as args. It writes per-feature findings to `$WORKTREE/specs/test-analysis/<phase>/<feature-slug>.md` and updates `$WORKTREE/specs/test-analysis/README.md`.
 
-It must return a structured summary back, conceptually:
-- `total_features` (int)
-- `total_missing_acs` (int)
-- `findings_paths` (list of relative paths)
+It returns a summary line:
+```
+test-analyze: features=<F> total_acs=<T> covered=<C> partial=<P> missing=<M> deferred=<D>
+```
+followed by one line per feature with missing or deferred ACs:
+```
+feature: <phase>/<slug> missing=<M> deferred=<D> findings=specs/test-analysis/<phase>/<slug>.md
+```
 
-If `total_missing_acs == 0`:
-- `git -C "$WORKTREE" checkout test-agent` (abandon the empty branch; it has no commits, so just leaving it unchecked-out is fine)
+Capture both — you'll use the per-feature lines to pick a target.
+
+If `total_missing == 0`:
+- `git -C "$WORKTREE" checkout test-agent` (abandon the empty branch).
 - `git -C "$WORKTREE" branch -D "$BRANCH"`
-- Update state: `last_analyzed_commit = ORIGIN_SHA`, `in_progress=false`, `started_at=null`. Persist.
-- Exit silently. (No PR when there's nothing to add.)
+- Update state: `last_complete_commit = ORIGIN_SHA`, `in_progress=false`, `started_at=null`. Persist.
+- Exit silently. (No PR when there's nothing to add — every spec'd AC has either an E2E test or a tracked deferred placeholder.)
 
-### 9. Implement tests
+### 8b. Pick one feature
 
-Invoke the `test-implement` skill with `$WORKTREE` as args. It reads the findings and writes new tests under `$WORKTREE/tests/**` matching the existing scaffold patterns.
+From the per-feature lines, **filter out any feature whose `<phase>/<slug>` is in `BUSY_FEATURES`** (open agent PRs from prior ticks, captured in step 4). The remaining set is candidate features.
 
-After it returns, run the full test suite inside the worktree:
-- `cd "$WORKTREE" && go test ./...`
+If the candidate set is empty (every feature with missing ACs already has an open PR):
+- Abandon the branch as in the silent-exit path above.
+- Do NOT update `last_complete_commit` — there's still work, just blocked on review.
+- Exit silently.
+
+Otherwise, pick the candidate with the highest `missing` count. Tie-break by highest `deferred`, then alphabetically by `<phase>/<slug>` for determinism.
+
+Capture this as `$FEATURE` (e.g. `phase-1/auth-endpoints`). All test-writing this tick targets only this feature.
+
+### 9. Implement tests for the chosen feature
+
+Invoke the `test-implement` skill with args:
+```
+worktree=$WORKTREE feature=$FEATURE
+```
+
+It reads the findings for `$FEATURE` and writes E2E tests under `$WORKTREE/tests/e2e/<phase>/<feature-slug>/`. It does NOT touch any other directory.
+
+After it returns, run the test suite for the affected E2E directory:
+- `cd "$WORKTREE" && go test ./tests/e2e/...`
 - `cd "$WORKTREE" && pnpm install --frozen-lockfile && pnpm -r --if-present test` (use `~/.npm-global/bin/pnpm` if `pnpm` is not on PATH)
 
 If any test fails:
 - Capture the failure output.
-- Append a `## Test run failures` section to the relevant findings doc with the failure log.
-- Continue to commit/push/PR — do NOT silently swallow the failure. The PR will be marked as needing review with the failures called out.
+- Append a `## Test run failures` section to the findings doc for `$FEATURE` with the failure log and a one-line interpretation ("E2E reveals real gap in apps/server/... — do not fix here").
+- Continue to commit/push/PR — do NOT silently swallow the failure. Failing E2E tests are the agent's primary signal that an AC is not actually met by the implementation. Surface them in the PR body.
+
+If `test-implement` reported `written=0` (e.g. the chosen feature had only deferred ACs and they were all already on record), abandon the branch as in the silent-exit path above.
 
 ### 10. Commit and push
 
 ```
-git -C "$WORKTREE" add specs/test-analysis tests
-git -C "$WORKTREE" -c commit.gpgsign=false commit -m "test: phase analysis $DATE — $TOTAL_MISSING_ACS new tests"
+git -C "$WORKTREE" add specs/test-analysis tests/e2e
+git -C "$WORKTREE" commit -m "test(e2e): $FEATURE — $WRITTEN new E2E tests ($PASSING passing, $FAILING failing, $SKIPPED skipped)"
 ```
 
-(If `commit.gpgsign` is unset locally, drop the `-c` flag — only suppress signing if the user has set it.)
+(If `commit.gpgsign` is set locally and signing fails for unattended runs, the user can opt into `-c commit.gpgsign=false` for this worktree only via their git config — the orchestrator does not suppress signing on its own. Per CLAUDE.md, never skip hooks/signing without explicit user direction.)
 
 ```
 git -C "$WORKTREE" push -u origin "$BRANCH"
@@ -126,7 +164,7 @@ git -C "$WORKTREE" push -u origin "$BRANCH"
 
 ### 11. Open PR
 
-Invoke the `test-pr` skill with args: worktree path, branch name, findings paths, total counts. It returns the PR URL.
+Invoke the `test-pr` skill with args: worktree path, branch name, the single feature implemented, the findings path for that feature, and the test-implement counts. It returns the PR URL.
 
 ### 12. Cleanup and persist state
 
@@ -139,23 +177,27 @@ This returns the worktree to its rest branch (which tracks `origin/main`) so a u
 Update state:
 - `in_progress=false`
 - `started_at=null`
-- `last_analyzed_commit=ORIGIN_SHA`
 - `last_pr_url=<URL from test-pr>`
+
+Do NOT update `last_complete_commit` here — opening a PR at this SHA does not mean every feature is covered. `last_complete_commit` only advances in step 8's silent-exit path when analysis returned `missing == 0` for every feature.
 
 Persist `STATE_FILE`.
 
-Emit a single one-line chat message: `test-watch: opened <URL> (<N> new tests across <M> features)`.
+Emit a single one-line chat message: `test-watch: opened <URL> (E2E tests for <FEATURE>: <N> written, <F> failing)`.
 
 ## Failure handling
 
 Any unexpected error during steps 5–11:
 1. Try to leave the worktree in a clean state: `git -C "$WORKTREE" checkout -B test-agent origin/main` (force-resets the rest branch even if it didn't exist or was on something else).
-2. Clear the lock: write `in_progress=false`, `started_at=null` to `STATE_FILE`. Do NOT update `last_analyzed_commit` — we want to retry on the next tick.
+2. Clear the lock: write `in_progress=false`, `started_at=null` to `STATE_FILE`. Do NOT update `last_complete_commit` — we want to retry on the next tick.
 3. Emit one chat line: `test-watch: error in step <N>: <short message>`. Do not paste long stack traces — most ticks are unattended.
 
 ## Things you must NOT do
 
-- Do not modify production code under `apps/**` or `packages/**`. You only add tests and findings docs.
+- Do not modify production code under `apps/**` or `packages/**`. You only add E2E tests under `tests/e2e/` and findings docs under `specs/test-analysis/`.
+- Do not modify tests outside `tests/e2e/<phase>/<feature-slug>/`. The other test directories (`tests/scaffold/`, `tests/smoke-test/`, `tests/server-ws-hub/`, `tests/monorepo-scaffold/`, all in-package `*_test.*`) belong to scaffold maintenance and feature authors — leave them alone.
+- Do not implement tests for more than one feature per tick. One feature = one PR.
+- Do not modify production code to make a failing E2E test pass. A failing E2E test is the agent's reporting channel — surface it in the PR body and let a human decide whether to fix the impl, refine the test, or amend the spec.
 - Do not push to `main` directly. Always go through a feature branch + PR.
 - Do not retry destructive git operations (`reset --hard`, `clean -fd`) outside the worktree.
 - Do not edit the user's primary working tree.
