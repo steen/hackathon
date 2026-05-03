@@ -1,7 +1,7 @@
 # Feature: System smoke test (`scripts/smoke.sh`)
 
 **Parent phase:** [Phase 0: Walking skeleton, system test ready](../phase-0-walking-skeleton-system-test-ready.md)
-**Status:** planned
+**Status:** done (PR #18)
 
 ## Requirements covered
 - (foundational test harness; no user-story IDs map directly)

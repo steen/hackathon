@@ -10,6 +10,17 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
+
+### Added
+- `apps/cli/main.go` is now a `package main` dispatcher delegating to `apps/cli/cmd`. Supports `chatd [--url URL] send <msg...>` and `chatd [--url URL] watch`; URL falls back to `CHAT_SERVER` env or the default. Cancels on SIGINT/SIGTERM via `signal.NotifyContext`. The library shipped in #14; this lands the missing entrypoint.
+- `scripts/smoke.sh` is the phase-0 system test: it builds `bin/server` and `bin/chatd`, picks a free port (via a one-shot `python3` socket bind, with `CHAT_SERVER_PORT` env override if `python3` is unavailable; the script errors out clearly if `python3` is missing and no override is set), boots the server, starts two `chatd watch` processes, sends a unique message via `chatd send`, and asserts both watchers received it within a 5s budget. Tears down all spawned processes via `trap cleanup EXIT INT TERM HUP` and dumps server/watcher logs only on failure.
+- `pnpm smoke` shortcut and `pnpm test` (root) now runs the smoke script first, then the workspace test loop. Smoke first so a broken phase-0 system test fails fast before slower unit suites run, and so a missing workspace dep (e.g. unbuilt `tests/node_modules`) does not silently skip the canonical phase-0 acceptance test.
+- CI: the `go` job in `.github/workflows/ci.yml` now runs `bash scripts/smoke.sh` after `go test`. The pnpm job uses `pnpm -r` which bypasses root scripts, so smoke is wired explicitly here rather than via `pnpm test`.
+
+### Removed
+- `apps/cli/doc.go` (its `package cli` declaration conflicted with the new `package main` in the same directory).
+
 ## 2026-05-03 15:20Z — Server `/ws` endpoint with in-memory hub (phase 0) (#17)
 
 ### Added
