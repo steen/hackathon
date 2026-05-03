@@ -573,7 +573,7 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 - This PRD: `specs/PRD.md`
 - Changelog: `CHANGELOG.md`
 - README (Phase 3 deliverable): `README.md`
-- Build process: features are implemented by Claude Code agent teams (one team per feature, members `impl` / `bull` / `qual`); the prior Archon `feature-implementation-loop` workflow is no longer the active driver. Files under `.archon/` are kept for reference.
+- Build process: features are implemented by Claude Code agent teams (one team per feature, members `impl` / `bull` / `qual`).
 
 ### Key dependency links
 - pnpm: https://pnpm.io

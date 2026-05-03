@@ -1,6 +1,6 @@
 # Implementation Plans
 
-These plans were originally seeded from the PRD by an Archon workflow; ongoing maintenance and per-feature implementation is now driven by Claude Code subagents and agent teams (impl/bull/qual review loop). Update this README and the relevant phase/feature files manually as the PRD evolves.
+Maintenance and per-feature implementation is driven by Claude Code subagents and agent teams (impl/bull/qual review loop). Update this README and the relevant phase/feature files manually as the PRD evolves.
 
 Some Phase-0 features have a deeper `feature-name/test-plan.md` next to the feature file. This is a per-feature exception for AC-tagged exhaustive test specs and is not the convention for other phases.
 
