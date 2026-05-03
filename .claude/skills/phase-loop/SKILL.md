@@ -113,9 +113,7 @@ After any merge: `rtk git fetch --all --prune` so local tracking refs match.
 
 ### 12. Re-fire (if `auto`)
 
-`ScheduleWakeup` at 60s with prompt `/phase-loop auto`. (60s is the harness floor — `delaySeconds` < 60 gets clamped up. The previous 270s setting stayed inside the 5-min prompt-cache TTL; 60s deliberately burns cache on most ticks for faster reaction. Don't go below 60s.)
-
-If a PR-merge notification arrives between ticks, re-invoke `/phase-loop auto` immediately — merges shrink the conflict surface and shouldn't wait for the safety wakeup.
+`ScheduleWakeup` at 270s with prompt `/phase-loop auto` (stays inside the 5-min prompt-cache TTL — every tick under 300s reuses the warm cache). If a PR-merge notification arrives between ticks, re-invoke `/phase-loop auto` immediately — merges shrink the conflict surface and shouldn't wait for the safety wakeup.
 
 Without `auto`, exit cleanly.
 
