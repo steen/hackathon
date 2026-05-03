@@ -66,9 +66,15 @@ If empty, **idle** — emit `references/idle-banner.md` and skip to step 12.
 
 ### 5. Plan the batch
 
-**Priority order from the epic's `## Sub-issues` list, not numerical order.** Take the first eligible item from the list as the primary; add more eligible items in list order whose footprints are disjoint from the primary AND from each other AND from every open PR. Cap at 3 subagents per tick.
+Take the first eligible item from the priority order as the primary; add more eligible items in priority order whose footprints are disjoint from the primary AND from each other AND from every open PR. Cap at 3 subagents per tick.
 
-If the epic's body lacks a `## Sub-issues` section (older epics may), fall back to numerical order.
+**Priority order — try these sources in order, use the first one that's available:**
+
+1. **Textual `## Sub-issues` list in the epic body.** The durable repo convention. Items appear in intentional priority; their order wins.
+2. **Native GitHub sub-issue link order.** If the epic body lacks `## Sub-issues`, query `rtk gh api repos/steen/Hackathon/issues/<epic>/sub_issues --jq '.[] | .number'` — that returns sub-issues in the order they were linked, which is approximately the order someone curated them.
+3. **Analytical order.** If neither above gives ordering (or the lists are empty), read each open sub-issue's body and infer order from content: explicit gating phrases (`must run first`, `blocks the rest`, `depends on #N`, `after #N lands`), upstream dependencies named in the issue, and severity/scope. Construct a topological ordering with gates first, then dependencies, then independent items by smallest scope. Surface the inferred ordering in chat so the user can override.
+
+NEVER fall back to numerical issue-number order. Numbers are creation timestamps, not priority.
 
 If a sub-issue is explicitly flagged as gating ("must run first", "blocks the rest", or similar in the body / epic deliverables), dispatch it ALONE — don't add parallel work that the audit/gate may invalidate.
 
