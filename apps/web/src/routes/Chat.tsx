@@ -1,0 +1,153 @@
+import type * as React from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useAuth } from "../auth/AuthContext.js";
+import { useChannels } from "../hooks/useChannels.js";
+import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
+import { getClient } from "../api.js";
+
+function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
+  const label =
+    state === "open"
+      ? "Connected"
+      : state === "connecting"
+        ? "Connecting..."
+        : state === "reconnecting"
+          ? "Reconnecting..."
+          : state === "closed"
+            ? "Disconnected"
+            : "Idle";
+  return (
+    <span className={`conn conn--${state}`} role="status" aria-live="polite">
+      {label}
+    </span>
+  );
+}
+
+export function Chat(): React.JSX.Element {
+  const { user, logout } = useAuth();
+  const channelsState = useChannels(true);
+  const [activeChannel, setActiveChannel] = useState<string | null>(null);
+  const messagesState = useMessages(activeChannel);
+  const [draft, setDraft] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (activeChannel === null && channelsState.channels.length > 0) {
+      setActiveChannel(channelsState.channels[0]?.id ?? null);
+    }
+  }, [activeChannel, channelsState.channels]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messagesState.messages]);
+
+  async function onSend(e: FormEvent<HTMLFormElement>): Promise<void> {
+    e.preventDefault();
+    if (activeChannel === null) return;
+    const body = draft.trim();
+    if (body.length === 0) return;
+    setSendError(null);
+    try {
+      await getClient().postMessage(activeChannel, body);
+      setDraft("");
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "failed to send");
+    }
+  }
+
+  return (
+    <div className="chat-layout">
+      <aside className="sidebar">
+        <header>
+          <strong>{user?.username ?? "..."}</strong>
+          <button
+            type="button"
+            onClick={() => {
+              void logout();
+            }}
+          >
+            Sign out
+          </button>
+        </header>
+        <h2>Channels</h2>
+        {channelsState.loading ? <p>Loading...</p> : null}
+        {channelsState.error !== null ? (
+          <p role="alert" className="error">
+            {channelsState.error}
+          </p>
+        ) : null}
+        <ul>
+          {channelsState.channels.map((c) => (
+            <li key={c.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveChannel(c.id);
+                }}
+                aria-current={c.id === activeChannel ? "true" : undefined}
+              >
+                #{c.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {/* TODO(#69): online-users list driven by GET /api/presence + presence WS events.
+            api-client surfaces PresenceEvent today; the GET endpoint is not yet wrapped
+            in api-client and the server route lands with #69. Leaving this empty rather
+            than fabricating a stub. */}
+        <div className="presence" aria-label="online users (pending #69)" />
+      </aside>
+      <main className="messages">
+        <header className="messages__header">
+          <h2>
+            {channelsState.channels.find((c) => c.id === activeChannel)?.name ?? "Select a channel"}
+          </h2>
+          <ConnectionBadge state={messagesState.connection} />
+        </header>
+        <div className="messages__list" ref={listRef} data-testid="message-list">
+          {messagesState.error !== null ? (
+            <p role="alert" className="error">
+              {messagesState.error}
+            </p>
+          ) : null}
+          {messagesState.messages.map((m) => (
+            <article key={m.id} className="msg" data-testid="msg">
+              <div className="msg__meta">
+                <span className="msg__sender">{m.sender_user_id}</span>
+                <time dateTime={m.created_at}>{m.created_at}</time>
+              </div>
+              <div className="msg__body">{m.body}</div>
+            </article>
+          ))}
+        </div>
+        <form
+          className="composer"
+          onSubmit={(e) => {
+            void onSend(e);
+          }}
+        >
+          <input
+            type="text"
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+            }}
+            placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
+            disabled={activeChannel === null}
+            aria-label="message"
+          />
+          <button type="submit" disabled={activeChannel === null || draft.trim().length === 0}>
+            Send
+          </button>
+          {sendError !== null ? (
+            <p role="alert" className="error">
+              {sendError}
+            </p>
+          ) : null}
+        </form>
+      </main>
+    </div>
+  );
+}
