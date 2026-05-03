@@ -1,180 +1,115 @@
 ---
 name: pr-review-loop
-description: One tick of the PR review loop — claim a candidate PR by adding the `in-review` label, run /review and /security-review, post line-level comments, fix issues, ensure CI green, and squash-merge. Each tick runs in its own per-PR git worktree so multiple ticks can review different PRs in parallel without touching the user's primary working tree. PRs already carrying the `in-review` label are skipped (claimed by another tick or held for human attention). Designed to be fired by `/loop 1m /pr-review-loop`, also runnable standalone.
+description: One tick of the PR review loop. Picks open PRs without `in-review`, dispatches a `pr-reviewer` subagent (in its own git worktree) per PR up to a parallel cap, then exits. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup at 270s). Idle ticks emit a banner and exit cleanly.
 ---
 
 # pr-review-loop
 
-One tick of the PR review loop. Picks at most one candidate PR per invocation, drives it from "open" to "merged", then exits.
+Driven by `/pr-review-loop` (single tick) or `/pr-review-loop auto` (continuous).
 
 ## Runtime contract
 
-- **Repo:** the cwd is a git checkout with `gh` authenticated for the GitHub repo. The `in-review` label exists on the repo (created via `gh label create "in-review" --color fbca04`); if a future agent finds it missing it should re-create it.
-- **Concurrency:** the `in-review` GitHub label is the per-PR lock — only one tick at a time should hold it on a given PR. Per-tick filesystem isolation comes from a dedicated git worktree at `.claude/worktrees/pr-review/<PR>`, so multiple ticks reviewing *different* PRs can run in parallel without stepping on each other or on the user's primary working tree.
-- **Idempotency:** every step is safe to re-run on the same PR. Adding the label twice is a no-op; posting two reviews is verbose but not destructive; merging an already-merged PR is a `gh` no-op; an existing worktree is reused after being reset to the PR's tip.
+- Cwd is the Hackathon repo, `gh` authenticated, `rtk` on PATH.
+- Each PR review runs in a `pr-reviewer` subagent dispatched with `isolation: "worktree"` so the harness creates `.claude/worktrees/agent-<id>` per review. The supervisor's primary working tree is never modified.
+- The `in-review` GitHub label is the per-PR lock — only one tick at a time holds it. Closing the PR (merge or abandon) auto-removes it.
+- Every step is idempotent.
+- The skill never edits source files itself — only dispatches.
 
-## Constants
+## Inputs
 
-- `REPO_ROOT`: the main working directory (cwd when this skill is invoked).
-- `WORKTREE_BASE`: `$REPO_ROOT/.claude/worktrees/pr-review`
-- `WORKTREE`: `$WORKTREE_BASE/$PR` (set once `$PR` is known in step 1).
-- The user's primary working tree is never modified by this skill. After step 2, every `git` command runs via `git -C "$WORKTREE"`.
+| Arg | Purpose |
+|-----|---------|
+| `auto` | Schedule a follow-up wakeup on PR-merge events + safety net every ~5 min. Without it, run one tick and exit. |
 
 ## Tick procedure
 
-Run these steps in order. Bail at any "exit silently" point — emit no chat output.
+Bail at "exit silently" points — emit no chat output beyond a one-line status the user can ignore.
 
-### 1. Find the candidate PR
-
-```bash
-gh pr list --state open \
-  --json number,title,headRefName,labels,mergeable,isDraft \
-  --limit 20 \
-  | jq '[.[] | select(.isDraft == false) | select(.labels | map(.name) | index("in-review") | not)]'
-```
-
-If the array is empty: emit a SMALL ASCII-art animal (≤10 lines) with a one-line idle thought reflecting frustration about the empty PR queue. Vary the animal and thought from tick to tick. Then exit silently.
-
-If the array is non-empty: pick the lowest PR number. That's `$PR`. Set `WORKTREE=$REPO_ROOT/.claude/worktrees/pr-review/$PR` and capture `HEAD_BRANCH=$(gh pr view "$PR" --json headRefName -q .headRefName)`.
-
-### 2. Claim the PR with the `in-review` label
+### 1. Sync
 
 ```bash
-gh pr edit "$PR" --add-label in-review
+rtk git fetch --all --prune
+rtk git checkout main
+rtk git pull --ff-only
 ```
 
-This is the lock-acquire step. From this point, other ticks (or human reviewers running this skill) will not pick up `$PR` until the label is removed (which happens automatically when the PR closes).
+Verify the `in-review` label exists; if missing, recreate: `rtk gh label create "in-review" --color fbca04`. If working tree is dirty, **stop and report**.
 
-### 3. Provision the per-PR worktree
+### 2. Inventory
 
 ```bash
-mkdir -p "$WORKTREE_BASE"
-git -C "$REPO_ROOT" fetch --quiet origin "+refs/heads/$HEAD_BRANCH:refs/remotes/origin/$HEAD_BRANCH" main
+rtk gh pr list --state open --json number,title,headRefName,labels,mergeable,isDraft,author --limit 30
+rtk git worktree list
 ```
 
-If `$WORKTREE` does not exist, create it on the PR's head branch:
+Drop the supervisor's own user from review candidates if their author login is the same as `gh api user --jq .login` — agents shouldn't review their own work; let a human or a different agent do it. (Skip this filter if the team is single-user.)
+
+### 3. Filter eligible PRs
+
+A PR is eligible iff all are true:
+
+1. `state == "open"` and not draft.
+2. No `in-review` label (lock not held).
+3. `mergeable` is `"MERGEABLE"` or `"UNKNOWN"` (skip `"CONFLICTING"` until the author resolves).
+4. Not currently the head of any in-flight `pr-reviewer` subagent (cross-reference active task list).
+
+If empty, **idle** — emit `references/idle-banner.md` (small, varied, mood-appropriate) and skip to step 9.
+
+### 4. Plan the batch
+
+Take the lowest-numbered eligible PR first. Add more whose head branches are distinct (worktrees are per-agent so file overlap doesn't matter; the constraint is "no two ticks on the SAME PR"). Cap at **2 parallel reviews per tick** to keep the review noise reviewable by a human.
+
+### 5. Claim + dispatch
+
+For each PR in the planned batch:
+
+1. **Claim**: `rtk gh pr edit <pr> --add-label in-review`. This lock prevents another tick from picking the same PR.
+2. **Dispatch** a `pr-reviewer` subagent with `isolation: "worktree"` and `run_in_background: true`. The prompt must include `pr` and `head_branch` inputs and reference the agent definition (`.claude/agents/pr-reviewer.md`) for the procedure. Use `references/reviewer-prompt-template.md` for the scaffold.
+3. **Track** via `TaskCreate` — subject `pr-reviewer subagent (#<pr>) reviews + merges`, status `pending`.
+
+If the dispatch itself fails (worktree creation error, etc.), drop the `in-review` label so the next tick retries: `rtk gh pr edit <pr> --remove-label in-review`.
+
+### 6. Wait
+
+Exit. Subagent completion notifications arrive as `task-notification` system reminders; the next `/pr-review-loop auto` tick processes them.
+
+### 7. On completion
+
+For each notification:
+
+1. **`MERGED: yes`** — verify the PR is closed (`rtk gh pr view <pr> --json state,mergedAt`), mark task `completed`. The auto-removed `in-review` label confirms cleanup.
+2. **`MERGED: no` with `BLOCKED:` set** — the PR needs human attention. Leave the `in-review` label as the signal, mark task `completed` with a note recording the blocker (CI red, can't reconcile, etc.). Surface to the user.
+3. **Truncated report** — look up the PR directly: `rtk gh pr view <pr> --json state,mergedAt,reviewDecision`. If `MERGED`, treat as (1). If `OPEN` and a recent review exists (`rtk gh api repos/steen/Hackathon/pulls/<pr>/reviews --jq '.[-1].submitted_at'`), the agent did its job but didn't merge — surface and treat as (2).
+4. **Stalled / no notification** — see step 8's failed-agent path.
+
+Worktree cleanup for the subagent's `.claude/worktrees/agent-<id>` is automatic when the harness's `isolation: "worktree"` task completes. If the worktree is still locked after a successful merge, run `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` to reclaim it.
+
+### 8. Cleanup for failed reviews
+
+If a subagent stalls or returns without `MERGED:` and without a clear `BLOCKED:`, its agent-worktree may have uncommitted WIP. Before forcing a worktree removal:
 
 ```bash
-git -C "$REPO_ROOT" worktree add -B "$HEAD_BRANCH" "$WORKTREE" "origin/$HEAD_BRANCH"
+rtk git -C .claude/worktrees/agent-<id> status --short
+rtk git -C .claude/worktrees/agent-<id> log --oneline origin/main..HEAD
 ```
 
-If `$WORKTREE` already exists (left over from a prior crashed tick), reuse it but normalize first:
+If WIP exists, push it on the agent's branch as a draft so the work survives. Only then `git worktree remove -f -f`. Drop the `in-review` label so the next tick can retry the PR.
 
-```bash
-git -C "$WORKTREE" checkout -B "$HEAD_BRANCH" "origin/$HEAD_BRANCH"
-git -C "$WORKTREE" reset --hard "origin/$HEAD_BRANCH"
-git -C "$WORKTREE" clean -fd
-```
+### 9. Re-fire (if `auto`)
 
-If `git worktree add` fails with "already checked out" — meaning the user has the PR branch open in the primary tree, or another tick is reviewing the same PR — drop the `in-review` label (`gh pr edit "$PR" --remove-label in-review`) and exit silently. Don't force.
+`ScheduleWakeup` at 270s with prompt `/pr-review-loop auto` (stays inside the 5-min prompt-cache TTL). When a PR-merge notification arrives between ticks, re-invoke `/pr-review-loop auto` immediately — merges shrink the candidate queue and may free up dispatch slots.
 
-From this point, every git command runs via `git -C "$WORKTREE"`. The user's primary tree is never touched.
+Without `auto`, exit cleanly.
 
-### 4. Reconcile with main
+## Hard prohibitions
 
-If the branch has diverged from `origin/main` (mergeable status `CONFLICTING` or `git -C "$WORKTREE" rev-list --count HEAD..origin/main` > 0), merge `main` in non-destructively:
+- Never review your own PRs (filter by author in step 2).
+- Never `event: "APPROVE"` / `"REQUEST_CHANGES"` on a posted review (the agent enforces this; the supervisor doesn't post reviews directly).
+- Never dispatch two subagents against the same PR.
+- Never strip the `in-review` label except (a) when claim+dispatch fails (step 5), or (b) when reclaiming a stalled worker after WIP recovery (step 8). Otherwise let the merge auto-remove it.
+- Never edit source files in the supervisor — only dispatch.
 
-```bash
-git -C "$WORKTREE" merge origin/main --no-ff -m "Merge main into $HEAD_BRANCH — reconcile"
-```
+## References
 
-Resolve conflicts by:
-- preferring `main`'s versions of files that have already been reviewed and merged in earlier PRs (CI workflow, test plans the team has already curated, server code that this PR re-introduces from a rolled-back ancestor);
-- keeping the PR's net-new files and net-new diffs;
-- merging `CHANGELOG.md` so the new entry sits above existing ones and carries the `(#$PR)` suffix.
-
-Run `(cd "$WORKTREE" && go build ./... && go test ./...)` and `(cd "$WORKTREE" && pnpm install --frozen-lockfile && pnpm -r --if-present test)`. Then `git -C "$WORKTREE" push origin "$HEAD_BRANCH"`.
-
-### 5. Run /review and /security-review
-
-Use the existing `/review` and `/security-review` slash commands against the worktree. Both produce text findings; consolidate them yourself.
-
-### 6. Post line-level review comments
-
-Build a single review payload using GitHub's "create a review" API:
-
-```bash
-gh api repos/:owner/:repo/pulls/$PR/reviews --input - <<'JSON'
-{
-  "event": "COMMENT",
-  "body": "<consolidated overview, security verdict, state notes>",
-  "comments": [
-    {"path": "...", "line": N, "side": "RIGHT", "body": "<concrete finding>"},
-    ...
-  ]
-}
-JSON
-```
-
-Constraints:
-- `side: "RIGHT"` for added/modified lines;
-- the `line` must be in the PR's diff (otherwise GitHub returns 422 "Line could not be resolved");
-- if a finding doesn't anchor to a diff line (whole-PR concerns, missing files, etc.), put it in the `body` instead, prefixed with "**General concern (not on a diff line):**";
-- leave the `event` as `"COMMENT"` so comments land unresolved — never `"APPROVE"` or `"REQUEST_CHANGES"`.
-
-### 7. Fix the issues
-
-Apply the minimum changes needed to address each comment inside `$WORKTREE`. Re-run `(cd "$WORKTREE" && go test ./...)` / `(cd "$WORKTREE" && pnpm test)`. Commit and push from the worktree:
-
-```bash
-git -C "$WORKTREE" add -A
-git -C "$WORKTREE" commit -m "fix(<scope>): address review comments on #$PR"
-git -C "$WORKTREE" push origin "$HEAD_BRANCH"
-```
-
-If the PR is "library only" (no entry-point change in `apps/server/main.go`/`apps/cli/main.go`) and the reviewer raised a future-facing concern (e.g. "this will break /ws when wired in"), still fix it now — that's cheaper than re-opening the issue later.
-
-### 8. Wait for CI to go green
-
-```bash
-until [ "$(gh pr view "$PR" --json mergeStateStatus -q '.mergeStateStatus')" = "CLEAN" ] && \
-      [ "$(gh pr view "$PR" --json statusCheckRollup -q '[.statusCheckRollup[] | select(.status != "COMPLETED")] | length')" = "0" ] && \
-      [ "$(gh pr view "$PR" --json statusCheckRollup -q '[.statusCheckRollup[] | select(.conclusion != "SUCCESS")] | length')" = "0" ]; do
-  sleep 12
-done
-```
-
-If CI fails: fix the failure inside `$WORKTREE` (read the run log via `gh run view --log-failed`), push, repeat. Cap at 3 fix iterations — if the PR is still red after the third, leave a final comment summarizing the blocker and proceed to step 10 (worktree teardown) without merging. Don't strip the `in-review` label — it signals "human, take a look."
-
-### 9. Squash-merge
-
-```bash
-gh pr merge "$PR" --squash \
-  --subject "<title> (#$PR)" \
-  --body "<one-paragraph summary of net-effect changes>"
-```
-
-The merge automatically closes the PR, which removes the `in-review` label.
-
-### 10. Tear down the worktree
-
-Whether the merge succeeded or the PR was abandoned in step 8, clean up the per-PR worktree so disk doesn't accumulate stale checkouts and the next tick on the same PR starts fresh:
-
-```bash
-git -C "$REPO_ROOT" worktree remove --force "$WORKTREE"
-git -C "$REPO_ROOT" worktree prune
-```
-
-Do NOT touch the user's primary working tree. Specifically: do not `git checkout`, `git fetch`, or `git reset` inside `$REPO_ROOT` — the user may be in the middle of unrelated work there. Concurrent ticks reviewing other PRs are running in their own worktrees and must not be disturbed.
-
-Exit. The next tick will pick up the next candidate.
-
-## CHANGELOG policy
-
-The CHANGELOG uses timestamped sections, newest-first, with the format `## YYYY-MM-DD HH:MMZ — <one-line summary> (#<PR>)` placed under `## Planned (next)`. Inside, use `Added` / `Changed` / `Fixed` / `Removed` subheadings with one to three high-level bullets — never a commit-by-commit log.
-
-**Skip the CHANGELOG entry** when the PR is purely internal tooling/CI/docs with no user-visible or operational impact. Note that decision in the merge body. The current bar:
-
-| PR kind | CHANGELOG? |
-|---------|-----------|
-| Production code (server, CLI, web app) | yes |
-| Operational behavior (CI, CHANGELOG itself, deployment scripts) when it affects how the project ships | yes |
-| Test scaffolding, agent config, plan/spec docs, `.archon/` / `.claude/` tooling | no |
-
-## Notes
-
-- This skill is the operational counterpart to the `loop` skill: `loop` schedules; `pr-review-loop` is what gets scheduled.
-- Per-PR worktrees mean two ticks claiming PRs #41 and #42 can run concurrently with no shared filesystem state. The `in-review` GitHub label still prevents two ticks from claiming the same PR.
-- The user's primary working tree is never touched. If you need to inspect the worktree, it lives at `.claude/worktrees/pr-review/<PR>` until step 10 removes it.
-- It deliberately leaves comments **unresolved** so the human PR owner sees them on next visit. Resolution is human-driven.
-- Keep ASCII animals small (≤10 lines) when the queue is empty so the output fits in a notification card.
+- `references/reviewer-prompt-template.md` — dispatch scaffold.
+- `references/idle-banner.md` — sad ANSI character + diagnostic line. Reused from phase-loop (symlink or duplicate).
