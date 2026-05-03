@@ -16,6 +16,11 @@ interface CancelToken {
   cancelled: boolean;
 }
 
+// Number of messages to refetch on a WS reopen. Larger than a typical
+// outage burst but bounded so the request stays cheap. The server caps
+// this at MaxMessagesLimit anyway.
+const CATCHUP_LIMIT = 50;
+
 export function useMessages(channelId: string | null): UseMessages {
   const [messages, setMessages] = useState<Message[]>([]);
   const [connection, setConnection] = useState<ConnectionState>("idle");
@@ -33,13 +38,47 @@ export function useMessages(channelId: string | null): UseMessages {
     setError(null);
     setConnection("connecting");
 
+    // openCount distinguishes the initial WS open (which already has
+    // a fresh history fetch) from later reopens (which must catch up
+    // anything posted while the socket was down). Plain closure
+    // variable — the listener captures it for the lifetime of this
+    // effect, and the effect re-runs on channelId change.
+    let openCount = 0;
+
+    const mergeFetched = (fetched: Message[]): void => {
+      if (tok.cancelled) return;
+      setMessages((prev) => {
+        if (fetched.length === 0) return prev;
+        const seen = new Set(prev.map((p) => p.id));
+        // Server returns newest-first (ORDER BY id DESC). Reverse so
+        // multi-message catchups append in chronological order, matching
+        // the live-WS append path.
+        const fresh = fetched.filter((m) => !seen.has(m.id)).reverse();
+        if (fresh.length === 0) return prev;
+        return [...prev, ...fresh];
+      });
+    };
+
+    const catchup = (): void => {
+      void (async () => {
+        try {
+          const recent = await getClient().listMessages(channelId, { limit: CATCHUP_LIMIT });
+          mergeFetched(recent);
+        } catch {
+          // A failed catchup leaves the list as-is; the user can scroll
+          // away and back to force a full refetch. Surfacing the error
+          // would also clobber a still-valid connection state.
+        }
+      })();
+    };
+
     /* eslint-disable @typescript-eslint/no-unnecessary-condition --
        tok.cancelled is mutated by the effect cleanup closure; eslint's
        flow analysis can't see the cross-closure write, so flags every
        check as "always falsy". */
     void (async () => {
       try {
-        const history = await getClient().listMessages(channelId, { limit: 50 });
+        const history = await getClient().listMessages(channelId, { limit: CATCHUP_LIMIT });
         if (tok.cancelled) return;
         setMessages(history);
       } catch (err) {
@@ -57,7 +96,10 @@ export function useMessages(channelId: string | null): UseMessages {
       });
       wsRef.current = ws;
       ws.on("open", () => {
-        if (!tok.cancelled) setConnection("open");
+        if (tok.cancelled) return;
+        setConnection("open");
+        openCount += 1;
+        if (openCount > 1) catchup();
       });
       ws.on("close", () => {
         if (!tok.cancelled) setConnection("reconnecting");
