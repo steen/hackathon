@@ -112,6 +112,71 @@ For each newly written test, the expected outcome is:
 - **Passing** if AC is live and the production code already satisfies the AC.
 - **Failing** if AC is live and the production code does NOT satisfy it. **This is a real signal — the agent has discovered a spec/impl gap. Leave the test failing. Do not modify production code to make it pass.** Surface the failure in the chat output and append a `## Test run failures` section to the findings doc with the failure log + a one-line interpretation.
 
+## Output: GitHub sub-issues for failing tests + un-implementable ACs
+
+After the test run, file a GitHub sub-issue on the current phase's epic for:
+
+1. **Each failing test** (the "real signal — spec/impl gap" mode in §103-113). Title: `Phase <phase> — Spec/impl gap: <feature-slug> AC-<N>`. Include the failure log + your one-line interpretation.
+2. **Each AC you couldn't even write a test for** (rare: missing helper that needs a separate PR, the test needs a fixture you can't build). Title: `Phase <phase> — Test blocker: <feature-slug> AC-<N>`.
+
+Do **NOT** file for: deferred ACs (already tracked via impl-status), passing tests, skipped-because-deferred tests, or already-filed gaps (idempotency on re-run — search by exact title first and skip if a match exists open).
+
+**Find the current phase epic:**
+
+```bash
+# `<phase>` comes from $FEATURE, e.g. phase-3/foo → 3
+rtk gh issue list --state open --label epic --search "Phase <phase>" --json number,title --limit 5
+```
+
+Take the lowest-numbered open epic whose title starts with `Phase <phase>:`. If none exists, surface that in the chat output and skip filing.
+
+**Idempotency check + file:**
+
+```bash
+EXISTING=$(rtk gh issue list --search "Phase <phase> — Spec/impl gap: <feature-slug> AC-<N>" --state open --json number --jq '.[0].number // empty')
+[ -z "$EXISTING" ] || { echo "skip: AC-<N> gap already tracked as #$EXISTING"; continue; }
+
+NEW=$(rtk gh issue create --title "Phase <phase> — Spec/impl gap: <feature-slug> AC-<N>" --label task --body "<body>" --json number --jq .number)
+NEW_ID=$(rtk gh api repos/steen/Hackathon/issues/$NEW --jq .id)
+rtk gh api -X POST repos/steen/Hackathon/issues/<epic>/sub_issues -F sub_issue_id=$NEW_ID
+```
+
+Body shape (gap):
+```
+Parent: #<epic>
+Source: /test-implement run for `<phase>/<feature-slug>` AC-<N>; the test failed against current main, exposing a spec/impl gap.
+
+## Context
+- AC text: <verbatim from spec>
+- Test: `tests/e2e/<phase>/<slug>/<file>::TestACN_<Name>`
+- Failure log:
+
+<the relevant lines from `go test` / `pnpm test` output, trimmed>
+
+## What's needed
+- Production-code change to satisfy the AC. Do NOT modify the test to make it pass.
+- See findings doc `specs/test-analysis/<phase>/<slug>.md` for the original AC framing.
+
+## Out of scope
+- Test edits beyond what /test-implement landed.
+```
+
+Body shape (blocker):
+```
+Parent: #<epic>
+Source: /test-implement run for `<phase>/<feature-slug>` AC-<N>; agent could not write the test.
+
+## Context
+- AC text: <verbatim from spec>
+- Why the test couldn't be written: <missing helper, missing fixture, missing tool, etc.>
+
+## What's needed
+- <the missing piece — extract a helper, build a fixture, etc.>
+- Once that lands, /test-implement can write the AC-<N> test on next tick.
+```
+
+Title convention is exact so future ticks detect duplicates.
+
 ## What to return to the caller
 
 Emit one chat line in this exact format so `/test-watch` can parse:

@@ -1,7 +1,7 @@
 ---
 name: pr-reviewer
 description: Take one open GitHub PR and drive it from "open" to "merged". Reconciles with main if behind, runs /review and /security-review, classifies each finding as blocker or non-blocker, fixes blockers in-place + pushes, files non-blockers as sub-issues on the parent epic, posts a single GitHub review, waits for CI green, then squash-merges. The user's standing "don't merge PRs" memory rule has an explicit exception for THIS agent (`feedback_no_pr_merging.md` second clause). Always invoked with `isolation: "worktree"` so multiple PR reviews can run in parallel without filesystem contention.
-tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "Skill"]
+tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
 model: opus
 ---
 
@@ -73,18 +73,29 @@ If anything fails, fix it (the reconcile produced a real conflict). Then push:
 rtk git push origin <head_branch>
 ```
 
-### 3. Run /review and /security-review
+### 3. Read the PR + write the review yourself — DO NOT invoke /review or /security-review via Skill
 
-Invoke the existing slash commands via the Skill tool with `args: "<pr>"`:
+Repeated past dispatches that called `Skill({skill:"review"})` or `Skill({skill:"security-review"})` got stuck: those skills load instructions that tell the model to produce review text as its FINAL output, so the agent's loop ended right after, never reaching §4 (post) or §7 (merge). The structural fix is to do the review inline.
 
+Read the PR yourself:
+
+```bash
+rtk gh pr view <pr> --json title,body,additions,deletions,changedFiles,files
+rtk gh pr diff <pr>
 ```
-Skill({skill: "review", args: "<pr>"})
-Skill({skill: "security-review"})
-```
 
-Both produce **text findings inside your context** — they do NOT post anything to GitHub. The text they emit is the input you take into §4 to construct the API call body. Your job is incomplete until §4 lands the review on the PR via `gh api`. Do NOT report back as if /review and /security-review were the deliverable. They aren't — the posted-to-GitHub review is.
+Then `Read` each changed file at HEAD (after §2's reconcile) to confirm the diff matches the worktree.
 
-Consolidate the two outputs into one body string yourself: brief overview from /review, security verdict from /security-review, any state notes you want to add.
+Write the review in your scratch — sections in this order:
+
+- **Overview** (1-2 sentences): what the PR does.
+- **Code quality**: CLAUDE.md convention compliance, comment hygiene, error handling, footprint discipline.
+- **Tests**: coverage of new code, regression risk on existing tests.
+- **Security**: any new auth surface, sinks, secrets, deserialization, header / origin changes. (You don't need a separate /security-review skill; inspect the diff against PRD §9 yourself.)
+- **Minor observations / nitpicks** (non-blocking).
+- **Verdict**: ready to merge, or a list of blockers.
+
+The output of THIS step is just review text in your context. The deliverable is the POSTED review in §4 + the merge in §7. Don't stop here.
 
 ### 4. Post the review
 
