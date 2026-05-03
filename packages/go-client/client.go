@@ -26,6 +26,12 @@ import (
 // Watch's lifetime is bound to its caller-supplied context.
 const DefaultTimeout = 30 * time.Second
 
+// MaxResponseBytes caps the bytes the client will read from a single
+// REST response. Mirrors the server's 1 MiB request-body cap so the
+// two sides agree on what's worth buffering, and a misbehaving or
+// hostile peer cannot make a client buffer arbitrary memory.
+const MaxResponseBytes int64 = 1 << 20
+
 // Client is the chat-server client. Construct with New. Token storage
 // is in-memory only — persisting it is the caller's job.
 type Client struct {
@@ -147,7 +153,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out interfac
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes))
 	if err != nil {
 		return fmt.Errorf("read response: %w", err)
 	}
