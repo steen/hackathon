@@ -13,7 +13,7 @@ import (
 func TestErrorEnvelopeShapeIsConsistent(t *testing.T) {
 	t.Run("ok shape", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		WriteOK(rec, map[string]string{"hello": "world"})
+		WriteOK(rec, http.StatusOK, map[string]string{"hello": "world"})
 
 		got := decodeRaw(t, rec)
 		assertKeys(t, got)
@@ -31,7 +31,7 @@ func TestErrorEnvelopeShapeIsConsistent(t *testing.T) {
 
 	t.Run("ok with nil data still ships data key", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		WriteOK(rec, nil)
+		WriteOK(rec, http.StatusOK, nil)
 
 		got := decodeRaw(t, rec)
 		assertKeys(t, got)
@@ -50,7 +50,7 @@ func TestErrorEnvelopeShapeIsConsistent(t *testing.T) {
 
 	t.Run("error shape", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		WriteError(rec, "bad_request", "missing field foo", http.StatusBadRequest)
+		WriteError(rec, http.StatusBadRequest, CodeBadRequest, "missing field foo")
 
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400", rec.Code)

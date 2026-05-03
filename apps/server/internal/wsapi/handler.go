@@ -28,8 +28,8 @@ const (
 	SendRatePerSec = 10.0
 
 	// MessageBodyLimit caps the decoded chat-message body (PRD §9, SEC-8).
-	// Mirrors httpx.MessageBodyLimit; the WS path enforces it independently
-	// so wsapi has no HTTP-side dependency.
+	// Mirrors internal/http.MessageBodyLimit; the WS path enforces it
+	// independently so wsapi has no HTTP-side dependency.
 	MessageBodyLimit = 4 * 1024
 )
 
