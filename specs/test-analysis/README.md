@@ -98,5 +98,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 
 `feature-cli-full-commands` (PR #66 + smoke rewire `c35ed34`) ships `apps/cli/` rewritten on top of `hackathon/packages/go-client`. 8 subcommands (`register`/`login`/`whoami`/`logout`/`channels`/`history`/`watch`/`send`); config persistence at `$XDG_CONFIG_HOME/chatd/config.json` (mode 0600); `--server`/`$CHAT_SERVER` for base URL. 19 in-package tests against a real `httptest.Server` + sqlite stack; all 10 named tests from the spec's Test plan are present. Closes `phase-2/go-client-package` AC-4 at the call-site level. **Supersedes** `phase-0/feature-cli-send-watch` — the old "raw WS, no auth" contract is now actively contradicted; the per-feature findings doc is kept as a history record.
 
+## Audit #78 response (`a283ba3`)
+
+A security audit of the WS path landed in three coordinated PRs:
+
+- **PR #85 (`92d447f`) `fix(wsapi): drop raw inbound WS rebroadcast`.** The phase-0 readLoop rebroadcast inbound frames verbatim, letting any authenticated peer forge `{type, data}` envelopes with arbitrary `sender_user_id` and impersonate other users — no DB write, no audit row. Fix: drop the broadcast; keep the read (drains the buffer; enforces size + rate limits). Producers must use `POST /api/channels/{id}/messages`. **Cross-impact:** `phase-0/server-ws-hub` AC-3 reframed (test was re-flipped to assert inbound-dropped + REST-broadcast); `phase-0/cli-send-watch` AC-1 silently functionally regressed pre-supersession (CLI test still passed; messages didn't reach watchers). Now moot — superseded by `phase-2/cli-full-commands` whose `chatd send` calls `client.PostMessage` (REST).
+- **PR #87 (`80c1de0`) `fix(wsapi): gate /debug/subs to loopback`.** The `internal-only` wording in `phase-0/server-ws-hub` AC-6 is now enforced rather than implicit — non-loopback sources get 403. New tests in `wsapi/debug_handler_test.go` cover the gate.
+- **PR #86 (`cb1e075`) `fix(audit): access log records authenticated user_id`.** The auth middleware wrote user_id under `auth.ctxKeyUserID`; the access log read via `http.UserID` (different unexported key) — so `user_id` was always `-` for authenticated requests in production. The in-isolation middleware tests passed because they wrote+read through the same key. Fix: pointer sink installed by AccessLog, written through by RequireJWT via a new `MiddlewareConfig.WithUserID` callback. New chain-level black-box test added. **Generalizable lesson:** middleware tests must drive the production chain order to catch keying mismatches.
+
 **Remaining phase 3 (5 features):** all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
