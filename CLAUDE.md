@@ -29,3 +29,6 @@ Say so with a reason. Don't fold under social pressure — change your mind only
 
 ## Comments
 Default to none. Add one only when the *why* is non-obvious. Never narrate the change.
+
+## Go module layout
+Single root `go.mod` with module name `hackathon`. There is no `go.work` and no per-app `go.mod`. Imports use the form `hackathon/<path>` (e.g. `hackathon/apps/server/internal/hub`). Do NOT introduce per-app modules or hardcode any GitHub coordinate (`github.com/...`) — the module name is intentionally unrelated to the repo's hosting URL so it survives org renames.
