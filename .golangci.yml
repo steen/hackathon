@@ -56,6 +56,11 @@ linters:
       excludes:
         # G104 (audit errors not checked) overlaps with errcheck which is already on.
         - G104
+        # G706 (log injection): the call sites that consume taintable input
+        # log config-derived values (CHAT_DB_PATH, CHAT_LISTEN_ADDR) which
+        # are operator-supplied, not user-supplied. No request-path log
+        # injection surface today.
+        - G706
 
     exhaustive:
       default-signifies-exhaustive: true

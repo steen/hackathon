@@ -28,7 +28,7 @@ import (
 const (
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
-	jwtSecretEnv      = "CHAT_JWT_SECRET"
+	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // env-var name, not a credential
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
 	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
@@ -91,7 +91,7 @@ func run() error {
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
 		if len(jwtSecret) == 0 {
-			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
+			return fmt.Errorf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
 		tickets = auth.NewTicketStore()
 		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
@@ -144,14 +144,22 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	listenErr := make(chan error, 1)
 	go func() {
 		log.Printf("chat server listening on %s", listenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen: %v", err)
+			listenErr <- err
 		}
+		close(listenErr)
 	}()
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case err := <-listenErr:
+		if err != nil {
+			return fmt.Errorf("listen: %w", err)
+		}
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

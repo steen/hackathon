@@ -20,12 +20,12 @@ import (
 // once that long has passed since the last failure (so casual
 // bad-day-typing doesn't accumulate forever).
 type UserLimiterConfig struct {
-	Step           time.Duration
-	MaxDelay       time.Duration
-	GraceFailures  int
-	Capacity       int
-	ResetAfter     time.Duration
-	Now            func() time.Time
+	Step          time.Duration
+	MaxDelay      time.Duration
+	GraceFailures int
+	Capacity      int
+	ResetAfter    time.Duration
+	Now           func() time.Time
 }
 
 // LoginUserConfig is the shared default for the per-username login
@@ -58,6 +58,9 @@ type userEntry struct {
 	updatedAt time.Time
 }
 
+// NewUserLimiter returns a limiter using cfg. Zero-valued fields fall back to
+// the defaults documented on UserLimiterConfig so callers can pass a partial
+// struct.
 func NewUserLimiter(cfg UserLimiterConfig) *UserLimiter {
 	if cfg.Step <= 0 {
 		cfg.Step = 500 * time.Millisecond
