@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/jumoel/hackathon/packages/go-shared/serverdefaults"
 )
 
 // EnvPort is the environment variable used to override the listen port.
 const EnvPort = "SERVER_PORT"
 
 // DefaultPort is the listen port used when EnvPort is unset.
-const DefaultPort = 8080
+const DefaultPort = serverdefaults.Port
 
 // Config holds resolved server settings.
 type Config struct {

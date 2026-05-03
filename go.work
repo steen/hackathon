@@ -3,6 +3,7 @@ go 1.23
 use (
 	./apps/cli
 	./apps/server
+	./packages/go-shared
 	./tests/e2e/scaffold
 	./tests/scaffold
 )
