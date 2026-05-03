@@ -10,6 +10,13 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 16:30Z — Body and WebSocket size/rate caps (phase 1)
+
+### Added
+- `apps/server/internal/httpx`: `Envelope` / `WriteError` matching the PRD §10 `{ok, data, error}` shape, plus a `BodyCap` middleware that caps every REST request at 16 KiB and writes a 413 `body_too_large` envelope on overflow (PRD §11 SEC-7). `WriteMessageTooLarge` provides the canonical 400 envelope for the REST chat-message path (SEC-8).
+- `apps/server/internal/wsapi`: per-connection `SetReadLimit(64 KiB)` so the library closes oversize frames with WebSocket close code `1009` (SEC-6); 4 KiB cap on decoded message bodies (SEC-8 WS path) closes with `1009`; per-connection token bucket (10 msg/s, burst 30) closes flooding clients with `1008` (PRD §9).
+- Tests assert the actual close codes observed by the client (`websocket.CloseStatus`), not just that the connection ended.
+
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 
 ### Added
