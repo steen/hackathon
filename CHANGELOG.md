@@ -16,6 +16,8 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Architectural decision: opaque-payload message envelope (`payload`, `nonce`, `sender_key_id`, `recipient_wraps`) so the server cannot read message contents, enabling future E2E encryption without a server-side change.
 - Architectural decision: ULIDs for all entity IDs.
 - Testing stance: coverage is measured against requirements (user stories and functional requirements), not lines of code. Tests are tagged with requirement IDs.
+- Phase 0 monorepo scaffold (#5): `go.work` + `pnpm-workspace.yaml` + root `package.json` with `dev`/`build`/`test` fan-out, GitHub Actions CI (per-module Go build/test, pnpm install/build/test) with workflow-level concurrency group and least-privilege `contents: read` permissions.
+- Phase 0 server WebSocket endpoint with in-memory hub (#6): `/ws` handler backed by a per-channel subscriber registry on `#general`, environment-driven config (`SERVER_PORT`, validated 1–65535), explicit `*http.Server` with `ReadHeaderTimeout` and `IdleTimeout` (Slowloris mitigation), clean WebSocket close (`StatusNormalClosure`).
 
 ### Planned (next)
 - Phase 0 — walking skeleton: server + two CLI clients exchanging real-time messages, validated by `scripts/smoke.sh`.
