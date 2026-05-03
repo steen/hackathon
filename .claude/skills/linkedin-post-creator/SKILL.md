@@ -21,7 +21,7 @@ git -C "$PWD" log --oneline --no-merges -100 2>/dev/null || echo "(ingen commits
 
 Kig i mappen `linkedin-posts/` efter eksisterende opslag-filer (`*.md`).
 
-- Sorter filerne kronologisk (filnavn er `YYYY-MM-DD-HH-MM.md`).
+- Sorter filerne kronologisk (filnavn er `NNN-YYYY-MM-DD-HH-MM.md`).
 - Find den **seneste fil med `status: posted`** i frontmatteren.
   - Brug dens `covers_to` SHA som udgangspunkt for git log.
 - Hvis ingen fil har `status: posted`, brug den seneste fils `covers_to` SHA.
@@ -57,8 +57,9 @@ Skriv et engagerende opslag på **dansk** der:
 ### 4. Gem opslaget
 
 Bestem filnavnet:
+- Tæl alle eksisterende filer i `linkedin-posts/*.md` og læg 1 til for at få det næste indeks (paddet til 3 cifre, f.eks. `001`, `002`).
 - Hent det aktuelle tidspunkt ned til minut: kør `date +"%Y-%m-%d-%H-%M"`.
-- Format: `linkedin-posts/YYYY-MM-DD-HH-MM.md` (f.eks. `2026-05-03-14-37.md`)
+- Format: `linkedin-posts/NNN-YYYY-MM-DD-HH-MM.md` (f.eks. `003-2026-05-03-14-37.md`)
 
 Gem filen med dette frontmatter øverst:
 
