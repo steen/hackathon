@@ -42,11 +42,9 @@ func main() {
 	}
 }
 
-// repository is the process-wide SQLite handle for later phase-1 features
+// repository is the process-wide SQLite handle for the phase-1 features
 // (auth, channels, messages). Nil when CHAT_DB_PATH is unset (phase-0 boot
 // path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
-//
-//nolint:unused // wired into run() once phase-1 handlers land.
 var repository *repo.Repo
 
 func run() error {

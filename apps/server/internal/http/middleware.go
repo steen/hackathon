@@ -82,7 +82,10 @@ func AccessLog(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		redacted := redactURL(r.URL)
-		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s",
+		// G706: r.Method is constrained by net/http to a fixed set; redacted goes
+		// through url.URL.EscapedPath() which never emits raw CR/LF — no log
+		// injection vector reachable here.
+		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s", //nolint:gosec // G706: see comment above.
 			r.Method,
 			redacted,
 			rec.status,
