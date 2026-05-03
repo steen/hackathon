@@ -1,0 +1,9 @@
+{
+  "name": "hackathon",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r --if-present run dev",
+    "build": "pnpm -r --if-present run build",
+    "test": "pnpm -r --if-present run test"
+  }
+}

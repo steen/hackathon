@@ -1,0 +1,18 @@
+# Node
+node_modules/
+dist/
+.pnpm-store/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Go
+*.exe
+*.test
+*.out
+bin/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
