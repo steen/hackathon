@@ -1,4 +1,4 @@
-package httpx_test
+package http_test
 
 import (
 	"bytes"
@@ -9,19 +9,19 @@ import (
 	"strings"
 	"testing"
 
-	"hackathon/apps/server/internal/httpx"
+	httpapi "hackathon/apps/server/internal/http"
 )
 
 // TestRESTRejectsBodyOver16KiBWith413 — covers PRD §11 SEC-7.
 func TestRESTRejectsBodyOver16KiBWith413(t *testing.T) {
 	called := false
-	h := httpx.BodyCap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := httpapi.BodyCap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	body := bytes.Repeat([]byte("a"), int(httpx.RESTBodyLimit)+1)
+	body := bytes.Repeat([]byte("a"), int(httpapi.RESTBodyLimit)+1)
 	req := httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -33,7 +33,7 @@ func TestRESTRejectsBodyOver16KiBWith413(t *testing.T) {
 		t.Fatalf("downstream handler should not run when body cap is exceeded")
 	}
 
-	var env httpx.Envelope
+	var env httpapi.Envelope
 	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode envelope: %v; body=%q", err, rr.Body.String())
 	}
@@ -57,7 +57,7 @@ func TestRESTRejectsBodyOver16KiBWith413(t *testing.T) {
 func TestRESTAllowsBodyAtLimit(t *testing.T) {
 	called := false
 	var seenLen int
-	h := httpx.BodyCap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := httpapi.BodyCap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 		buf, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -67,7 +67,7 @@ func TestRESTAllowsBodyAtLimit(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	body := bytes.Repeat([]byte("a"), int(httpx.RESTBodyLimit))
+	body := bytes.Repeat([]byte("a"), int(httpapi.RESTBodyLimit))
 	req := httptest.NewRequest(http.MethodPost, "/x", bytes.NewReader(body))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -78,8 +78,8 @@ func TestRESTAllowsBodyAtLimit(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d want 200", rr.Code)
 	}
-	if seenLen != int(httpx.RESTBodyLimit) {
-		t.Fatalf("downstream read len: got %d want %d", seenLen, httpx.RESTBodyLimit)
+	if seenLen != int(httpapi.RESTBodyLimit) {
+		t.Fatalf("downstream read len: got %d want %d", seenLen, httpapi.RESTBodyLimit)
 	}
 }
 
@@ -87,12 +87,12 @@ func TestRESTAllowsBodyAtLimit(t *testing.T) {
 // envelope shape; the WS path is asserted in wsapi tests).
 func TestWriteMessageTooLargeEnvelope(t *testing.T) {
 	rr := httptest.NewRecorder()
-	httpx.WriteMessageTooLarge(rr)
+	httpapi.WriteMessageTooLarge(rr)
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d want 400", rr.Code)
 	}
-	var env httpx.Envelope
+	var env httpapi.Envelope
 	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
 		t.Fatalf("decode envelope: %v", err)
 	}

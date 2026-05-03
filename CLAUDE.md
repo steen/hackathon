@@ -33,5 +33,17 @@ Default to none. Add one only when the *why* is non-obvious. Never narrate the c
 ## No hardcoded secrets
 Never commit secrets — JWT signing keys, invite codes, API tokens, passwords, private keys, session cookies, OAuth client secrets, DB credentials. Read them from env vars or a secret store at runtime. Test fixtures must use obviously-fake placeholders (e.g. `test-secret-32-bytes-min-aaaaaaaa`), never values that could be mistaken for real ones. If you spot a hardcoded secret in existing code while working, surface it and fix it — do not leave it.
 
+## Parallel work — minimize PR collisions
+For any work split across multiple parallel agents:
+
+- **Don't stack PRs on open PRs.** Branch off `origin/main`. If a feature is too big for one PR, split into "introduce dead code" + "wire it up" — both off main, the second PR follows the first's merge. Stacking amplifies rebases N× when the parent squash-merges.
+- **Don't write to conflict-magnet files in feature PRs.** `apps/server/main.go` is a 20-line bootstrap that walks `routes.All()`; each feature contributes one `apps/server/internal/routes/<feature>.go` with an `init()` that appends its `Route`. `CHANGELOG.md` is generated from per-PR fragments under `CHANGELOG.d/` (one Markdown file per PR, concatenated at release). Never edit the central files.
+- **Use real timestamps, never invent them.** Run `date -u +%Y-%m-%dT%H:%MZ` for any changelog or diary entry. Don't pick a future timestamp to maintain ordering.
+- **Read the contract first.** Cross-feature shared types (envelope shape, error codes, middleware names, package boundaries) are defined once in a contract doc; agents read it before writing code. If a type or helper isn't in the contract and isn't already in the repo, ask before inventing one.
+- **Drive-by fixes go in their own PR.** Spot a bug while doing a feature? File a separate PR (or push back to whoever already filed one). Don't add it to your feature PR — that's how two PRs end up fixing the same thing with different names and conflict at merge.
+- **Linter is PR #0 of any phase.** Strict lint rules (gosec, gocritic, revive, gofmt; ESLint strict-type-checked + prettier) land before features so every feature ships lint-clean at PR-open and false positives surface once.
+
+Ditto for cleanup: drift fixes go in their own PR (or the dedicated cleanup PR), not snuck into a feature.
+
 ## Go module layout
 Single root `go.mod` with module name `hackathon`. There is no `go.work` and no per-app `go.mod`. Imports use the form `hackathon/<path>` (e.g. `hackathon/apps/server/internal/hub`). Do NOT introduce per-app modules or hardcode any GitHub coordinate (`github.com/...`) — the module name is intentionally unrelated to the repo's hosting URL so it survives org renames.

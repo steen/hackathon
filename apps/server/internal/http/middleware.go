@@ -30,6 +30,8 @@ type statusRecorder struct {
 	wrote  bool
 }
 
+// WriteHeader captures the response status before forwarding to the wrapped
+// ResponseWriter. Repeated calls are idempotent.
 func (s *statusRecorder) WriteHeader(code int) {
 	if s.wrote {
 		return
@@ -95,6 +97,11 @@ func AccessLog(next http.Handler) http.Handler {
 // key's presence so an operator can see "ticket was passed" without seeing
 // the value. Parsing is via net/url so byte-level oddities (encoding,
 // ordering, repeated keys) cannot smuggle a raw token into the log.
+//
+// `u.EscapedPath()` and `q.Encode()` percent-encode CR/LF, which is why
+// gosec G706 (CRLF log injection) is excluded in .golangci.yml. If you
+// add a new access-log call site, do NOT log `r.URL.RawPath` or
+// `r.URL.Opaque` — they bypass that escaping.
 func redactURL(u *url.URL) string {
 	if u == nil {
 		return ""
@@ -129,7 +136,7 @@ func Recover(next http.Handler) http.Handler {
 			}
 			log.Printf("panic request_id=%s value=%v\n%s",
 				RequestID(r.Context()), rv, debug.Stack())
-			WriteError(w, "internal_error", "internal server error", http.StatusInternalServerError)
+			WriteError(w, http.StatusInternalServerError, CodeInternal, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
 	})

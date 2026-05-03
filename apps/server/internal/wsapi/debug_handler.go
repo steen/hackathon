@@ -36,6 +36,6 @@ func DebugSubsHandler(h *hub.Hub) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintf(w, "%d\n", h.SubscriberCount(channel))
+		_, _ = fmt.Fprintf(w, "%d\n", h.SubscriberCount(channel)) //nolint:gosec // G705: %d renders an int; no taint can reach the output.
 	}
 }

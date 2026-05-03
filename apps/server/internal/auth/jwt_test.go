@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -36,18 +37,22 @@ func TestJWTRejectsTamperedSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	// Flip one byte in the signature segment (last segment after the
-	// final '.').
 	idx := strings.LastIndex(tok, ".")
 	if idx < 0 || idx == len(tok)-1 {
 		t.Fatalf("token has no signature segment: %q", tok)
 	}
-	last := tok[len(tok)-1]
-	flipped := byte('A')
-	if last == 'A' {
-		flipped = 'B'
+	// Decode the signature, flip one byte, re-encode. Flipping a base64
+	// char directly is unsafe: the last base64url char of a 32-byte HMAC
+	// signature carries only 4 useful bits, so chars in {A,B,C,D} (and
+	// the 15 other 4-char buckets) decode identically — flipping inside
+	// a bucket leaves the signature untampered ~1/16 of the time.
+	sigB64 := tok[idx+1:]
+	sigBytes, err := base64.RawURLEncoding.DecodeString(sigB64)
+	if err != nil {
+		t.Fatalf("decode sig: %v", err)
 	}
-	tampered := tok[:len(tok)-1] + string(flipped)
+	sigBytes[0] ^= 0x01
+	tampered := tok[:idx+1] + base64.RawURLEncoding.EncodeToString(sigBytes)
 	if _, err := Parse(testKey, tampered, 0); !errors.Is(err, ErrJWTInvalid) {
 		t.Fatalf("Parse(tampered) = %v, want ErrJWTInvalid", err)
 	}

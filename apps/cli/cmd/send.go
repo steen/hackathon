@@ -7,12 +7,17 @@ import (
 	"github.com/coder/websocket"
 )
 
+// Send writes args (joined by single spaces) as one text frame to the given
+// WebSocket URL and performs a clean close handshake.
 func Send(ctx context.Context, url string, args []string) error {
-	c, _, err := websocket.Dial(ctx, url, nil)
+	c, resp, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
 		return err
 	}
-	defer c.CloseNow() // safety net — no-op once Close runs cleanly below
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	defer func() { _ = c.CloseNow() }()
 
 	if err := c.Write(ctx, websocket.MessageText, []byte(strings.Join(args, " "))); err != nil {
 		return err

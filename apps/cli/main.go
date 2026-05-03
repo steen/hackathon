@@ -2,8 +2,8 @@
 //
 // Usage:
 //
-//	chatd [--url ws://host:port/ws] send <message...>
-//	chatd [--url ws://host:port/ws] watch
+//	chatd [--url ws://host:port/ws] [--ws-ticket TICKET] send <message...>
+//	chatd [--url ws://host:port/ws] [--ws-ticket TICKET] watch
 package main
 
 import (
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"hackathon/apps/cli/cmd"
@@ -25,18 +26,30 @@ func main() {
 
 func run(args []string) error {
 	url := ""
-	for len(args) > 0 && args[0] == "--url" {
-		if len(args) < 2 {
-			return fmt.Errorf("--url requires a value")
+	ticket := ""
+	for len(args) > 0 && strings.HasPrefix(args[0], "--") {
+		switch args[0] {
+		case "--url":
+			if len(args) < 2 {
+				return fmt.Errorf("--url requires a value")
+			}
+			url = args[1]
+			args = args[2:]
+		case "--ws-ticket":
+			if len(args) < 2 {
+				return fmt.Errorf("--ws-ticket requires a value")
+			}
+			ticket = args[1]
+			args = args[2:]
+		default:
+			return fmt.Errorf("unknown flag %q", args[0])
 		}
-		url = args[1]
-		args = args[2:]
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("usage: chatd [--url URL] {send <msg...>|watch}")
+		return fmt.Errorf("usage: chatd [--url URL] [--ws-ticket TICKET] {send <msg...>|watch}")
 	}
 
-	resolved := cmd.ResolveURL(url)
+	resolved := cmd.AppendTicket(cmd.ResolveURL(url), ticket)
 	sub, rest := args[0], args[1:]
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

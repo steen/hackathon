@@ -1,0 +1,97 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - gocritic
+    - gosec
+    - revive
+    - misspell
+    - unparam
+    - prealloc
+    - bodyclose
+    - noctx
+    - nilerr
+    - errorlint
+    - exhaustive
+
+  settings:
+    revive:
+      rules:
+        - name: var-naming
+        - name: unused-parameter
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+            - "disableStutteringCheck"
+        - name: indent-error-flow
+        - name: errorf
+        - name: if-return
+        - name: increment-decrement
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: unreachable-code
+
+    gosec:
+      excludes:
+        # G104 (audit errors not checked) overlaps with errcheck which is already on.
+        - G104
+        # G706 (log injection): noisy on access logs. The access-log middleware
+        # uses url.URL.EscapedPath() which never emits raw CR/LF, and request
+        # method is constrained by net/http. CRLF injection is not reachable.
+        - G706
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+  exclusions:
+    generated: lax
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - unparam
+          - errcheck
+          - noctx
+          # bodyclose: in test code that calls websocket.Dial, the returned
+          # *http.Response.Body is the underlying TCP connection that
+          # *websocket.Conn already owns; closing it independently would race
+          # the WS close handshake. Production code closes it explicitly.
+          - bodyclose
+      - path: _test\.go
+        text: "unused-parameter"
+        linters:
+          - revive
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - hackathon
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
