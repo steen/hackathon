@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:36:54Z
-**Analyzed commit:** `979995f`
+**Last updated:** 2026-05-03T15:29:59Z
+**Analyzed commit:** `6bfb65d`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -46,10 +46,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
+| phase-1 | [startup-config-checks](phase-1/startup-config-checks.md) | implemented | 5/5 | 0 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred. PR #25 added a 6th AC to `server-ws-hub` (the new `/debug/subs` endpoint), fully covered by `apps/server/internal/wsapi/debug_handler_test.go`.
 
-**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 4 ACs · 3 covered · 1 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (the spec lists it explicitly) — see the per-feature findings for details. The other 9 phase-1 features still have specs but no implementation.
+**Phase-1 totals (so far):** 2 features analyzed of 11 spec'd · 9 ACs · 8 covered · 1 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (the spec lists it explicitly).
+
+**Phase-1 sibling test-agent PRs in flight (not yet on main):** PR #37 (file-perms-and-headers), PR #40 (sqlite-schema-and-ulid), PR #43 (body-and-ws-caps), PR #47 (auth-internals + security-headers-and-sqlite-ensure-wiring stub spec). Findings docs land in the index as their PRs merge.
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
