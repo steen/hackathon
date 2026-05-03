@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:56:48Z
-**Analyzed commit:** `f765726`
+**Last updated:** 2026-05-03T15:02:47Z
+**Analyzed commit:** `e689e8f`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -45,12 +45,15 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | partial | 3/4 | 1 | 0 | 0 |
 | phase-1 | [sqlite-schema-and-ulid](phase-1/sqlite-schema-and-ulid.md) | implemented | 4/5 | 1 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred. PR #25 added a 6th AC to `server-ws-hub` (the new `/debug/subs` endpoint), fully covered by `apps/server/internal/wsapi/debug_handler_test.go`.
 
-**Phase-1 totals (so far):** 2 features analyzed of 10 spec'd · 9 ACs · 7 covered · 2 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (production gap, not a test gap). AC-4 of `sqlite-schema-and-ulid` is partial because the schema permits ULIDs (TEXT PRIMARY KEY) and `ids.NewULID()` exists with strong tests, but no shipped INSERT code path uses it yet — `repo.Repo` is a constructor-only stub; firms up once `feature-channels-and-messages` lands.
+**Phase-1 totals (so far):** 3 features analyzed of 10 spec'd · 13 ACs · 11 covered · 2 partial · 0 missing · 0 deferred. AC-1 of `logging-and-error-envelope` is partial because the access-log line omits `IP` (production gap, not a test gap). AC-4 of `sqlite-schema-and-ulid` is partial because the schema permits ULIDs (TEXT PRIMARY KEY) and `ids.NewULID()` exists with strong tests, but no shipped INSERT code path uses it yet — `repo.Repo` is a constructor-only stub; firms up once `feature-channels-and-messages` lands.
+
+`feature-body-and-ws-caps` (PR #27) ships clean: WS read limit (64 KiB → close 1009), body cap (4 KiB), per-conn token bucket (close 1008), and REST 16 KiB cap (413). All four ACs covered by package-level tests with explicit library-constant guards.
 
 **Phase-1 sibling PRs in flight (not yet on main):** PR #37 tracks `file-perms-and-headers` (1/3, SecurityHeaders not wired). Findings docs appear in the index once each PR merges; the next tick after each merge reconciles totals.
 
