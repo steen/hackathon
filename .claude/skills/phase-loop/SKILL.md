@@ -1,29 +1,29 @@
 ---
 name: phase-loop
-description: One tick of the Hackathon repo's phased delivery loop. Picks the lowest-numbered open epic issue, scans its sub-issues for parallel-eligibility against the current open-PR conflict surface, and dispatches each eligible sub-issue to a fresh `issue-pr-worker` subagent in an isolated git worktree. Worker subagents mirror CI locally before pushing. Designed to run in two modes: `single-tick` (one pass, exit) and `auto-fire` (re-trigger this skill on every PR-merge event so newly-unblocked work is picked up immediately, plus a periodic safety wakeup). Idle behavior is explicit: when nothing is eligible, the skill exits cleanly without spinning.
+description: One tick of the Hackathon repo's phased delivery loop. Picks the lowest-numbered open epic, scans its sub-issues for parallel-eligibility against the open-PR conflict surface, and dispatches eligible work to `issue-pr-worker` subagents in isolated worktrees. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup). Idle ticks emit a banner and exit cleanly.
 ---
 
 # phase-loop
 
-Supervises the Hackathon repo's phased issue-shipping pipeline. Driven by `/phase-loop` (single tick) or `/phase-loop auto` (continuous, re-fired on merge events).
+Driven by `/phase-loop` (single tick) or `/phase-loop auto` (continuous).
 
 ## Runtime contract
 
-- **Repo:** cwd is a git checkout of the Hackathon repo with `gh` authenticated for it. RTK is on PATH; every shell command goes through `rtk` per the global RTK rules.
-- **Concurrency:** parallel work happens in subagents, each in its own git worktree at `.claude/worktrees/agent-<id>` via the Agent tool's `isolation: "worktree"`. The supervisor's primary working tree is never modified by workers.
-- **Idempotency:** every step is safe to re-run. The skill picks at most one eligible foreground task and N parallel subagents per tick, then returns.
-- **Authority:** the skill never merges PRs (user's job), never pushes to `main`, never edits source files itself — it only dispatches.
+- Cwd is the Hackathon repo, `gh` authenticated, `rtk` on PATH.
+- Parallel work runs in `.claude/worktrees/agent-<id>` via the Agent tool's `isolation: "worktree"`.
+- Every step is idempotent.
+- The skill never merges PRs, pushes to main, or edits source files — only dispatches.
 
 ## Inputs
 
 | Arg | Purpose |
 |-----|---------|
-| `auto` | Optional. When present, schedule a follow-up wakeup on every PR-merge event AND a safety net every 20 min. When absent, run one tick and exit. |
-| `phase-override=<N>` | Optional. Force the skill to use epic `#<N>` instead of the lowest-numbered open epic. |
+| `auto` | Schedule a follow-up wakeup on PR-merge events + safety net every ~5 min. Without it, run one tick and exit. |
+| `phase-override=<N>` | Force epic `#<N>` instead of lowest-numbered. |
 
 ## Tick procedure
 
-Run steps in order. **Bail at "exit silently" points** — emit no chat output beyond a one-line status the user can ignore.
+Bail at "exit silently" points — emit no chat output beyond a one-line status the user can ignore.
 
 ### 1. Sync
 
@@ -33,112 +33,100 @@ rtk git checkout main
 rtk git pull --ff-only
 ```
 
-If the working tree is dirty, **stop and report** — the user must clean up before the loop runs (otherwise step 8's worktree spawns inherit dirty state).
+If working tree is dirty, **stop and report** — the user must clean up.
 
-### 2. Inventory in-flight work
+### 2. Inventory
 
 ```bash
 rtk gh pr list --state open --json number,title,headRefName,files
 rtk git worktree list
 ```
 
-For each open PR, capture the file paths it touches — that's the conflict surface for this tick. For each existing agent worktree, capture its branch and assume it's still running until `git worktree remove` succeeds in step 11.
+Capture each open PR's file footprint (= conflict surface for this tick). Each agent worktree is "still running" until `git worktree remove` succeeds in step 11.
 
 ### 3. Pick the phase
-
-Find the lowest-numbered open issue with the `epic` label (or use `phase-override` if provided):
 
 ```bash
 rtk gh issue list --state open --label epic --json number,title --limit 20
 ```
 
-Read the chosen epic's body — its "Sub-issues" section lists what's in scope.
+Take the lowest-numbered open epic (or `phase-override`). Read its body.
 
-### 4. Filter sub-issues for parallel-eligibility
+### 4. Filter sub-issues for eligibility
 
-For each sub-issue, all of these must be true:
+A sub-issue is eligible iff all are true:
 
-1. It is open and not already assigned to an in-flight PR (cross-reference step 2).
-2. Its file footprint (read the `Spec:` link in the issue body, or guess narrowly from the title — never widen) does NOT overlap any open PR's file footprint.
-3. It does NOT depend on code that only exists in an unmerged PR (e.g. an issue that wires an api-client method blocked on the api-client PR).
-4. It does NOT require editing conflict-magnet files (`apps/server/main.go`, `CHANGELOG.md`) when another in-flight PR also touches that file.
-5. Branching off `origin/main` will not require any cherry-pick from an open PR (no stacking).
+1. Open and not assigned to an in-flight PR.
+2. Footprint disjoint from every open PR's footprint.
+3. Doesn't depend on code that lives only in an unmerged PR.
+4. Doesn't need to edit a conflict-magnet file (`apps/server/main.go`, `CHANGELOG.md`) that another open PR also touches.
+5. Branchable off `origin/main` without cherry-picks (no stacking).
 
-If the filter produces an empty set, **idle**: emit the idle banner from `references/idle-banner.md` (a sad, passive-aggressive ANSI figure expressing the agent's emotional state about having no work, plus a one-line diagnostic of what is blocked on what), then skip to step 12. The same banner fires from step 12 if dispatch count was zero for any other reason (every candidate blocked by an in-flight PR, etc.).
+If empty, **idle** — emit `references/idle-banner.md` and skip to step 12.
 
 ### 5. Plan the batch
 
-From the eligible set:
+Lowest-numbered eligible sub-issue first; add more whose footprints are disjoint from the first AND from each other AND from every open PR. Cap at 3 subagents per tick.
 
-- **Foreground task:** the lowest-numbered eligible sub-issue. The supervisor itself does NOT implement it; both foreground and parallel work are dispatched to `issue-pr-worker` subagents. The "foreground" naming is historical — every task today is dispatched.
-- **Parallel set:** any other eligible sub-issue whose footprint is disjoint from the foreground task AND from every other parallel pick AND from every in-flight PR. Cap parallelism at 3 subagents per tick to stay reviewable.
+For each, derive: `branch_name` (`feat/<slug>` or `fix/<slug>`), `closes_or_refs` (`Closes` or `Refs` for umbrella), `footprint` (explicit narrow paths), `spec_path` (from issue body, if any).
 
-For each sub-issue you'll dispatch, derive:
+### 6. Sec-fix dispatch
 
-- `branch_name`: `feat/<slug>` for features, `fix/<slug>` for bug/sec fixes
-- `closes_or_refs`: `Closes` for ordinary issues, `Refs` if the issue is an umbrella tracking multiple findings
-- `footprint`: the paths the worker may touch — be explicit, narrow, glob-friendly
-- `spec_path`: the `specs/plans/...` file linked in the issue body (omit if absent)
+If the epic has a "Security audit findings" umbrella, each remaining unfixed finding is a candidate (use `Refs`). Skip info-severity findings unless the rest of the queue is empty.
 
-### 6. Sec-fix dispatch (additional source)
+### 7. Dispatch
 
-If the open epic has a sub-issue like "Phase X — Security audit findings" (an umbrella), each remaining unfixed finding is also a candidate. Pick disjoint findings into the parallel set the same way as ordinary sub-issues, with `closes_or_refs: Refs`. Skip findings whose suggested fix is "info" severity unless the rest of the queue is empty.
+Call `issue-pr-worker` for every planned item with `isolation: "worktree"` + `run_in_background: true`. Use `references/worker-prompt-template.md` for the prompt scaffold.
 
-### 7. Dispatch subagents
+Never dispatch two subagents with overlapping footprints. Queue the second for next tick if needed.
 
-For every sub-issue in the planned batch (foreground + parallel), call the `issue-pr-worker` agent with `isolation: "worktree"` and a prompt that includes the inputs above. Always run subagents in the background (`run_in_background: true`). The subagent reads CLAUDE.md, mirrors CI locally, and gates its push on a green local mirror — see `references/worker-prompt-template.md` for the exact prompt scaffold.
+### 8. Track
 
-Important: never dispatch two subagents whose footprints overlap, even partially. If you find yourself wanting to, queue one for the next tick instead.
+`TaskCreate` per dispatch, subject `<branch_name> subagent (#<issue>) opens PR + green CI`, status `pending`.
 
-### 8. Track dispatched work
+### 9. Wait
 
-Record each dispatched subagent in tasks (`TaskCreate`) with subject `<branch_name> subagent (#<issue>) opens PR + green CI`. Set status `pending`; the user-visible task list shows what's running.
+Exit. Completion notifications arrive as `task-notification` system reminders; the next `/phase-loop auto` tick processes them. Do not poll.
 
-### 9. Wait for completions
+### 10. On completion
 
-The supervisor exits and returns control. Subagent completion notifications arrive automatically as `task-notification` system reminders; the skill (when re-invoked) treats those as the trigger to run another tick. Do not poll subagent state from within this tick.
+The agent's §9 report can arrive truncated ("Waiting for the monitor."). For every notification:
 
-### 10. On any subagent completion
-
-When a subagent reports `LOCAL_CI_MIRROR: green` and `CI_STATE: green`:
-
-1. Verify the PR exists: `rtk gh pr view <num> --json state,mergeable`.
-2. Mark its task `completed`.
-3. Do NOT merge — that's the user's job.
-
-If the subagent reports red (locally or after push), update the task with the failure detail and surface to the user. Do not auto-retry.
+1. **Full report, green+green** — `rtk gh pr view <num> --json state,mergeable` to verify, mark task `completed`. Do NOT merge.
+2. **Truncated** — look up the branch directly: `rtk gh pr list --search "head:<branch>" --json number,state` then `rtk gh pr checks <num>`. If a PR exists and CI is green/pending, treat as green and proceed as (1).
+3. **Red, stalled, or no PR** — see step 11's failed-agent path. Update task with failure detail, surface to user. Do not auto-retry.
 
 ### 11. Cleanup
 
-For each completed subagent's worktree:
+**Pushed agents**: `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` (`-f -f` overrides locked + dirty). Skip if subagent is still running.
+
+**Failed agents** have uncommitted WIP that `worktree remove` destroys. First:
 
 ```bash
-rtk git worktree remove -f -f .claude/worktrees/agent-<id>
+rtk git -C .claude/worktrees/agent-<id> status --short
+rtk git -C .claude/worktrees/agent-<id> log --oneline origin/main..HEAD
 ```
 
-Locked worktrees need `-f -f` (one to override the lock, one to ignore the worktree's modifications). Skip cleanup for any worktree whose subagent is still running.
+Then either commit + push the WIP as a draft, leave the worktree in place for user inspection, or (only if explicitly disposable) remove. When in doubt, defer cleanup.
 
-After a successful merge (yours or anyone's): `rtk git fetch --all --prune` so local tracking refs match remote, especially with auto-delete-on-merge.
+After any merge: `rtk git fetch --all --prune` so local tracking refs match.
 
-### 12. Re-fire (if `auto` mode)
+### 12. Re-fire (if `auto`)
 
-If invoked with `auto`:
+`ScheduleWakeup` at 270s with prompt `/phase-loop auto` (stays inside the 5-min prompt-cache TTL). If a PR-merge notification arrives between ticks, re-invoke `/phase-loop auto` immediately — merges shrink the conflict surface.
 
-- Schedule a periodic safety wakeup with `ScheduleWakeup` at 270 s with the prompt `/phase-loop auto`. (270 s is the largest delay that stays inside the 5-minute prompt cache TTL — picking 300 s would burn the cache without amortizing it. Re-read the ScheduleWakeup tool's cache guidance before deviating.)
-- Whenever a PR-merge notification arrives between ticks, re-invoke `/phase-loop auto` immediately — don't wait for the safety wakeup. Merges shrink the conflict surface and may unblock previously-ineligible sub-issues.
-
-If invoked without `auto`, exit cleanly. The user re-fires manually.
+Without `auto`, exit cleanly.
 
 ## Hard prohibitions
 
-- The skill never merges PRs.
-- The skill never edits source files itself — only dispatches via `issue-pr-worker`.
-- The skill never spawns a subagent that overlaps another subagent's footprint, even by one file.
-- The skill never picks the same sub-issue twice across simultaneous ticks (the in-flight PR check in step 2 catches this).
-- The skill never falls through to the next epic until the current one has zero eligible sub-issues AND zero in-flight PRs targeting it.
+- Never merge PRs.
+- Never edit source files — only dispatch.
+- Never spawn two subagents with overlapping footprints.
+- Never pick the same sub-issue twice across simultaneous ticks.
+- Never fall through to the next epic until the current has zero eligible sub-issues AND zero in-flight PRs.
 
-## Sub-skills / references
+## References
 
-- `references/worker-prompt-template.md` — the standard prompt scaffold passed to each `issue-pr-worker` dispatch.
-- `references/eligibility-examples.md` — worked examples of conflict-surface analysis for tricky cases (PR touches `wsapi/handler.go`, sec finding wants to edit it; cli + web disjoint; etc.).
-- `references/idle-banner.md` — the sad ANSI banner library used when a tick produces zero new dispatches.
+- `references/worker-prompt-template.md` — dispatch scaffold.
+- `references/eligibility-examples.md` — conflict-surface examples.
+- `references/idle-banner.md` — the idle banner spec.
