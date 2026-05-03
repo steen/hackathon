@@ -108,6 +108,16 @@ func main() {
 		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
 		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
 		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
+
+		ch := httpapi.NewChannelsHandlers(httpapi.ChannelsDeps{
+			Repo: repository,
+			Hub:  h,
+		})
+		msg := httpapi.NewMessagesHandlers(httpapi.MessagesDeps{
+			Repo: repository,
+			Hub:  h,
+		})
+		ch.Routes(mux, require, msg)
 	}
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
