@@ -26,6 +26,7 @@
 - Unit test: `EnforcePolicy` rejects too-short and too-long passwords.
 - Unit test: `Issue` then `Parse` round-trips; tampered token rejected; expired token rejected.
 - Unit test: login timing for unknown user is within a small delta of timing for a known user with wrong password (sanity check, not a strict timing assertion).
+- `test_login_error_message_byte_identical_for_unknown_vs_wrong_password` — covers SEC-4. PRD §9 mandates byte-identical error text.
 
 ## Files expected to be touched or created
 - `apps/server/internal/auth/password.go`

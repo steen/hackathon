@@ -21,8 +21,13 @@ Phase 1
 - manual cross-client demo (CLI ↔ Web message round-trip).
 
 ## Features
-- [Go client package](phase-2/feature-go-client.md)
+
+Note: `feature-presence.md` is the only Phase-2 feature that modifies server internals (`apps/server/internal/hub/hub.go`); the other four features are client-side only.
+
+Test ownership: US-7 covered by `feature-presence.md`; US-8 covered by `feature-cli-full-commands.md`.
+
+- [Go client package](phase-2/feature-go-client-package.md)
 - [CLI full command set](phase-2/feature-cli-full-commands.md)
-- [TS api-client package](phase-2/feature-api-client-ts.md)
+- [TS api-client package](phase-2/feature-ts-api-client-package.md)
 - [Web app](phase-2/feature-web-app.md)
-- [Tests for US-7 and US-8](phase-2/feature-tests-us-7-us-8.md)
+- [Presence (online users)](phase-2/feature-presence.md)

@@ -27,6 +27,7 @@
 - `test_web_register_form_requires_invite_code` — covers US-9 / US-11 surfacing.
 - `test_web_chat_page_renders_history_then_appends_live_messages` — covers US-9.
 - `test_web_reconnects_after_ws_disconnect` — covers US-9 reconnect requirement.
+- `test_message_with_html_tags_renders_as_text_not_dom` — covers SEC-9. Asserts a posted message containing `<script>alert(1)</script>` round-trips and renders as the literal characters in the chat DOM, not as a script element.
 
 ## Files expected to be touched or created
 - `apps/web/package.json`

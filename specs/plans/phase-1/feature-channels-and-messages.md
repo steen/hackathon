@@ -18,7 +18,7 @@
 - All endpoints require authentication (bearer token via REST, ticket-redeemed JWT for WS).
 
 ## Implementation steps
-1. Add `apps/server/internal/store/channels.go` and `messages.go` with `ListChannels`, `CreateChannel`, `ListMessages`, `InsertMessage`.
+1. Add `apps/server/internal/repo/channels.go` and `messages.go` with `ListChannels`, `CreateChannel`, `ListMessages`, `InsertMessage`.
 2. Add HTTP handlers in `apps/server/internal/http/channels_handlers.go` and `messages_handlers.go`.
 3. Update the in-memory hub (from Phase 0) to be channel-aware: subscribers join by channel ID, broadcasts target a single channel.
 4. On `POST /api/channels/{id}/messages`: insert into DB, then broadcast the persisted record to the hub.
@@ -35,9 +35,9 @@
 - `test_endpoints_require_authentication` — covers cross-cutting auth.
 
 ## Files expected to be touched or created
-- `apps/server/internal/store/channels.go`
-- `apps/server/internal/store/messages.go`
-- `apps/server/internal/store/*_test.go`
+- `apps/server/internal/repo/channels.go`
+- `apps/server/internal/repo/messages.go`
+- `apps/server/internal/repo/*_test.go`
 - `apps/server/internal/http/channels_handlers.go`
 - `apps/server/internal/http/messages_handlers.go`
 - `apps/server/internal/http/*_test.go`

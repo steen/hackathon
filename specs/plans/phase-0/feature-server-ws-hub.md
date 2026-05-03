@@ -29,7 +29,6 @@
 - `apps/server/main.go`
 - `apps/server/internal/hub/hub.go`
 - `apps/server/internal/hub/hub_test.go`
-- `apps/server/go.mod`
 
 ## Risks
 - Goroutine leaks if disconnect handling is incomplete; mitigated by deferring unsubscribe in the handler.

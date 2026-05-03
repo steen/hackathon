@@ -4,6 +4,8 @@
 **Parent phase:** [Phase 0: Walking skeleton, system test ready](../../phase-0-walking-skeleton-system-test-ready.md)
 **PRD revision:** 7e33be3
 
+> **Note:** This file is a deeper, AC-tagged test specification that supersedes and expands the `## Test plan` section in the parent feature file.
+
 ## Note on requirement IDs
 
 The feature plan's "Requirements covered" section lists **no** `US-*` or `FR-*` IDs — it states "(no user-story IDs land fully here; US-8 is completed in Phase 2 with the full command set)". Per the workflow rule "a requirement with no tests is a bug — flag it", this is flagged: there are zero requirement IDs to attach tests to.
