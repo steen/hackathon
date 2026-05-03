@@ -198,10 +198,15 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // Me handles GET /api/me. Must be wrapped in auth.RequireJWT.
 func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
+		w.Header().Set("Allow", stdhttp.MethodGet)
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _ := auth.UserIDFromContext(r.Context())
+	uid, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
 	uname, _ := auth.UsernameFromContext(r.Context())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"user": map[string]string{
@@ -216,10 +221,15 @@ func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // for the caller (US-12).
 func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
+		w.Header().Set("Allow", stdhttp.MethodPost)
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _ := auth.UserIDFromContext(r.Context())
+	uid, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
 	if _, err := h.store.IncrementTokenVersion(r.Context(), uid); err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not invalidate token")
 		return
@@ -233,10 +243,15 @@ func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // caller; redemption happens at the WS upgrade.
 func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
+		w.Header().Set("Allow", stdhttp.MethodPost)
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _ := auth.UserIDFromContext(r.Context())
+	uid, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "unauthorized")
+		return
+	}
 	tok, exp := h.deps.Tickets.Issue(uid)
 	h.logEvent(r.Context(), uid, AuthEventTicketIssued, clientIP(r), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
