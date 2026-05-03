@@ -17,7 +17,7 @@ import (
 func dialServer(t *testing.T, ctx context.Context) (*websocket.Conn, *hub.Hub, func()) {
 	t.Helper()
 	h := hub.New()
-	srv := httptest.NewServer(wsapi.Handler(h))
+	srv := httptest.NewServer(wsapi.Handler(h, nil, wsapi.Config{}))
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
 	conn, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
