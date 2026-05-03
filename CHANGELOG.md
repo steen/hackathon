@@ -10,12 +10,35 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 14:20Z — Startup config checks (phase 1, SEC-1 + SEC-2)
+## 2026-05-03 17:00Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
 
 ### Added
 - `apps/server/internal/config` package: loads `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOW_PUBLIC_BIND` from env and runs `Validate()` once at startup. Refuses to boot when the JWT secret is missing, shorter than 32 bytes, non-ASCII, a single repeated character, low-entropy (fewer than 5 distinct bytes), or matches a dev-default denylist (`change-me`, `secret`, `dev`, `password`, `hackathon`, etc., padded variants included). Refuses to bind a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1`. Refuses to start without an invite code while registration is enabled.
 - `apps/server/main.go` calls `config.Validate()` before any HTTP setup; failures print a non-secret error to stderr and exit 1, success logs each check that passed by name.
 - Tests in `apps/server/internal/config/config_test.go` covering SEC-1 (missing/short/denylisted/repeated/low-entropy/non-ASCII secret), SEC-2 (loopback default, public-bind override, malformed addr), and US-11 startup invite-code enforcement. A leakage test asserts no error message echoes the secret value.
+
+## 2026-05-03 16:45Z — Security headers middleware + SQLite 0600 file perms (phase 1) (#26)
+
+### Added
+- `apps/server/internal/http/headers_middleware.go` (SEC-10) sets `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, and `X-Frame-Options` on every response. The CSP literal is held verbatim from PRD §9 in a single constant; tests assert byte-for-byte equality with the PRD string and that all four headers appear on 200, 404, and 500 paths.
+- `apps/server/internal/db/perms.go` (SEC-14) exposes `EnsureFile` which pre-creates the SQLite database file with mode `0600` and chmods existing files to `0600` (covers cases where the process umask widened a freshly created file). Test asserts `os.Stat` returns `0600`.
+
+## 2026-05-03 16:30Z — Smoke-test follow-ups: deterministic readiness + bounded teardown (#25)
+
+### Added
+- `GET /debug/subs?channel=<name>` on the server returns the current subscriber count for the given channel as plain text. Internal-only (the `/debug/` prefix marks it as not part of the product API and not on the `{ok,data,error}` envelope contract); intended for CI scripts and tests to avoid sleep-based readiness races. Wired under the same mux as `/ws` in `apps/server/main.go`. Unit-tested in `apps/server/internal/wsapi/debug_handler_test.go`.
+
+### Changed
+- `scripts/smoke.sh` now polls `/debug/subs?channel=#general` (5s budget) until both watchers have registered before publishing, instead of `sleep 0.5`. Removes a CI flake on slow runners where the WebSocket dial took longer than the fixed sleep and the publish missed one or both subscribers.
+- `scripts/smoke.sh` `cleanup()` escalates SIGTERM to SIGKILL after a ~5s poll per pid, then `wait`s. Previously a wedged child that ignored SIGTERM (deadlock, blocked syscall, masked signal) would leave `wait` blocked until the workflow-level timeout, masking the failure and burning runner minutes. Pure bash — no `coreutils timeout` dependency.
+
+## 2026-05-03 16:00Z — Access-log middleware + user-safe error envelope (phase 1) (#24)
+
+### Added
+- `apps/server/internal/http` package with the `{ok, data, error}` response envelope (`WriteOK`, `WriteError`) per PRD §10. All three keys are physically present on every response — `ok=true` ships `data` filled and `error: null`; `ok=false` ships `data: null` and `error: {code, message}`.
+- Access-log middleware emits one line per request with method, path, status, latency, and request ID. Sensitive query parameters `token` and `ticket` are redacted via `net/url` parsing (handles repeated keys and percent-encoded values), satisfying SEC-11.
+- Panic recovery middleware logs the panic value and stack server-side with the request ID, returns a generic 500 envelope, and never leaks the panic value to the client.
+- Request-ID middleware mints a 128-bit hex ID per request, plumbs it via `RequestID(ctx)`, and echoes it as the `X-Request-Id` response header for log correlation.
 
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 

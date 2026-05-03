@@ -44,6 +44,7 @@ func main() {
 	h := hub.New()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", wsapi.Handler(h))
+	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —

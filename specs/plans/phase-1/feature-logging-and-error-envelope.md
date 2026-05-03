@@ -1,7 +1,7 @@
 # Feature: Access-log middleware and user-safe error envelope
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** done
 
 ## Requirements covered
 - (security hardening; cross-cutting hygiene supporting all phase 1 endpoints)

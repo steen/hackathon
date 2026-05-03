@@ -31,4 +31,5 @@
 - `.github/workflows/ci.yml` (optional, if CI is being set up in this phase)
 
 ## Risks
-- Flakiness from race conditions on watcher startup; mitigated by polling for a "ready" log line or the listening port before sending.
+- Flakiness from race conditions on watcher startup; mitigated by polling `GET /debug/subs?channel=#general` until the count reaches 2 (5s budget) before publishing, instead of a fixed sleep.
+- Wedged child processes (deadlock, ignored SIGTERM) could hang `wait` indefinitely; mitigated by a bounded TERM-then-KILL escalation in `cleanup()` (~5s per pid).

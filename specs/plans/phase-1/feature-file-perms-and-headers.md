@@ -1,7 +1,7 @@
 # Feature: SQLite file permissions and response security headers
 
 **Parent phase:** [Phase 1: Persistence + auth](../phase-1-persistence-auth.md)
-**Status:** planned
+**Status:** implemented
 
 ## Requirements covered
 - (security hardening; cross-cutting baseline for hosting per US-10 single-binary deploy)
