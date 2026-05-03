@@ -80,6 +80,13 @@ export function usePresence(enabled: boolean): UsePresence {
 
       if (tok.cancelled) return;
 
+      // Deliberate second WS per tab: the messages WS in useMessages
+      // already receives `presence` frames via the hub's BroadcastAll,
+      // but threading that subscription through React state requires
+      // either a shared client in context or a presence event channel
+      // on useMessages — both deferred. Server-side AddPresence is
+      // ref-counted on userID, so two sockets from the same user still
+      // fire only one join/leave pair.
       ws = new WebSocketClient({
         http: getClient().http,
         backoffMs: BACKOFF_MS,
