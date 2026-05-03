@@ -2,7 +2,7 @@ name: feature-implementation-loop
 description: |
   Use when: You have a feature plan markdown file and want to drive the full implementation cycle (test plan → TDD → E2E → review → PR) in one run.
   Triggers: User invokes with a path to a feature plan (e.g. specs/plans/phase-1/feature-auth.md), or phrases like "run feature-implementation-loop", "implement feature from plan", "execute feature loop", "start feature implementation".
-  Does: Parses the feature plan and parent PRD; expands a full test plan; creates a feat/{slug} branch; runs a strict red-green-refactor TDD loop for unit tests; implements E2E tests; runs the full test suite; reviews the implementation against acceptance criteria, requirement IDs, and coding standards; fixes critical/high findings; pushes the branch and opens a PR via gh CLI with requirement-ID traceability.
+  Does: Parses the feature plan and parent PRD; expands a full test plan; creates a feat/{slug} branch; runs a strict red-green-refactor TDD loop for unit tests (gated by the full unit suite); implements E2E tests (gated by the full suite); reviews the implementation against acceptance criteria, requirement IDs, and coding standards; fixes critical/high findings; commits, pushes, and opens a PR via gh CLI with requirement-ID traceability.
   NOT for: Quick hotfixes, bug fixes without a feature plan, partially-implemented features already in progress, or non-test-driven changes.
 
 nodes:
@@ -66,8 +66,7 @@ nodes:
 
         The test plan path is the `test_plan_path` field of the JSON above.
 
-        Coding standards (read once if not already loaded):
-        - CLAUDE.md and ~/.claude/rules/common/*.md
+        Coding standards (the project's CLAUDE.md is automatically loaded by Claude Code; do not re-read it):
         - Immutability: never mutate existing objects; return new copies.
         - Files < 800 lines; extract when growing.
         - Validation at boundaries (user input, API responses, file content).
@@ -100,15 +99,28 @@ nodes:
         #!/bin/bash
         set -e
         FAIL=0
-        # Go modules under apps/* and packages/*
-        for d in apps/* packages/*; do
-          if [ -f "$d/go.mod" ]; then
+        FOUND=0
+        # Go: any module reachable via go.work (covers apps/*, packages/*, tests/*, and the root)
+        if [ -f go.work ]; then
+          FOUND=1
+          go test ./... -short || FAIL=1
+        else
+          for f in $(find . -maxdepth 4 -name go.mod -not -path '*/node_modules/*' 2>/dev/null); do
+            d=$(dirname "$f")
+            FOUND=1
             (cd "$d" && go test ./... -short) || FAIL=1
-          fi
-        done
-        # TS workspaces (skip silently if pnpm not present)
+          done
+        fi
+        # TS workspaces; --if-present skips workspaces that don't define the script
         if command -v pnpm >/dev/null 2>&1; then
-          pnpm -r test:unit || FAIL=1
+          if [ -f pnpm-workspace.yaml ] || [ -f pnpm-lock.yaml ]; then
+            FOUND=1
+            pnpm -r --if-present test:unit || FAIL=1
+          fi
+        fi
+        if [ "$FOUND" -eq 0 ]; then
+          echo "until_bash: no test runners detected — refusing to mark loop done" >&2
+          exit 1
         fi
         exit $FAIL
       max_iterations: 30
@@ -150,9 +162,11 @@ nodes:
       until_bash: |
         #!/bin/bash
         set -e
-        go test ./...
-        if command -v pnpm >/dev/null 2>&1; then
-          pnpm -r test
+        if [ -f go.work ] || ls -1 */go.mod >/dev/null 2>&1; then
+          go test ./...
+        fi
+        if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-workspace.yaml ]; then
+          pnpm -r --if-present test
         fi
       max_iterations: 20
       fresh_context: true
@@ -206,9 +220,11 @@ nodes:
       until_bash: |
         #!/bin/bash
         set -e
-        go test ./...
-        if command -v pnpm >/dev/null 2>&1; then
-          pnpm -r test
+        if [ -f go.work ] || ls -1 */go.mod >/dev/null 2>&1; then
+          go test ./...
+        fi
+        if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-workspace.yaml ]; then
+          pnpm -r --if-present test
         fi
         test -f "$ARTIFACTS_DIR/second-pass-ok"
       max_iterations: 5
@@ -321,14 +337,16 @@ nodes:
         DRAFT_FLAG="--draft"
       fi
 
+      # Use $BASE_BRANCH so --from feat/<prev> stacks PRs onto the prior branch.
+      # Defaults to main when unset.
+      PR_BASE="${BASE_BRANCH:-main}"
+
       gh pr create \
-        --base main \
+        --base "$PR_BASE" \
         --head "$BRANCH" \
         --title "feat($SLUG): $FEATURE_NAME" \
         --body-file "$BODY_FILE" \
         $DRAFT_FLAG
-
-      gh pr view "$BRANCH" --json url -q .url
 
   - id: summarize
     depends_on: [create-pr]
