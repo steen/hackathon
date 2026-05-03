@@ -89,6 +89,12 @@ func (c *connSubscriber) close() {
 // Same-origin enforcement is delegated to coder/websocket.Accept,
 // which compares Host to Origin by default and additionally honors
 // any patterns in cfg.OriginPatterns. A mismatch yields HTTP 403.
+//
+// The connection subscribes to defaultChannel by default; passing
+// ?channel=<id> overrides it. The query-param subscription is the
+// minimum the channels-and-messages feature needs; the PRD's typed
+// {type:subscribe,...} frame protocol can layer on top later without
+// breaking this contract.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
@@ -109,6 +115,11 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 			userID = uid
 		}
 
+		channel := defaultChannel
+		if c := r.URL.Query().Get("channel"); c != "" {
+			channel = c
+		}
+
 		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			return
@@ -119,15 +130,15 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		_ = userID // userID will land on the per-connection state once channels-and-messages merges; SEC requires the redemption itself, which has already happened.
 
 		sub := newConnSubscriber()
-		h.Subscribe(defaultChannel, sub)
-		defer h.Unsubscribe(defaultChannel, sub)
+		h.Subscribe(channel, sub)
+		defer h.Unsubscribe(channel, sub)
 		defer sub.close()
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
 		go writeLoop(ctx, conn, sub)
-		readLoop(ctx, conn, h, defaultChannel, newTokenBucket(SendRateBurst, SendRatePerSec))
+		readLoop(ctx, conn, h, channel, newTokenBucket(SendRateBurst, SendRatePerSec))
 	}
 }
 
