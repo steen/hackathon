@@ -36,14 +36,14 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T20:36:00Z
-**Analyzed commit:** `d41f2a7`
+**Last updated:** 2026-05-03T20:45:00Z
+**Analyzed commit:** `75bce4c`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
 | phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
-| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | superseded by phase-2/cli-full-commands | — | — | — | — |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | implemented | 4/4 | 0 | 0 | 0 |
@@ -63,12 +63,13 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-2 | [ts-api-client-package](phase-2/ts-api-client-package.md) | implemented | 6/7 | 1 | 0 | 0 |
 | phase-2 | [presence](phase-2/presence.md) | implemented | 4/5 | 0 | 0 | 1 |
 | phase-2 | [web-app](phase-2/web-app.md) | implemented | 5/6 | 1 | 0 | 0 |
+| phase-2 | [cli-full-commands](phase-2/cli-full-commands.md) | implemented | 10/10 | 0 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
+**Phase-0 totals:** 3 active features · 16 ACs · 16 covered · 0 partial · 0 missing · 0 deferred. (`cli-send-watch` is superseded by `phase-2/cli-full-commands`; its 4 ACs are no longer counted. **Note:** sibling PR #91 in flight modifies `phase-0/cli-send-watch.md` to mark AC-1 partial pre-supersession; the per-feature file may temporarily contradict this index row until a follow-up tick reconciles.)
 
 **Phase-1 totals:** 14 features analyzed of 14 spec'd · 64 ACs · 63 covered · 1 partial · 0 missing · 0 deferred.
 
-**Phase-2 totals (so far):** 4 features analyzed of 5 spec'd (10/30/40/50 specs implemented; 20-cli-full-commands unstarted) · 22 ACs · 19 covered · 2 partial · 0 missing · 1 deferred. The two phase-2 partials and the deferred AC are all the same cross-feature gap: web app needs api-client to wrap `GET /api/presence`, presence-server's wire format needs to reconcile with ts-api-client's `PresenceEvent` type, and the web-app's chat page TODO closes once both sides converge.
+**Phase-2 totals:** 5 features analyzed of 5 spec'd (10/20/30/40/50 — phase-2 closes here) · 32 ACs · 29 covered · 2 partial · 0 missing · 1 deferred. The two phase-2 partials and the deferred AC are all the same cross-feature gap: web app needs api-client to wrap `GET /api/presence`, presence-server's wire format needs to reconcile with ts-api-client's `PresenceEvent` type, and the web-app's chat page TODO closes once both sides converge.
 
 **Coordinated follow-up batch landed in `fa60bfd`:** the four planned-only stub specs (gap-A `access-log-fields-and-wiring`, gap-B `security-headers-and-sqlite-ensure-wiring`, gap-C `auth-endpoint-paths-align-with-prd`, gap-D `ws-userid-binding-and-channel-existence-check`) all closed in one PR set. Each one was tracked at 0/N deferred; all four re-promote to N/N implemented at this SHA. The closure also transitively re-promotes parent features whose ACs depended on the same wiring chain:
 
@@ -95,5 +96,7 @@ Generated automatically — leave this section alone; the agent rewrites it.
 
 **Schema-drift flag (cross-feature, blocks 2 partials + 1 deferred):** the server emits the presence frame as `{type:"presence", data:{kind, user_id}}` but the TS api-client defines `PresenceEvent.data` as `{kind, user:User}` (full user record). One side needs to move — picking the lighter-weight `{user_id}` shape requires the client to maintain a userID→username map; embedding the full `User` matches the REST endpoint's `{id, username}` shape. **Production change required either way; out of test-agent scope.** Closing this drift unblocks: ts-api-client AC-6 (partial → covered), web-app AC-5 (partial → covered, after api-client adds `getPresence()` wrap), and presence AC-4 (deferred → covered, since web's the missing consumer).
 
-**Remaining phase 2 (1 feature) and phase 3 (5 features):** `phase-2/20-feature-cli-full-commands.md` and all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
+`feature-cli-full-commands` (PR #66 + smoke rewire `c35ed34`) ships `apps/cli/` rewritten on top of `hackathon/packages/go-client`. 8 subcommands (`register`/`login`/`whoami`/`logout`/`channels`/`history`/`watch`/`send`); config persistence at `$XDG_CONFIG_HOME/chatd/config.json` (mode 0600); `--server`/`$CHAT_SERVER` for base URL. 19 in-package tests against a real `httptest.Server` + sqlite stack; all 10 named tests from the spec's Test plan are present. Closes `phase-2/go-client-package` AC-4 at the call-site level. **Supersedes** `phase-0/feature-cli-send-watch` — the old "raw WS, no auth" contract is now actively contradicted; the per-feature findings doc is kept as a history record.
+
+**Remaining phase 3 (5 features):** all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
