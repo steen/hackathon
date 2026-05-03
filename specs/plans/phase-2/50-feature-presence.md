@@ -13,12 +13,17 @@
 - The web app shows online users in the chat page; the CLI `chatd watch` optionally surfaces presence events.
 - Presence is consistent if the same user has multiple connections (counted as online while at least one connection is open).
 
+## Prerequisites (not satisfied today)
+- The WS handler extracts `userID` from a redeemed ticket but does not bind it to the subscription — see the `_ = userID` line and TODO at `apps/server/internal/wsapi/handler.go:147–151`. Presence requires finishing this binding first; without it the hub has no way to associate a connection with a user.
+- The current `hub.Hub` has no per-connection metadata and no user→connection map. This feature adds both — a non-trivial change to the hub's surface, not just a new handler.
+
 ## Implementation steps
-1. Extend the in-memory hub to maintain a `userID → connectionCount` map, updated on connect/disconnect.
-2. On the first connection for a user, broadcast `{type:"presence", kind:"join", user_id}`; on the last disconnect, broadcast `kind:"leave"`.
-3. Add `GET /api/presence` returning the current online set.
-4. Update `packages/api-client` and `packages/go-client` to expose `Presence()` and `presence` events on the WS stream.
-5. Update `apps/web` to render an online-users list driven by the initial `GET /api/presence` plus presence events.
+1. Finish the userID binding in `apps/server/internal/wsapi/handler.go` so the hub can record `(userID, connection)` on `Subscribe` and remove on `Unsubscribe`.
+2. Extend the in-memory hub to maintain a `userID → connectionCount` map, updated on connect/disconnect.
+3. On the first connection for a user, broadcast `{type:"presence", kind:"join", user_id}`; on the last disconnect, broadcast `kind:"leave"`.
+4. Add `GET /api/presence` returning the current online set.
+5. Update `packages/api-client` and `packages/go-client` to expose `Presence()` and `presence` events on the WS stream.
+6. Update `apps/web` to render an online-users list driven by the initial `GET /api/presence` plus presence events.
 
 ## Test plan
 - `test_presence_endpoint_lists_online_users` — covers US-7.
