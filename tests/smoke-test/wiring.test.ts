@@ -57,8 +57,7 @@ describe("smoke-test: wiring + script structure", () => {
       true,
     );
     expect(
-      body.includes("/debug/subs?channel=${CHANNEL_ID}") ||
-        body.includes("channel=%23general"),
+      body.includes("/debug/subs?channel=${CHANNEL_ID}") || body.includes("channel=%23general"),
       "must poll /debug/subs with the smoke channel id (or legacy #general)",
     ).toBe(true);
     expect(
