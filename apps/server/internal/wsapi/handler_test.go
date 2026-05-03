@@ -359,6 +359,113 @@ func TestHandlerChannelLookupErrorReturns500(t *testing.T) {
 	}
 }
 
+// Audit #78 (low): a 404 on an unknown ?channel= must NOT redeem the
+// ws-ticket. We assert this by issuing one ticket, sending it to /ws
+// with an unknown channel, observing the 404, and then redeeming the
+// same ticket directly against the TicketStore — which must still
+// succeed because the handler did not consume it. Also covers SEC-12
+// indistinguishability: the rejection body for unknown channel is the
+// same shape as for missing/invalid ticket only at the upgrade level;
+// here we only assert non-consumption, which is the new invariant.
+func TestHandlerUnknownChannelDoesNotConsumeTicket(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, ts, cfg))
+	defer srv.Close()
+
+	const owner = "user-probe"
+	tok, _ := ts.Issue(owner)
+
+	resp, err := http.Get(srv.URL + "/ws?channel=missing-channel-id&ticket=" + tok)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", resp.StatusCode)
+	}
+
+	uid, ok := ts.Redeem(tok)
+	if !ok {
+		t.Fatal("ticket was consumed by the unknown-channel rejection; want still-redeemable")
+	}
+	if uid != owner {
+		t.Fatalf("redeemed user_id: got %q want %q", uid, owner)
+	}
+}
+
+// Audit #78 (low): with the channel-check-first ordering, an unknown
+// channel + missing ticket must return 404 (channel arm), NOT 401
+// (ticket arm). Locks in the ordering as a contract — a future swap
+// back to ticket-first would silently change the response and pass
+// the rest of the suite.
+func TestHandlerUnknownChannelWithoutTicketReturns404(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, ts, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws?channel=missing-channel-id")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404 (channel arm runs before ticket arm)", resp.StatusCode)
+	}
+}
+
+// Audit #78 (low): the legacy defaultChannel sentinel still skips the
+// lookup, so a request without ?channel= and with a valid ticket must
+// upgrade successfully even when ChannelLookup would otherwise reject.
+func TestHandlerDefaultChannelSentinelStillRedeemsTicket(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, ts, cfg))
+	defer srv.Close()
+
+	const owner = "user-default"
+	tok, _ := ts.Issue(owner)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, defaultChannel, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ts.Redeem(tok); ok {
+		t.Fatal("ticket should have been consumed by the successful upgrade")
+	}
+}
+
 // gap-D F5: after a successful ticket redemption, the per-conn state
 // carries the redeemed userID. Observed via the test-only accessor on
 // connSubscriber and hub.SnapshotSubscribers.

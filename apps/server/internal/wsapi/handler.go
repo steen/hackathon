@@ -100,7 +100,9 @@ func (c *connSubscriber) close() {
 // accepts. The redemption happens before the WebSocket handshake so a
 // rejection is a 401 with the PRD §10 envelope (RFC 6455 only defines
 // close codes after a successful upgrade — pre-upgrade failures cannot
-// use 1008).
+// use 1008). The channel-existence check (when cfg.ChannelLookup is set)
+// runs before redemption so an unknown channel rejects with 404 without
+// consuming the one-shot ticket (audit #78, low-severity).
 //
 // When ts is nil, ticket enforcement is skipped. This branch exists
 // for the phase-0 smoke wiring and for tests that exercise the hub
@@ -120,6 +122,40 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		OriginPatterns: cfg.OriginPatterns,
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		channel := defaultChannel
+		if c := r.URL.Query().Get("channel"); c != "" {
+			// Cap the channel-key length — a 1 MB query string would
+			// otherwise sit in the subscriber map for the lifetime of
+			// the connection. 64 chars covers a 26-char ULID plus
+			// padding for `#general`-style legacy names.
+			if len(c) > 64 {
+				http.Error(w, "channel parameter too long", http.StatusBadRequest)
+				return
+			}
+			channel = c
+		}
+
+		// Reject upgrades for unknown channels with HTTP 404 BEFORE the
+		// WebSocket handshake — and BEFORE redeeming the ws-ticket, so a
+		// typo or probe does not burn the one-shot ticket (audit #78,
+		// low-severity). The legacy defaultChannel sentinel skips the
+		// lookup so phase-0 boot paths and tests without a DB keep
+		// working. Use http.Error (text/plain) — the JSON envelope lives
+		// in internal/http and importing it here would create a cycle
+		// (the http package's ws_broadcast_test.go imports wsapi).
+		if cfg.ChannelLookup != nil && channel != defaultChannel {
+			ok, err := cfg.ChannelLookup(r.Context(), channel)
+			if err != nil {
+				log.Printf("ws channel lookup: %v", err)
+				http.Error(w, "channel lookup failed", http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				http.Error(w, "channel not found", http.StatusNotFound)
+				return
+			}
+		}
+
 		var userID string
 		if ts != nil {
 			ticket := r.URL.Query().Get("ticket")
@@ -135,38 +171,6 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 				return
 			}
 			userID = uid
-		}
-
-		channel := defaultChannel
-		if c := r.URL.Query().Get("channel"); c != "" {
-			// Cap the channel-key length — a 1 MB query string would
-			// otherwise sit in the subscriber map for the lifetime of
-			// the connection. 64 chars covers a 26-char ULID plus
-			// padding for `#general`-style legacy names.
-			if len(c) > 64 {
-				http.Error(w, "channel parameter too long", http.StatusBadRequest)
-				return
-			}
-			channel = c
-		}
-
-		// Reject upgrades for unknown channels with HTTP 404 BEFORE the
-		// WebSocket handshake. The legacy defaultChannel sentinel skips
-		// the lookup so phase-0 boot paths and tests without a DB keep
-		// working. Use http.Error (text/plain) — the JSON envelope lives
-		// in internal/http and importing it here would create a cycle
-		// (the http package's ws_broadcast_test.go imports wsapi).
-		if cfg.ChannelLookup != nil && channel != defaultChannel {
-			ok, err := cfg.ChannelLookup(r.Context(), channel)
-			if err != nil {
-				log.Printf("ws channel lookup: %v", err)
-				http.Error(w, "channel lookup failed", http.StatusInternalServerError)
-				return
-			}
-			if !ok {
-				http.Error(w, "channel not found", http.StatusNotFound)
-				return
-			}
 		}
 
 		conn, err := websocket.Accept(w, r, acceptOpts)
