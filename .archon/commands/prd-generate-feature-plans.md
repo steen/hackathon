@@ -18,8 +18,12 @@ $parse-prd.output
 For each phase in the `phases` array:
 
 1. Run `mkdir -p specs/plans/phase-{number}` via Bash.
-2. Group the phase's deliverables into features — typically one deliverable = one feature, but combine deliverables when they form one cohesive unit of work.
-3. For each feature, write `specs/plans/phase-{number}/feature-{slug}.md` using the Write tool with the content template below.
+2. List existing feature plans for the phase via `ls specs/plans/phase-{number}/feature-*.md 2>/dev/null` to detect prior runs.
+3. Determine the phase mode:
+   - **Phase 0 — read-only.** Never modify or overwrite any existing `specs/plans/phase-0/feature-*.md` file. If a requirement ID (US/FR/SEC) maps to phase 0 work and is not already covered in an existing phase-0 feature plan, create a NEW `feature-{slug}.md` for the missing piece. Otherwise add no files.
+   - **Phases 1–3 — updatable.** You may edit existing feature plans (e.g. to add SEC-N IDs to `Requirements covered`) using the Edit tool, or create new feature files. When editing, preserve unrelated sections; only the `Requirements covered` and `Test plan` sections should change to add traceability.
+4. Group the phase's deliverables into features — typically one deliverable = one feature, but combine deliverables when they form one cohesive unit of work.
+5. For each feature, write `specs/plans/phase-{number}/feature-{slug}.md` using the Write tool with the content template below (subject to the read-only rule above).
 
 ## File template
 
@@ -30,9 +34,10 @@ For each phase in the `phases` array:
 **Status:** planned
 
 ## Requirements covered
-{Bulleted list of `US-N` / `FR-*` IDs this feature implements. Each ID MUST exist in
-the `requirements` array of the parsed PRD data — do not invent IDs. Include the
-requirement description after the ID, e.g. `- US-3 — User can log in with email`.}
+{Bulleted list of `US-N` / `FR-*` / `SEC-N` IDs this feature implements. Each ID MUST
+exist in the `requirements` array of the parsed PRD data — do not invent IDs. Include
+the requirement description after the ID, e.g. `- US-3 — User can log in with email`
+or `- SEC-3 — Login response time for unknown user is within 20% of wrong-password time`.}
 
 ## Acceptance criteria
 {Concrete, testable criteria — each bullet starts with a verb. Derive from the
@@ -54,8 +59,8 @@ deliverable text and the parent phase's validation_criteria.}
 
 ## Rules
 
-- Use the Write tool to create or overwrite each file (idempotent).
+- Use the Write tool to create new files. Use the Edit tool to update existing phase 1–3 files. NEVER overwrite existing phase-0 files.
 - Slugs are lowercase, hyphenated, derived from the feature name.
-- Every `id` in the parsed `requirements` array MUST appear in the `Requirements covered` section of at least one feature plan across all phases. Distribute IDs based on which deliverable the requirement description most naturally maps to.
+- Every `id` in the parsed `requirements` array (including every `SEC-N`) MUST appear in the `Requirements covered` section of at least one feature plan across all phases. Distribute IDs based on which deliverable the requirement description most naturally maps to.
 - Do NOT create files outside `specs/plans/`. Never write to `.agents/plans/`.
-- When done, print one line per file written: `wrote: <path>`.
+- When done, print one line per file touched: `wrote: <path>` for new files, `edited: <path>` for in-place edits, `skipped: <path>` for phase-0 files left untouched.

@@ -21,8 +21,7 @@ nodes:
   - id: generate-feature-plans
     command: prd-generate-feature-plans
     depends_on: [parse-prd]
-    allowed_tools: [Read, Write, Bash]
-    denied_tools: [Edit]
+    allowed_tools: [Read, Write, Edit, Bash, Glob]
 
   - id: generate-index
     command: prd-generate-index

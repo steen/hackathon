@@ -27,7 +27,7 @@ $ARGUMENTS
    - `deliverables` (array of strings, one per checklist item, order preserved)
    - `validation_criteria` (array of strings, verbatim from PRD)
 5. Locate the **User Stories / Requirements** section. Match by section title (e.g. "User Stories", "Requirements", "Functional Requirements") — again, NOT by heading number.
-6. Extract every requirement ID matching `US-\d+` or `FR-[\w.\-]+`, with its description.
+6. Extract every requirement ID matching `US-\d+`, `FR-[\w.\-]+`, or `SEC-\d+`, with its description. `SEC-*` IDs typically live under a dedicated **Security Requirements / Acceptance Criteria** section (often a table). Treat them as first-class requirements and include them in the same `requirements` array. Do NOT expand range expressions like `SEC-1…SEC-15` — only emit IDs that appear individually in the PRD.
 7. Capture the PRD revision: run `git log -n 1 --pretty=format:%h -- <prd-path>` via Bash to get the short SHA of the last commit that touched the PRD. If git fails or the file is untracked, use the string `"uncommitted"`.
 
 ## Output
@@ -51,7 +51,8 @@ Output **only** a single JSON object as your final response, with this exact sha
   ],
   "requirements": [
     {"id": "US-1", "description": "..."},
-    {"id": "FR-1.1", "description": "..."}
+    {"id": "FR-1.1", "description": "..."},
+    {"id": "SEC-1", "description": "..."}
   ]
 }
 ```
