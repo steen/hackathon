@@ -79,9 +79,12 @@ nodes:
         git reset --hard "origin/$PARENT_BRANCH"
       fi
 
+      # If the branch already exists locally, it may carry stale work from a
+      # killed prior run that wasn't cleaned up. Always reset it to the parent
+      # tip we just verified — the actual implementation will recommit.
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-        echo "branch $BRANCH already exists — checking out"
-        git checkout "$BRANCH"
+        echo "branch $BRANCH already exists — resetting to origin/$PARENT_BRANCH"
+        git checkout -B "$BRANCH" "origin/$PARENT_BRANCH"
       else
         echo "creating branch $BRANCH from $PARENT_BRANCH"
         git checkout -b "$BRANCH"
