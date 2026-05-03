@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -137,7 +138,7 @@ func serverBinary(t *testing.T) string {
 		build := exec.Command("go", "build", "-o", out, "./apps/server")
 		build.Dir = root
 		if combined, err := build.CombinedOutput(); err != nil {
-			serverBuildErr = fmt.Errorf("go build ./apps/server: %v\n%s", err, combined)
+			serverBuildErr = fmt.Errorf("go build ./apps/server: %w\n%s", err, combined)
 			return
 		}
 		serverBuildPath = out
@@ -156,7 +157,7 @@ func chatdBinary(t *testing.T) string {
 		build := exec.Command("go", "build", "-o", out, "./apps/cli")
 		build.Dir = root
 		if combined, err := build.CombinedOutput(); err != nil {
-			chatdBuildErr = fmt.Errorf("go build ./apps/cli: %v\n%s", err, combined)
+			chatdBuildErr = fmt.Errorf("go build ./apps/cli: %w\n%s", err, combined)
 			return
 		}
 		chatdBuildPath = out
@@ -213,13 +214,12 @@ func chatdRun(t *testing.T, xdgDir string, stdin string, extraEnv []string, args
 
 	err := cmd.Run()
 	exitCode := 0
-	switch v := err.(type) {
-	case nil:
-		// success path
-	case *exec.ExitError:
-		exitCode = v.ExitCode()
-		err = nil // surface via exitCode, not err
-	default:
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+			err = nil // surface via exitCode, not err
+		}
 		// other launch error (binary missing, etc.) — surface via err
 	}
 
@@ -267,36 +267,6 @@ func registerViaREST(t *testing.T, srv *runningServer, username, password string
 		t.Fatalf("register did not return token: %s", raw)
 	}
 	return env.Data.Token, env.Data.User.ID
-}
-
-// loginViaREST exchanges username/password for a bearer token.
-func loginViaREST(t *testing.T, srv *runningServer, username, password string) string {
-	t.Helper()
-	body, _ := json.Marshal(map[string]string{
-		"username": username,
-		"password": password,
-	})
-	resp, err := http.Post(srv.url+"/api/auth/login", "application/json", bytes.NewReader(body)) //nolint:gosec,noctx // test helper, loopback URL
-	if err != nil {
-		t.Fatalf("POST /api/auth/login: %v", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("login status = %d, body = %s", resp.StatusCode, raw)
-	}
-	var env struct {
-		Data struct {
-			Token string `json:"token"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		t.Fatalf("decode login envelope: %v", err)
-	}
-	if env.Data.Token == "" {
-		t.Fatalf("login: empty token in %s", raw)
-	}
-	return env.Data.Token
 }
 
 // createChannelViaREST creates a channel and returns its id.
@@ -439,10 +409,6 @@ func readConfigFile(t *testing.T, xdgDir string) (*configFile, error) {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
 	}
 	return &cf, nil
-}
-
-func configPath(xdgDir string) string {
-	return filepath.Join(xdgDir, "chatd", "config.json")
 }
 
 // randomPassword returns a 32-char hex password — comfortably above the

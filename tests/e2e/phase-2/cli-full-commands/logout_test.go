@@ -59,11 +59,10 @@ func TestAC8_Logout_ClearsConfigAndInvalidatesServerSide(t *testing.T) {
 		if cf.Token != "" {
 			t.Errorf("AC-8: token still set after logout; cf=%+v", cf)
 		}
-	default:
+	case errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err):
 		// Common case: file removed entirely.
-		if !errors.Is(err, fs.ErrNotExist) && !os.IsNotExist(err) {
-			t.Errorf("AC-8: unexpected error reading config after logout: %v", err)
-		}
+	default:
+		t.Errorf("AC-8: unexpected error reading config after logout: %v", err)
 	}
 
 	// Server-side invalidation — the captured token must no longer be
