@@ -6,8 +6,11 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
+
+	"hackathon/apps/server/internal/auth"
 )
 
 // SEC-11: token query parameter must not appear in access logs.
@@ -225,6 +228,78 @@ func TestRequestIDsAreUniquePerRequest(t *testing.T) {
 	}
 	if len(seen) != 32 {
 		t.Fatalf("expected 32 distinct request IDs, got %d", len(seen))
+	}
+}
+
+// Regression test for the audit finding "Access log loses every authenticated
+// user_id". Before the fix the auth middleware wrote user.ID under its private
+// ctxKey while the access log read via http.UserID, which keys on a different
+// type — so user_id was always "-" in production. This test runs an
+// authenticated request through the real chain (SecurityHeaders →
+// RequestIDMiddleware → AccessLog → RequireJWT(handler)) plus an unauth
+// request and asserts the log line shows the ULID for the auth case and "-"
+// for the unauth case.
+func TestAccessLogRecordsAuthenticatedUserIDThroughRealChain(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+
+	tok := registerOK(t, f, "alice", "correct-horse-battery")
+
+	var sawUserID string
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if uid, ok := auth.UserIDFromContext(r.Context()); ok {
+			sawUserID = uid
+		}
+		w.WriteHeader(http.StatusOK)
+	})
+
+	require := auth.RequireJWT(auth.MiddlewareConfig{
+		SigningKey:        []byte("test-signing-key-must-be-long-enough"),
+		Lookup:            f.handlers.LookupUserInfo,
+		WriteUnauthorized: WriteUnauthorized,
+		WithUserID:        WithUserID,
+	})
+	chain := SecurityHeaders(RequestIDMiddleware(AccessLog(require(handler))))
+
+	logs := captureLog(t)
+
+	// Authenticated request: log line must contain the user's ULID.
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authed status: got %d want 200", rec.Code)
+	}
+	if sawUserID == "" {
+		t.Fatalf("handler never observed an authenticated user id; auth chain misconfigured")
+	}
+	out := logs.String()
+	wantField := "user_id=" + sawUserID
+	if !strings.Contains(out, wantField) {
+		t.Fatalf("access log missing %q for authenticated request:\n%s", wantField, out)
+	}
+	if strings.Contains(out, "user_id=-") {
+		t.Fatalf("access log rendered \"-\" for an authenticated request:\n%s", out)
+	}
+	// Defensive: the value must be a non-empty 26-char ULID, not the literal
+	// string "<nil>" or some accidental fmt %v of a context value.
+	ulidRE := regexp.MustCompile(`user_id=[0-9A-HJKMNP-TV-Z]{26}\b`)
+	if !ulidRE.MatchString(out) {
+		t.Fatalf("access log user_id is not a ULID-shaped value:\n%s", out)
+	}
+
+	// Unauthenticated request through the same chain: must render "-".
+	logs.Reset()
+	reqAnon := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	recAnon := httptest.NewRecorder()
+	chain.ServeHTTP(recAnon, reqAnon)
+	if recAnon.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth status: got %d want 401", recAnon.Code)
+	}
+	outAnon := logs.String()
+	if !strings.Contains(outAnon, "user_id=-") {
+		t.Fatalf("access log missing user_id=- for unauthenticated request:\n%s", outAnon)
 	}
 }
 

@@ -91,6 +91,7 @@ func (f *fixture) dispatch(path string, w stdhttp.ResponseWriter, r *stdhttp.Req
 		SigningKey:        []byte("test-signing-key-must-be-long-enough"),
 		Lookup:            f.handlers.LookupUserInfo,
 		WriteUnauthorized: WriteUnauthorized,
+		WithUserID:        WithUserID,
 	})
 	switch path {
 	case "/api/auth/register":

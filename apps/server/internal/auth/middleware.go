@@ -43,6 +43,14 @@ type MiddlewareConfig struct {
 	// package does not import the http envelope package (which would
 	// create a cycle: auth → httpapi → auth).
 	WriteUnauthorized func(w http.ResponseWriter, code, message string)
+	// WithUserID, if non-nil, is called with the request context and
+	// the resolved user ID after a successful JWT check. The returned
+	// context is plumbed into the downstream handler. Injected (rather
+	// than this package importing http) so the http package's access
+	// log can read the same ctx key its WithUserID writes — without
+	// reintroducing the auth → http import cycle. Callers that don't
+	// need access-log attribution may leave this nil.
+	WithUserID func(ctx context.Context, userID string) context.Context
 }
 
 // RequireJWT returns a middleware that admits requests carrying a
@@ -84,6 +92,9 @@ func RequireJWT(cfg MiddlewareConfig) func(http.Handler) http.Handler {
 			}
 			ctx := context.WithValue(r.Context(), ctxKeyUserID, user.ID)
 			ctx = context.WithValue(ctx, ctxKeyUsername, user.Username)
+			if cfg.WithUserID != nil {
+				ctx = cfg.WithUserID(ctx, user.ID)
+			}
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

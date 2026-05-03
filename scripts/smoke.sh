@@ -87,7 +87,9 @@ go build -o "$CHATD_BIN" ./apps/cli
 PORT="${CHAT_SERVER_PORT:-$(pick_free_port)}"
 WS_URL="ws://127.0.0.1:${PORT}/ws"
 API_URL="http://127.0.0.1:${PORT}"
-export CHAT_SERVER="$WS_URL"
+# CHAT_SERVER is set later, after we know the channel ID — watchers must
+# subscribe to the same channel the producer posts to (audit #78 dropped
+# the legacy raw-rebroadcast on /ws so REST is the only producer path).
 
 # Auth flow needs a SQLite file plus the JWT secret and invite code. The
 # work-dir DB makes each invocation hermetic. Per PR #28's startup config
@@ -153,6 +155,23 @@ mint_ticket() {
     -H "Authorization: Bearer ${TOKEN}" | json_get ticket
 }
 
+# Audit #78 (medium) removed the legacy raw rebroadcast on /ws. The
+# supported producer path is REST POST /api/channels/{id}/messages,
+# which requires a channel row. Create one and subscribe both watchers
+# to it via ?channel=<id> rather than the legacy #general sentinel.
+echo "[smoke] creating smoke channel"
+CHANNEL_NAME="smoke-$$-$(date +%s)"
+CREATE_RESP=$(curl -fsS -X POST "${API_URL}/api/channels" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"${CHANNEL_NAME}\"}")
+CHANNEL_ID=$(printf '%s' "$CREATE_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['id'])")
+if [[ -z "$CHANNEL_ID" ]]; then
+  echo "[smoke] create channel did not return an id: ${CREATE_RESP}" >&2
+  exit 1
+fi
+export CHAT_SERVER="${WS_URL}?channel=${CHANNEL_ID}"
+
 echo "[smoke] starting two watchers (each with its own ticket)"
 WATCH1_TICKET=$(mint_ticket)
 "$CHATD_BIN" --ws-ticket "$WATCH1_TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
@@ -161,12 +180,9 @@ WATCH2_TICKET=$(mint_ticket)
 "$CHATD_BIN" --ws-ticket "$WATCH2_TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
 WATCH2_PID=$!
 
-# Wait for both watchers to register with the hub. Polling /debug/subs avoids
-# the race where a slow CI runner's WebSocket dial takes longer than a fixed
-# sleep and the publish below misses one or both subscribers. The %23 is a
-# URL-encoded '#' so curl doesn't truncate the query at a fragment.
+# Wait for both watchers to register with the hub on the smoke channel.
 EXPECTED_SUBS=2
-SUBS_URL="http://127.0.0.1:${PORT}/debug/subs?channel=%23general"
+SUBS_URL="http://127.0.0.1:${PORT}/debug/subs?channel=${CHANNEL_ID}"
 subs_ready=0
 for _ in $(seq 1 50); do
   count=$(curl -fsS "$SUBS_URL" 2>/dev/null || echo "")
@@ -182,9 +198,11 @@ if [[ $subs_ready -ne 1 ]]; then
 fi
 
 MSG="smoke-$$-$(date +%s%N)"
-echo "[smoke] sending message: ${MSG}"
-SEND_TICKET=$(mint_ticket)
-"$CHATD_BIN" --ws-ticket "$SEND_TICKET" send "$MSG"
+echo "[smoke] sending message via REST: ${MSG}"
+curl -fsS -X POST "${API_URL}/api/channels/${CHANNEL_ID}/messages" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H 'Content-Type: application/json' \
+  -d "{\"body\":\"${MSG}\"}" >/dev/null
 
 # Poll up to ~5s for both files to contain the message.
 deadline=$(( $(date +%s) + 5 ))

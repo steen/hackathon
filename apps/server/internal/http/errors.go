@@ -74,6 +74,7 @@ type ctxKey int
 const (
 	requestIDKey ctxKey = iota
 	userIDKey
+	userIDSinkKey
 )
 
 // WithRequestID returns a child context carrying id. Used by middleware to
@@ -92,17 +93,48 @@ func RequestID(ctx context.Context) string {
 	return ""
 }
 
+// withUserIDSink returns a child context carrying a pointer-backed sink that
+// inner middleware can write the authenticated user id into. The sink lives
+// in the *outer* context so AccessLog (which wraps the auth middleware and
+// only sees the request's original context after ServeHTTP returns) can read
+// the value an inner request-context update wrote. Without this indirection
+// the auth middleware's r.WithContext(...) is invisible to the outer wrapper
+// because http.Request.WithContext returns a fresh *Request.
+func withUserIDSink(ctx context.Context, sink *string) context.Context {
+	return context.WithValue(ctx, userIDSinkKey, sink)
+}
+
+// userIDSink returns the pointer sink installed by AccessLog, if any. Nil
+// when AccessLog is not in the chain (e.g. unit tests for inner middleware).
+func userIDSink(ctx context.Context) *string {
+	v, _ := ctx.Value(userIDSinkKey).(*string)
+	return v
+}
+
 // WithUserID returns a child context carrying the authenticated user's id.
 // Auth middleware (or any handler that has resolved a user) calls this so
-// the access log and downstream handlers can attribute the request.
+// the access log and downstream handlers can attribute the request. When an
+// outer AccessLog has installed a sink (the production chain), the id is
+// also written through the sink so AccessLog sees it after the inner handler
+// returns — see the userIDSink doc comment for why a pointer is needed.
 func WithUserID(ctx context.Context, id string) context.Context {
+	if s := userIDSink(ctx); s != nil {
+		*s = id
+	}
 	return context.WithValue(ctx, userIDKey, id)
 }
 
 // UserID extracts the authenticated user id set by WithUserID. Returns the
 // empty string when no id is present (unauthenticated request, or a handler
-// invoked outside the auth middleware in tests).
+// invoked outside the auth middleware in tests). Reads the AccessLog sink
+// first so it returns the value an inner middleware wrote even when the
+// caller still holds the outer (pre-auth) context — that is the case for
+// AccessLog itself, which only sees the original request context after the
+// handler returns.
 func UserID(ctx context.Context) string {
+	if s := userIDSink(ctx); s != nil && *s != "" {
+		return *s
+	}
 	if v, ok := ctx.Value(userIDKey).(string); ok {
 		return v
 	}
