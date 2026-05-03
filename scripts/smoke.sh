@@ -92,9 +92,10 @@ export CHAT_SERVER="$WS_URL"
 # Auth flow needs a SQLite file plus the JWT secret and invite code. The
 # work-dir DB makes each invocation hermetic. Per PR #28's startup config
 # validation, the secret + invite code are generated per-run via openssl
-# (no fake-secret literal committed to git; the values live only for the
-# duration of this smoke run). openssl is on every CI runner and avoids
-# the `tr <urandom | head` SIGPIPE trap under `set -o pipefail`.
+# (no fake-secret literal committed to git per CLAUDE.md "no hardcoded
+# secrets"; values live only for the duration of this smoke run).
+# openssl is on every CI runner and avoids the `tr </dev/urandom | head`
+# SIGPIPE trap under `set -o pipefail`.
 DB_PATH="$WORK_DIR/chat.db"
 SMOKE_JWT_SECRET="$(openssl rand -hex 20)"      # 40 hex chars, well over the 32-byte floor
 SMOKE_INVITE_CODE="$(openssl rand -hex 8)"      # 16 hex chars
@@ -144,27 +145,20 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-echo "[smoke] ws-ticket"
-TICKET_RESP=$(curl -fsS -X POST "${API_URL}/api/ws-ticket" \
-  -H "Authorization: Bearer ${TOKEN}")
-TICKET=$(printf '%s' "$TICKET_RESP" | json_get ticket)
-if [[ -z "$TICKET" ]]; then
-  echo "[smoke] ws-ticket did not return a ticket: ${TICKET_RESP}" >&2
-  exit 1
-fi
+# Tickets are single-use (SEC-12) so each WS dial needs its own. Mint
+# one per connection rather than caching a value the server will reject
+# on second use.
+mint_ticket() {
+  curl -fsS -X POST "${API_URL}/api/ws-ticket" \
+    -H "Authorization: Bearer ${TOKEN}" | json_get ticket
+}
 
-# WS handshake hardening (ticket redemption at /ws upgrade) lands in
-# the ws-hardening feature; for now /ws ignores the query parameter,
-# so reusing one ticket across both watchers and the sender works.
-# Once the upgrader calls Redeem() — single-use — this script must
-# issue one ticket per chatd invocation (three total). Reusing one
-# ticket will fail silently for the second and third consumers.
-# We still pass --ws-ticket today so the smoke wiring is in place —
-# coder/websocket Accept ignores unknown query params.
-echo "[smoke] starting two watchers (with ticket)"
-"$CHATD_BIN" --ws-ticket "$TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
+echo "[smoke] starting two watchers (each with its own ticket)"
+WATCH1_TICKET=$(mint_ticket)
+"$CHATD_BIN" --ws-ticket "$WATCH1_TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
 WATCH1_PID=$!
-"$CHATD_BIN" --ws-ticket "$TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
+WATCH2_TICKET=$(mint_ticket)
+"$CHATD_BIN" --ws-ticket "$WATCH2_TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
 WATCH2_PID=$!
 
 # Wait for both watchers to register with the hub. Polling /debug/subs avoids
@@ -189,7 +183,8 @@ fi
 
 MSG="smoke-$$-$(date +%s%N)"
 echo "[smoke] sending message: ${MSG}"
-"$CHATD_BIN" --ws-ticket "$TICKET" send "$MSG"
+SEND_TICKET=$(mint_ticket)
+"$CHATD_BIN" --ws-ticket "$SEND_TICKET" send "$MSG"
 
 # Poll up to ~5s for both files to contain the message.
 deadline=$(( $(date +%s) + 5 ))

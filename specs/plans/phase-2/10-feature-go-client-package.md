@@ -4,11 +4,12 @@
 **Status:** planned
 
 ## Requirements covered
-- (foundation for US-8; the CLI in `feature-cli-full-commands.md` consumes this package)
+- (foundation for US-8; the CLI in `20-feature-cli-full-commands.md` consumes this package)
 
 ## Acceptance criteria
 - A reusable Go package at `packages/go-client` (part of the single-root `hackathon` module, imported as `hackathon/packages/go-client`) exposes typed methods for: `Login`, `Register`, `Me`, `Logout`, `ListChannels`, `CreateChannel`, `ListMessages`, `PostMessage`, `WsTicket`, and `Watch` (returns a stream of inbound events).
-- The client handles base URL, auth token storage (in memory), and JSON/error-envelope decoding.
+- The client handles base URL, auth token storage (in memory), and JSON/error-envelope decoding (envelope shape is `{ok, data, error: {code, message}}` per `apps/server/internal/http/errors.go`).
+- HTTP requests authenticate with `Authorization: Bearer <jwt>`; WebSocket connections use the one-shot ticket flow — call `WsTicket` to mint a ticket, then redeem it on upgrade as `?ticket=<hex>` (see `apps/server/internal/wsapi/handler.go` and `feature-ws-hardening.md`). Bearer tokens are not sent on the WS upgrade.
 - The client is consumable from `apps/cli` via a normal in-module import (no workspace replace directive needed).
 
 ## Implementation steps

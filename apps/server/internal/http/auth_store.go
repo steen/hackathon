@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	stdhttp "net/http"
 	"time"
 
 	"hackathon/apps/server/internal/auth"
@@ -17,11 +18,13 @@ type authStore struct{ db *sql.DB }
 
 func newAuthStore(db *sql.DB) *authStore { return &authStore{db: db} }
 
-// CreateUser inserts a new user row. Returns ErrUsernameTaken when the
-// UNIQUE constraint on users.username trips so the handler can return
-// a 409 envelope without exposing the SQL error.
+// ErrUsernameTaken is returned by CreateUser when the UNIQUE constraint
+// on users.username trips so the handler can return a 409 envelope
+// without exposing the SQL error.
 var ErrUsernameTaken = errors.New("auth_store: username already taken")
 
+// CreateUser inserts a new user row. Returns ErrUsernameTaken when the
+// UNIQUE constraint on users.username trips.
 func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash string, now time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO users(id, username, password_hash, token_version, created_at)
@@ -93,6 +96,16 @@ func (s *authStore) IncrementTokenVersion(ctx context.Context, userID string) (i
 		return 0, err
 	}
 	return tv, nil
+}
+
+// LogRateLimited records one rate-limit rejection in auth_events so
+// the spec AC ("Limits are observable in auth_events") holds. The
+// signature matches RateLimitAuditSink so the middleware can call it
+// without importing the concrete store. Errors are swallowed for the
+// same reason LogAuthEvent's callers ignore its error: an audit-log
+// failure must not turn a 429 into a 500.
+func (s *authStore) LogRateLimited(r *stdhttp.Request, userID, ip string) {
+	_ = s.LogAuthEvent(r.Context(), userID, AuthEventRateLimited, ip, r.UserAgent())
 }
 
 // LogAuthEvent appends one auth_events row. Per the migration's column

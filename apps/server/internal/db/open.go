@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // SQL driver registration; used by sql.Open("sqlite", ...).
 )
 
 // Open returns a *sql.DB pointing at a SQLite file at path. EnsureFile (SEC-14)

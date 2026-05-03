@@ -14,7 +14,7 @@ import (
 // post-condition as on POSIX hosts. Production deployments are unix-only;
 // this branch exists so local development on Windows can build the package.
 func EnsureFile(path string) error {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, FileMode)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, FileMode) //nolint:gosec // G304: path is the configured DB location (CHAT_DB_PATH); operator-controlled by design.
 	if err != nil {
 		return fmt.Errorf("db: open %q: %w", path, err)
 	}

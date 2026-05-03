@@ -9,8 +9,9 @@
 ## Acceptance criteria
 - `apps/web` is a Vite + React + TypeScript app that builds with `pnpm --filter web build`.
 - The app provides a login screen, a register screen (gated by invite code), and a chat page with channel list + message stream + input.
-- The chat page subscribes via WS and updates in real time as new messages arrive.
-- On WS disconnect, the client reconnects automatically with exponential backoff (and visibly indicates connection state).
+- The chat page subscribes via WS and updates in real time as new messages arrive. The WS upgrade goes through the ticket flow exposed by `packages/api-client` (see `30-feature-ts-api-client-package.md`); the bearer token is not sent on the WS upgrade.
+- On WS disconnect, the client reconnects automatically with exponential backoff (and visibly indicates connection state). Each reconnect mints a fresh ticket via `GET /api/ws-ticket` rather than reusing the prior one.
+- Once `50-feature-presence.md` lands, the chat page renders an online-users list driven by the initial `GET /api/presence` plus `presence` events on the WS stream.
 - The app consumes `packages/api-client` for all server interactions.
 
 ## Implementation steps

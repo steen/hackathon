@@ -10,54 +10,63 @@ import (
 	"net/http"
 )
 
+// Envelope is the {ok,data,error} response shape from PRD §10.
 type Envelope struct {
 	OK    bool        `json:"ok"`
 	Data  interface{} `json:"data"`
 	Error *ErrorBody  `json:"error"`
 }
 
+// ErrorBody is the user-safe error payload nested in Envelope.Error.
+// Code is a stable machine string clients branch on; Message is
+// user-safe text (no SQL, no stack traces, no file paths — see PRD §9
+// "Secrets & config hygiene").
 type ErrorBody struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
 }
 
-// Error codes used across the auth surface. Kept as a small enum so
+// Error codes used across the HTTP surface. Kept as a small enum so
 // clients can branch on code rather than parse Message.
 const (
 	CodeBadRequest      = "bad_request"
 	CodeUnauthorized    = "unauthorized"
 	CodeForbidden       = "forbidden"
+	CodeNotFound        = "not_found"
 	CodeConflict        = "conflict"
 	CodeInternal        = "internal"
 	CodeMethodNotAllow  = "method_not_allowed"
 	CodeUnsupportedType = "unsupported_media_type"
 )
 
-// WriteOK serializes data inside a success envelope at the given status.
-// data may be nil — the envelope still ships data: null, ok: true,
-// error: null so clients can rely on all three keys being present.
-func WriteOK(w http.ResponseWriter, status int, data interface{}) {
-	writeJSON(w, status, Envelope{OK: true, Data: data, Error: nil})
+// WriteJSON serializes env at status. A serialization failure logs and
+// stops; the headers are already on the wire so a partial body is
+// preferable to a panic.
+func WriteJSON(w http.ResponseWriter, status int, env Envelope) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(env); err != nil {
+		log.Printf("envelope encode: %v", err)
+	}
 }
 
-// WriteError serializes a user-safe error envelope. message must be safe to
-// surface to a remote client — no SQL text, stack frames, or file paths. The
-// caller is responsible for logging the underlying detail server-side.
+// WriteOK sends the success arm of the envelope at status. data may be
+// nil — the envelope still ships data: null, ok: true, error: null so
+// clients can rely on all three keys being present.
+func WriteOK(w http.ResponseWriter, status int, data interface{}) {
+	WriteJSON(w, status, Envelope{OK: true, Data: data, Error: nil})
+}
+
+// WriteError sends the failure arm of the envelope at status. message
+// must be safe to surface to a remote client — no SQL text, stack
+// frames, or file paths. The caller is responsible for logging the
+// underlying detail server-side.
 func WriteError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, Envelope{
+	WriteJSON(w, status, Envelope{
 		OK:    false,
 		Data:  nil,
 		Error: &ErrorBody{Code: code, Message: message},
 	})
-}
-
-func writeJSON(w http.ResponseWriter, status int, body Envelope) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(body); err != nil {
-		// Headers are flushed; we can only log.
-		log.Printf("envelope encode: %v", err)
-	}
 }
 
 type ctxKey int

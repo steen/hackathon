@@ -26,8 +26,10 @@ Note: `feature-presence.md` is the only Phase-2 feature that modifies server int
 
 Test ownership: US-7 covered by `feature-presence.md`; US-8 covered by `feature-cli-full-commands.md`.
 
-- [Go client package](phase-2/feature-go-client-package.md)
-- [CLI full command set](phase-2/feature-cli-full-commands.md)
-- [TS api-client package](phase-2/feature-ts-api-client-package.md)
-- [Web app](phase-2/feature-web-app.md)
-- [Presence (online users)](phase-2/feature-presence.md)
+Implementation order is encoded in the filename prefix (10, 20, 30…). Insert new features by picking an unused number between neighbours (e.g. `15-`).
+
+- [10 — Go client package](phase-2/10-feature-go-client-package.md)
+- [20 — CLI full command set](phase-2/20-feature-cli-full-commands.md)
+- [30 — TS api-client package](phase-2/30-feature-ts-api-client-package.md)
+- [40 — Web app](phase-2/40-feature-web-app.md)
+- [50 — Presence (online users)](phase-2/50-feature-presence.md)

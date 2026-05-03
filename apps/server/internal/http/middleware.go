@@ -30,6 +30,8 @@ type statusRecorder struct {
 	wrote  bool
 }
 
+// WriteHeader captures the response status before forwarding to the wrapped
+// ResponseWriter. Repeated calls are idempotent.
 func (s *statusRecorder) WriteHeader(code int) {
 	if s.wrote {
 		return
@@ -80,7 +82,10 @@ func AccessLog(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		redacted := redactURL(r.URL)
-		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s",
+		// G706: r.Method is constrained by net/http to a fixed set; redacted goes
+		// through url.URL.EscapedPath() which never emits raw CR/LF — no log
+		// injection vector reachable here.
+		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s", //nolint:gosec // G706: see comment above.
 			r.Method,
 			redacted,
 			rec.status,
@@ -95,6 +100,11 @@ func AccessLog(next http.Handler) http.Handler {
 // key's presence so an operator can see "ticket was passed" without seeing
 // the value. Parsing is via net/url so byte-level oddities (encoding,
 // ordering, repeated keys) cannot smuggle a raw token into the log.
+//
+// `u.EscapedPath()` and `q.Encode()` percent-encode CR/LF, which is why
+// gosec G706 (CRLF log injection) is excluded in .golangci.yml. If you
+// add a new access-log call site, do NOT log `r.URL.RawPath` or
+// `r.URL.Opaque` — they bypass that escaping.
 func redactURL(u *url.URL) string {
 	if u == nil {
 		return ""

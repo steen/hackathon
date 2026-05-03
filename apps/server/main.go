@@ -10,15 +10,16 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
-	"hackathon/apps/server/internal/httpx"
-	"hackathon/apps/server/internal/hub"
 	httpapi "hackathon/apps/server/internal/http"
+	"hackathon/apps/server/internal/hub"
+	"hackathon/apps/server/internal/ratelimit"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
 )
@@ -26,25 +27,32 @@ import (
 const (
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
-	jwtSecretEnv      = "CHAT_JWT_SECRET"
+	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
+	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
 )
 
-// repository is a process-wide handle that later phase-1 features (auth,
-// channels, messages) will use to reach SQLite. Kept package-level so the
-// startup wiring lives in one place; nil when CHAT_DB_PATH is unset (phase-0
-// boot path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
+func main() {
+	if err := run(); err != nil {
+		log.Fatalf("%v", err)
+	}
+}
+
+// repository is the process-wide SQLite handle for later phase-1 features
+// (auth, channels, messages). Nil when CHAT_DB_PATH is unset (phase-0 boot
+// path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
+//
+//nolint:unused // wired into run() once phase-1 handlers land.
 var repository *repo.Repo
 
-func main() {
+func run() error {
 	cfg := config.Load()
 	checks, err := cfg.Validate()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("config: %w", err)
 	}
 	for _, ch := range checks {
 		log.Printf("config check ok: %s", ch.Name)
@@ -52,63 +60,84 @@ func main() {
 
 	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
 	if err != nil {
-		log.Fatalf("config: %v", err)
+		return fmt.Errorf("config: %w", err)
 	}
 
 	if dbPath := os.Getenv(dbPathEnv); dbPath != "" {
 		sqlDB, err := appdb.Open(dbPath)
 		if err != nil {
-			log.Fatalf("db open: %v", err)
+			return fmt.Errorf("db open: %w", err)
 		}
 		defer func() { _ = sqlDB.Close() }()
 		migCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		if err := appdb.Apply(migCtx, sqlDB); err != nil {
 			cancel()
-			log.Fatalf("db migrate: %v", err)
+			return fmt.Errorf("db migrate: %w", err)
 		}
 		cancel()
 		repository, err = repo.New(sqlDB)
 		if err != nil {
-			log.Fatalf("repo init: %v", err)
+			return fmt.Errorf("repo init: %w", err)
 		}
-		log.Printf("db ready at %s", dbPath)
+		log.Printf("db ready at %q", dbPath)
 	}
 
 	h := hub.New()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", wsapi.Handler(h))
 	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
+	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
+	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
+	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
+	var tickets *auth.TicketStore
 
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
 		if len(jwtSecret) == 0 {
-			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
+			return fmt.Errorf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
-		tickets := auth.NewTicketStore()
+		tickets = auth.NewTicketStore()
+		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
+		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfig())
+		userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
 		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
-			DB:         repository.DB(),
-			Tickets:    tickets,
-			SigningKey: jwtSecret,
-			InviteCode: os.Getenv(inviteCodeEnv),
+			DB:          repository.DB(),
+			Tickets:     tickets,
+			SigningKey:  jwtSecret,
+			InviteCode:  os.Getenv(inviteCodeEnv),
+			UserLimiter: userLimiter,
 		})
 		require := auth.RequireJWT(auth.MiddlewareConfig{
 			SigningKey:        jwtSecret,
 			Lookup:            ah.LookupUserInfo,
 			WriteUnauthorized: httpapi.WriteUnauthorized,
 		})
-		mux.HandleFunc("/api/register", ah.Register)
-		mux.HandleFunc("/api/login", ah.Login)
+		loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
+		registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())
+		mux.Handle("/api/register", registerRL(http.HandlerFunc(ah.Register)))
+		mux.Handle("/api/login", loginRL(http.HandlerFunc(ah.Login)))
 		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
 		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
 		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
+
+		ch := httpapi.NewChannelsHandlers(httpapi.ChannelsDeps{
+			Repo: repository,
+			Hub:  h,
+		})
+		msg := httpapi.NewMessagesHandlers(httpapi.MessagesDeps{
+			Repo: repository,
+			Hub:  h,
+		})
+		ch.Routes(mux, require, msg)
 	}
+
+	mux.HandleFunc("/ws", wsapi.Handler(h, tickets, wsCfg))
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           httpx.BodyCap(mux),
+		Handler:           httpapi.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
@@ -129,6 +158,25 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+	return nil
+}
+
+// parseAllowedOrigins splits a comma-separated CHAT_ALLOWED_ORIGINS
+// value into the OriginPatterns shape coder/websocket expects. Empty
+// or whitespace-only entries are dropped so a stray trailing comma is
+// not treated as a wildcard.
+func parseAllowedOrigins(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveListenAddr returns the address the HTTP server should bind. cfg is

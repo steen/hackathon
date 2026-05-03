@@ -11,8 +11,10 @@ import (
 	"strings"
 )
 
+// Env var names read at startup. Names, not values — gosec's G101
+// "hardcoded credentials" check trips on the literal "SECRET" substring.
 const (
-	EnvJWTSecret       = "CHAT_JWT_SECRET"
+	EnvJWTSecret       = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
 	EnvInviteCode      = "CHAT_INVITE_CODE"
 	EnvListenAddr      = "CHAT_LISTEN_ADDR"
 	EnvAllowPublicBind = "CHAT_ALLOW_PUBLIC_BIND"
