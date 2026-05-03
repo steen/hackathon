@@ -10,6 +10,14 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 18:27Z — Gate `/debug/subs` to loopback peers (#87)
+
+### Fixed
+- `GET /debug/subs` now refuses non-loopback peers with HTTP 404 (same response shape as a missing route, so the endpoint is invisible to a port scan). Closes the SEC `#78` follow-up: when an operator runs the server with `CHAT_ALLOW_PUBLIC_BIND=1`, the debug endpoint can no longer be used from off-host to enumerate channel subscriber counts. `scripts/smoke.sh` is unaffected — it already polls `127.0.0.1`. Loopback detection uses `net.IP.IsLoopback`, so 127.0.0.0/8, `::1`, and `::ffff:127.0.0.1` are all accepted uniformly.
+
+### Notes
+- Gate is enforced inside `wsapi.DebugSubsHandler` (no `apps/server/main.go` churn). It uses `r.RemoteAddr` (the TCP peer set by net/http), not `X-Forwarded-For`. If a future deployment fronts the server with a loopback-bound reverse proxy on the same host, every request will appear to originate from the proxy and the gate will admit it; this is out of scope for the current threat model (direct public bind), but worth knowing before adding such a proxy.
+
 ## 2026-05-03 17:06Z — Phase-1 follow-up gaps: access log + SecurityHeaders + auth-path rename + WS user binding (#75)
 
 ### Changed
