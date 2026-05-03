@@ -15,7 +15,7 @@ import (
 )
 
 // rlFixture wires a fresh DB + handlers + the IP rate-limit middleware
-// in front of /api/login and /api/register, mirroring main.go.
+// in front of /api/auth/login and /api/auth/register, mirroring main.go.
 type rlFixture struct {
 	mux      *stdhttp.ServeMux
 	handlers *AuthHandlers
@@ -48,8 +48,8 @@ func newRateLimitFixture(t *testing.T, loginCfg, registerCfg ratelimit.IPLimiter
 	loginRL := IPRateLimit(ratelimit.NewIPLimiter(loginCfg), 5*time.Minute, h.AuditSink())
 	registerRL := IPRateLimit(ratelimit.NewIPLimiter(registerCfg), 15*time.Minute, h.AuditSink())
 	mux := stdhttp.NewServeMux()
-	mux.Handle("/api/register", registerRL(stdhttp.HandlerFunc(h.Register)))
-	mux.Handle("/api/login", loginRL(stdhttp.HandlerFunc(h.Login)))
+	mux.Handle("/api/auth/register", registerRL(stdhttp.HandlerFunc(h.Register)))
+	mux.Handle("/api/auth/login", loginRL(stdhttp.HandlerFunc(h.Login)))
 	return &rlFixture{
 		mux:      mux,
 		handlers: h,
@@ -86,12 +86,12 @@ func TestIPRateLimitBlocksEleventhLoginAttemptWithin5min(t *testing.T) {
 
 	body := map[string]string{"username": "nobody", "password": "anything-at-all"}
 	for i := 1; i <= 10; i++ {
-		rr := f.post(t, "/api/login", body, "9.9.9.9")
+		rr := f.post(t, "/api/auth/login", body, "9.9.9.9")
 		if rr.Code == stdhttp.StatusTooManyRequests {
 			t.Fatalf("attempt %d/10 already 429; SEC-5 requires the 11th to be the first 429", i)
 		}
 	}
-	rr := f.post(t, "/api/login", body, "9.9.9.9")
+	rr := f.post(t, "/api/auth/login", body, "9.9.9.9")
 	if rr.Code != stdhttp.StatusTooManyRequests {
 		t.Fatalf("11th login attempt within 5 min from one IP must return 429 (SEC-5); got %d", rr.Code)
 	}
@@ -102,7 +102,7 @@ func TestIPRateLimitBlocksRegisterAfterBurst(t *testing.T) {
 	defer f.close()
 
 	for i := 1; i <= 5; i++ {
-		rr := f.post(t, "/api/register", map[string]string{
+		rr := f.post(t, "/api/auth/register", map[string]string{
 			"username":    "user-x",
 			"password":    "correct-horse-battery",
 			"invite_code": "WRONG", // 403 doesn't refund the bucket
@@ -111,7 +111,7 @@ func TestIPRateLimitBlocksRegisterAfterBurst(t *testing.T) {
 			t.Fatalf("attempt %d should fit within burst=5", i)
 		}
 	}
-	rr := f.post(t, "/api/register", map[string]string{
+	rr := f.post(t, "/api/auth/register", map[string]string{
 		"username":    "user-x",
 		"password":    "correct-horse-battery",
 		"invite_code": "WRONG",
@@ -126,10 +126,10 @@ func TestRateLimitedResponseUsesEnvelope(t *testing.T) {
 	defer f.close()
 
 	body := map[string]string{"username": "x", "password": "y"}
-	if rr := f.post(t, "/api/login", body, "7.7.7.7"); rr.Code == stdhttp.StatusTooManyRequests {
+	if rr := f.post(t, "/api/auth/login", body, "7.7.7.7"); rr.Code == stdhttp.StatusTooManyRequests {
 		t.Fatal("first attempt should not be limited")
 	}
-	rr := f.post(t, "/api/login", body, "7.7.7.7")
+	rr := f.post(t, "/api/auth/login", body, "7.7.7.7")
 	if rr.Code != stdhttp.StatusTooManyRequests {
 		t.Fatalf("second attempt status: got %d want 429", rr.Code)
 	}
@@ -161,7 +161,7 @@ func TestSuccessfulLoginResetsUsernameBackoff(t *testing.T) {
 	f := newRateLimitFixture(t, ratelimit.LoginIPConfig(), ratelimit.RegisterIPConfig(), &uc)
 	defer f.close()
 
-	if rr := f.post(t, "/api/register", map[string]string{
+	if rr := f.post(t, "/api/auth/register", map[string]string{
 		"username":    "alice",
 		"password":    "correct-horse-battery",
 		"invite_code": "INVITE-OK",
@@ -170,14 +170,14 @@ func TestSuccessfulLoginResetsUsernameBackoff(t *testing.T) {
 	}
 
 	// One bad password registers a failure on the user limiter.
-	if rr := f.post(t, "/api/login", map[string]string{
+	if rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "wrong-password-xyz",
 	}, "1.1.1.1"); rr.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("bad login status: %d", rr.Code)
 	}
 	// Wait past the gate, then succeed → should reset the counter.
 	time.Sleep(120 * time.Millisecond)
-	if rr := f.post(t, "/api/login", map[string]string{
+	if rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "correct-horse-battery",
 	}, "1.1.1.1"); rr.Code != stdhttp.StatusOK {
 		t.Fatalf("good login status: %d", rr.Code)
@@ -187,12 +187,12 @@ func TestSuccessfulLoginResetsUsernameBackoff(t *testing.T) {
 	// the *next* attempt is what gates. Verify by a wrong password,
 	// then immediately retry — if Reset didn't fire, this would gate
 	// instantly with a multi-step delay; instead it is a single Step.
-	if rr := f.post(t, "/api/login", map[string]string{
+	if rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "wrong-again-here",
 	}, "1.1.1.1"); rr.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("post-reset bad login: %d", rr.Code)
 	}
-	rr := f.post(t, "/api/login", map[string]string{
+	rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "wrong-again-here",
 	}, "1.1.1.1")
 	if rr.Code != stdhttp.StatusTooManyRequests {
@@ -210,8 +210,8 @@ func TestRateLimitRejectionLoggedToAuthEvents(t *testing.T) {
 	defer f.close()
 
 	body := map[string]string{"username": "x", "password": "y"}
-	_ = f.post(t, "/api/login", body, "5.5.5.5")
-	rr := f.post(t, "/api/login", body, "5.5.5.5")
+	_ = f.post(t, "/api/auth/login", body, "5.5.5.5")
+	rr := f.post(t, "/api/auth/login", body, "5.5.5.5")
 	if rr.Code != stdhttp.StatusTooManyRequests {
 		t.Fatalf("setup: expected 429 on second call; got %d", rr.Code)
 	}

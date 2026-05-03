@@ -88,6 +88,9 @@ func run() error {
 	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
 	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
 	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
+	if repository != nil {
+		wsCfg.ChannelLookup = repository.ChannelExists
+	}
 	var tickets *auth.TicketStore
 
 	if repository != nil {
@@ -113,11 +116,11 @@ func run() error {
 		})
 		loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
 		registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())
-		mux.Handle("/api/register", registerRL(http.HandlerFunc(ah.Register)))
-		mux.Handle("/api/login", loginRL(http.HandlerFunc(ah.Login)))
-		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
-		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
-		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
+		mux.Handle("/api/auth/register", registerRL(http.HandlerFunc(ah.Register)))
+		mux.Handle("/api/auth/login", loginRL(http.HandlerFunc(ah.Login)))
+		mux.Handle("/api/auth/me", require(http.HandlerFunc(ah.Me)))
+		mux.Handle("/api/auth/logout", require(http.HandlerFunc(ah.Logout)))
+		mux.Handle("/api/auth/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
 
 		ch := httpapi.NewChannelsHandlers(httpapi.ChannelsDeps{
 			Repo: repository,
@@ -135,9 +138,20 @@ func run() error {
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
+	// Middleware order (outer → inner):
+	//   SecurityHeaders      → SEC-10 baseline headers on every response
+	//   RequestIDMiddleware  → assigns X-Request-Id, plumbs ctx
+	//   AccessLog            → emits one log line per request (uses ctx)
+	//   Recover              → catches panics, writes generic 500
+	//   BodyCap              → caps request body to RESTBodyLimit
+	//   mux                  → handler dispatch
+	// SecurityHeaders is outermost so even error responses written by inner
+	// middleware (Recover's 500, BodyCap's 413) carry the headers.
+	// statusRecorder.Hijack forwards the Hijacker interface so /ws upgrade
+	// still works through this chain.
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           httpapi.BodyCap(mux),
+		Handler:           httpapi.SecurityHeaders(httpapi.RequestIDMiddleware(httpapi.AccessLog(httpapi.Recover(httpapi.BodyCap(mux))))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}

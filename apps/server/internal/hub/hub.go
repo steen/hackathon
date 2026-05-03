@@ -57,6 +57,21 @@ func (h *Hub) SubscriberCount(channel string) int {
 	return len(h.channels[channel])
 }
 
+// SnapshotSubscribers returns a slice copy of every Subscriber currently
+// registered for channel. Intended for tests and debug-only inspection
+// (e.g. assertions that the WS handler bound the right per-conn state);
+// production code should use Broadcast, not iterate the snapshot.
+func (h *Hub) SnapshotSubscribers(channel string) []Subscriber {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	subs := h.channels[channel]
+	out := make([]Subscriber, 0, len(subs))
+	for s := range subs {
+		out = append(out, s)
+	}
+	return out
+}
+
 // Broadcast delivers msg to every subscriber of channel. Snapshot the
 // subscriber set under the read lock so Send calls do not block hub
 // mutations and a slow subscriber cannot stall the hub.

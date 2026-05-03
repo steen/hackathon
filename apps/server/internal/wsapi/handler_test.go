@@ -2,6 +2,7 @@ package wsapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -225,5 +226,154 @@ func waitForSubscribers(h *hub.Hub, channel string, want int, timeout time.Durat
 			return fmt.Errorf("waiting for %d subscribers on %s: got %d", want, channel, got)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// gap-D: WS upgrade for an unknown channel is rejected with HTTP 404
+// BEFORE the WebSocket handshake. The legacy #general sentinel keeps
+// working without a DB lookup; any other channel id is checked via
+// cfg.ChannelLookup.
+func TestHandlerRejectsUnknownChannel(t *testing.T) {
+	h := hub.New()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws?channel=missing-channel-id")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "channel not found") {
+		t.Fatalf("body: got %q want substring 'channel not found'", body)
+	}
+}
+
+// gap-D: legacy #general bypasses the lookup so phase-0 boot paths and
+// pre-DB tests keep working.
+func TestHandlerAcceptsLegacyDefaultChannelWithoutLookup(t *testing.T) {
+	h := hub.New()
+	calls := 0
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			calls++
+			return false, nil // would normally reject — but #general skips the check
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	_ = c.Close(websocket.StatusNormalClosure, "")
+	if calls != 0 {
+		t.Fatalf("ChannelLookup invoked %d time(s) for default channel; want 0", calls)
+	}
+}
+
+// gap-D: a known channel passes the lookup and the upgrade succeeds.
+func TestHandlerAcceptsKnownChannel(t *testing.T) {
+	h := hub.New()
+	const known = "01HABCDEFGHJKMNPQRSTVWXYZA"
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, id string) (bool, error) {
+			return id == known, nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?channel=" + known
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, known, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gap-D: a ChannelLookup error becomes HTTP 500 (no upgrade).
+func TestHandlerChannelLookupErrorReturns500(t *testing.T) {
+	h := hub.New()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, errors.New("synthetic db failure")
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws?channel=anything")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", resp.StatusCode)
+	}
+}
+
+// gap-D F5: after a successful ticket redemption, the per-conn state
+// carries the redeemed userID. Observed via the test-only accessor on
+// connSubscriber and hub.SnapshotSubscribers.
+func TestHandlerBindsUserIDFromTicket(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	srv := httptest.NewServer(Handler(h, ts, Config{}))
+	defer srv.Close()
+
+	const owner = "user-7"
+	tok, _ := ts.Issue(owner)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, defaultChannel, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	subs := h.SnapshotSubscribers(defaultChannel)
+	if len(subs) != 1 {
+		t.Fatalf("subs: got %d want 1", len(subs))
+	}
+	cs, ok := subs[0].(*connSubscriber)
+	if !ok {
+		t.Fatalf("subscriber type: got %T want *connSubscriber", subs[0])
+	}
+	if got := cs.userIDForTesting(); got != owner {
+		t.Fatalf("userID: got %q want %q", got, owner)
+	}
+	if got := cs.channelForTesting(); got != defaultChannel {
+		t.Fatalf("channel: got %q want %q", got, defaultChannel)
 	}
 }

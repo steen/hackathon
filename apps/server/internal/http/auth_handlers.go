@@ -42,7 +42,7 @@ type AuthDeps struct {
 	SigningKey []byte
 	InviteCode string
 	Now        func() time.Time
-	// UserLimiter, when non-nil, gates /api/login on the per-username
+	// UserLimiter, when non-nil, gates /api/auth/login on the per-username
 	// failure backoff (PRD §9). When nil, the per-username gate is
 	// skipped — useful for tests that exercise other code paths.
 	UserLimiter *ratelimit.UserLimiter
@@ -76,7 +76,7 @@ func (h *AuthHandlers) LookupUserInfo(ctx context.Context, userID string) (*auth
 	return h.store.LookupUserByID(ctx, userID)
 }
 
-// Register handles POST /api/register.
+// Register handles POST /api/auth/register.
 //
 // Validation order is intentional: invite code first (so a brute-force
 // attempt against the regex/policy/DB cannot be used to discover that
@@ -154,7 +154,7 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	})
 }
 
-// Login handles POST /api/login.
+// Login handles POST /api/auth/login.
 //
 // The success/failure split delegates to auth.AuthenticateLogin so the
 // constant-time bcrypt path and SEC-4 byte-identical error message
@@ -217,7 +217,7 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	})
 }
 
-// Me handles GET /api/me. Must be wrapped in auth.RequireJWT.
+// Me handles GET /api/auth/me. Must be wrapped in auth.RequireJWT.
 func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
 		w.Header().Set("Allow", stdhttp.MethodGet)
@@ -238,7 +238,7 @@ func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	})
 }
 
-// Logout handles POST /api/logout. Must be wrapped in auth.RequireJWT.
+// Logout handles POST /api/auth/logout. Must be wrapped in auth.RequireJWT.
 // Bumps users.token_version, invalidating every previously-issued JWT
 // for the caller (US-12).
 func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
@@ -260,7 +260,7 @@ func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{"ok": true})
 }
 
-// WSTicket handles POST /api/ws-ticket. Must be wrapped in
+// WSTicket handles POST /api/auth/ws-ticket. Must be wrapped in
 // auth.RequireJWT. Issues a 30s, single-use ticket bound to the
 // caller; redemption happens at the WS upgrade.
 func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
