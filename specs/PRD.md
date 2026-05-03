@@ -1,5 +1,7 @@
 # Discord Lite — Product Requirements Document
 
+**Revision:** PR #128 (post-Phase-2 alignment per #126; supersedes commit `7e33be3`)
+
 ## 1. Executive Summary
 
 Discord Lite is a self-hosted, text-only chat application for friend groups uncomfortable with mandatory age verification and identity collection. The MVP ships two clients — a scriptable CLI and a React web app — backed by a single Go server with SQLite persistence.
@@ -114,8 +116,8 @@ Each story has an ID (`US-N`) used to tag tests and demo steps. A story is "cove
 ```
 ┌──────────┐  ┌──────────────┐
 │   CLI    │  │   Web UI     │
-│ (cobra)  │  │ (Vite +      │
-│          │  │  React + TS) │
+│ (stdlib  │  │ (Vite +      │
+│  flag)   │  │  React + TS) │
 └────┬─────┘  └──────┬───────┘
      │               │
  packages/go-client  packages/api-client (TS)
@@ -185,7 +187,7 @@ The exact internal package layout under `apps/server/internal/` will firm up as 
 - Graceful shutdown on SIGINT/SIGTERM.
 
 ### CLI (`apps/cli`, binary `chatd`)
-Built with cobra. Token cached at `~/.chatd/token`. Commands:
+Built on stdlib `flag`. A small `splitFlagsAndPositional` helper (see `apps/cli/cmd/history.go`, landed in PR #117) lets per-command `flag.FlagSet` instances accept flags placed after positional args (`chatd history <chan> --limit 10`) without pulling in `pflag`. Token cached at `~/.chatd/token`. Commands:
 
 | Command | Purpose |
 |---|---|
@@ -199,8 +201,10 @@ Built with cobra. Token cached at `~/.chatd/token`. Commands:
 | `chatd watch <channel>` | Live tail of a channel (used in Phase 0 system test) |
 | `chatd logout` | Clears stored token |
 
+Future migration path: a move to cobra/pflag becomes worthwhile once subcommand groups, generated `--help`, or shell completion are needed. At 9 flat commands the stdlib `flag` + helper is cheaper to maintain.
+
 ### Web UI (`apps/web`)
-Vite + React 18 + TypeScript + Zustand + Tailwind.
+Vite + React 18 + TypeScript. State via React Context; styling via plain CSS at `apps/web/src/styles.css`.
 
 - Login / register page.
 - Single chat page: sidebar (channels + presence) + message list + input.
@@ -208,7 +212,9 @@ Vite + React 18 + TypeScript + Zustand + Tailwind.
 - Reconnect-on-disconnect with exponential backoff.
 - Reuses `packages/api-client` (TS) for all API calls.
 
-**Why React + Vite (not HTMX, not SvelteKit)**: hackathon velocity. Zustand fits chat state cleanly, Vite is zero-config, the team already knows React.
+**Why React + Vite (not HTMX, not SvelteKit)**: hackathon velocity. Vite is zero-config, the team already knows React.
+
+**Why Context + plain CSS (not Zustand + Tailwind)**: at the 4-route MVP scale neither is load-bearing. Revisit if cross-route state mutation or a design system becomes required (see §13).
 
 ## 8. Technology Stack
 
@@ -229,7 +235,6 @@ Vite + React 18 + TypeScript + Zustand + Tailwind.
 
 | Package | Purpose |
 |---|---|
-| `github.com/spf13/cobra` | CLI commands |
 | `golang.org/x/term` | Password prompts |
 
 ### Web
@@ -239,8 +244,6 @@ Vite + React 18 + TypeScript + Zustand + Tailwind.
 | Vite | Build tool |
 | React 18 | UI framework |
 | TypeScript | Types |
-| Zustand | State |
-| Tailwind CSS | Styling |
 
 ### Tooling
 
@@ -391,27 +394,45 @@ POST /api/channels/{id}/messages
                           { "body" }    → <Message>
 ```
 
+### Presence
+
+```
+GET  /api/presence        (Bearer)      → { "users": [ { "id", "username" } ] }
+```
+
+Returns the current set of connected users for reconciliation on (re)connect. WS `presence` frames carry only deltas; clients seed from this snapshot.
+
 ### WebSocket
 
 ```
-GET /ws?ticket=<ws-ticket>
+GET /ws?ticket=<ws-ticket>&channel=<channel_id>
 ```
 
 The ticket is obtained via `POST /api/auth/ws-ticket`. Tickets are single-use, 30-second TTL, and bound to the issuing user. The session JWT itself is never accepted as a query parameter.
 
-Inbound (client → server):
-```json
-{ "type": "subscribe",   "channel_id": "..." }
-{ "type": "unsubscribe", "channel_id": "..." }
-{ "type": "send",        "channel_id": "...", "body": "..." }
-```
+Channel scope is set at upgrade via `?channel=<channel_id>`. Sends use REST `POST /api/channels/{id}/messages`. Multiplexing several channels on a single WS is intentionally not supported — eliminating client-supplied `channel_id` on inbound frames closes the sender-spoofing surface (see §"Design deviations" below). To follow another channel, the client opens a second connection with a new ticket.
+
+Inbound (client → server): no application-level frames. The server reads only protocol-level pings/pongs and close frames.
 
 Outbound (server → client):
 ```json
 { "type": "message",  "data": { "id", "channel_id", "sender_user_id", "body", "created_at" } }
-{ "type": "presence", "data": { "channel_id", "users": [ { "id", "username" } ] } }
+{ "type": "presence", "data": { "kind": "join" | "leave", "user_id": "..." } }
 { "type": "error",    "data": { "code", "message" } }
 ```
+
+`presence` frames are global join/leave deltas; clients seed the full set from `GET /api/presence` on (re)connect.
+
+### Design deviations from earlier PRD revisions
+
+Phase 2 implementation locked in four divergences from the original spec. Each was reviewed in issues #121–#124 and resolved as a PRD update rather than a code change; this section is the canonical record so the spec stays honest without rewriting history.
+
+| Area | Original spec | Implementation | Why kept | Locked in by |
+|---|---|---|---|---|
+| Web state + styling | Zustand + Tailwind | React Context + plain CSS (`apps/web/src/styles.css`) | Neither is load-bearing at 4-route scale; Context covers cross-component reads cleanly, plain CSS avoids a build-config and design-system commitment for an MVP. Revisit if either grows in. | PR #84 (web app), #105 (presence list) |
+| WS inbound protocol | `{type:"subscribe"\|"unsubscribe"\|"send"}` typed frames | `?channel=<id>` at upgrade; sends via REST `POST /api/channels/{id}/messages`; no application-level inbound frames | Strictly safer — eliminates the client-supplied `channel_id` on send that allowed sender-spoofing (sec finding #3, fix `92d447f`). Cheaper too: one channel per WS removes hub fan-out branching. | commit `92d447f`, PR #88 |
+| Presence frame shape | Per-channel snapshot `{channel_id, users:[{id,username}]}` on every change | Global delta `{kind:"join"\|"leave", user_id}` on transition + `GET /api/presence` snapshot for reconciliation | Cheaper on the wire (delta vs. full set), matches the implemented `usePresence` hook and the e2e suite. Snapshot on (re)connect closes the catch-up gap. | PR #80, #105 |
+| CLI framework | cobra | stdlib `flag` + `splitFlagsAndPositional` helper (allows flags after positional args) | 9 flat commands don't justify cobra's footprint. Migration becomes worthwhile once subcommand groups, generated `--help`, or shell completion are needed (see §13). | PR #88, PR #117 |
 
 ## 11. Success Criteria
 
@@ -548,6 +569,8 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 - **Push notifications** — web push, APNs, FCM.
 - **Search.**
 - **Bots / webhooks.**
+- **Web state lib + design system** — adopt Zustand (or similar) when cross-route state mutation outgrows Context, and Tailwind (or similar) when the design surface outgrows hand-rolled CSS.
+- **CLI framework migration** — adopt cobra/pflag once subcommand groups, generated `--help`, or shell completion are needed.
 
 ## 14. Risks & Mitigations
 
@@ -582,10 +605,8 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 - nhooyr.io/websocket: https://pkg.go.dev/nhooyr.io/websocket
 - modernc.org/sqlite: https://pkg.go.dev/modernc.org/sqlite
 - goose: https://github.com/pressly/goose
-- cobra: https://github.com/spf13/cobra
 - React: https://react.dev
 - Vite: https://vite.dev
-- Zustand: https://github.com/pmndrs/zustand
 - ULID: https://github.com/ulid/spec
 
 ### Assumptions
