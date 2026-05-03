@@ -87,6 +87,14 @@ func AccessLog(next http.Handler) http.Handler {
 		next.ServeHTTP(rec, r)
 
 		redacted := redactURL(r.URL)
+		userID := UserID(r.Context())
+		if userID == "" {
+			// "-" is the standard access-log convention for an absent value
+			// (see Apache combined log). Keeps field count stable and avoids
+			// `user_id=` (zero-length value) tripping naive whitespace
+			// tokenizers in downstream log dashboards.
+			userID = "-"
+		}
 		// G706: r.Method is constrained by net/http to a fixed set; redacted goes
 		// through url.URL.EscapedPath() which never emits raw CR/LF — no log
 		// injection vector reachable here. remote_ip is the SplitHostPort host
@@ -99,7 +107,7 @@ func AccessLog(next http.Handler) http.Handler {
 			time.Since(start).Milliseconds(),
 			RequestID(r.Context()),
 			remoteIP(r.RemoteAddr),
-			UserID(r.Context()),
+			userID,
 		)
 	})
 }

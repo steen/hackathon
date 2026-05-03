@@ -126,7 +126,7 @@ func TestAccessLogRecordsUserIDFromContext(t *testing.T) {
 	}
 }
 
-func TestAccessLogUserIDIsEmptyWhenUnset(t *testing.T) {
+func TestAccessLogUserIDRendersDashWhenUnset(t *testing.T) {
 	logs := captureLog(t)
 
 	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -136,11 +136,11 @@ func TestAccessLogUserIDIsEmptyWhenUnset(t *testing.T) {
 	chain.ServeHTTP(httptest.NewRecorder(), req)
 
 	out := logs.String()
-	// Trailing "user_id=" with no value (line ends or whitespace follows) is
-	// the unauthenticated case. Ensure the field is present but empty.
-	trimmed := strings.TrimRight(out, "\n")
-	if !strings.Contains(out, "user_id=\n") && !strings.Contains(out, "user_id= ") && !strings.HasSuffix(trimmed, "user_id=") {
-		t.Fatalf("access log user_id should be empty when unset: %s", out)
+	// "-" is the standard access-log convention for an absent value
+	// (Apache combined log). Empty string would split as a zero-length
+	// field for naive whitespace tokenizers.
+	if !strings.Contains(out, "user_id=-") {
+		t.Fatalf("access log user_id should be \"-\" when unset: %s", out)
 	}
 }
 

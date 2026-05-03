@@ -10,12 +10,12 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
-## 2026-05-03 17:06Z — Phase-1 follow-up gaps: access log + SecurityHeaders + auth-path rename + WS user binding
+## 2026-05-03 17:06Z — Phase-1 follow-up gaps: access log + SecurityHeaders + auth-path rename + WS user binding (#75)
 
 ### Changed
 - **Auth endpoints renamed (BREAKING wire change):** `/api/register`, `/api/login`, `/api/me`, `/api/logout`, `/api/ws-ticket` → `/api/auth/<verb>` per PRD §10. CLI clients and any reverse-proxy rules pointing at the old paths must update.
 - HTTP middleware chain in `apps/server/main.go` now wraps mux with `SecurityHeaders → RequestIDMiddleware → AccessLog → Recover → BodyCap → mux`. Every response — including error envelopes — now carries the SEC-10 headers; every access log line carries `request_id`, `remote_ip` (host portion of `r.RemoteAddr`), and `user_id` (empty when unauthenticated).
-- `wsapi.Handler` binds the redeemed-ticket `userID` onto per-connection state (was a `_ = userID` TODO) and rejects WS upgrades for unknown channels with HTTP 404 before the WebSocket handshake. Legacy `#general` continues to work without a DB lookup.
+- `wsapi.Handler` binds the redeemed-ticket `userID` onto per-connection state (was a `_ = userID` TODO) and rejects WS upgrades for unknown channels with HTTP 404 before the WebSocket handshake. Legacy `#general` continues to work without a DB lookup. **Behavior change:** clients that previously dialed `?channel=<id>` for an arbitrary id and got an open socket now get HTTP 404 — the channel must be created via `POST /api/channels` first.
 
 ### Notes
 - `X-Forwarded-For` is intentionally still NOT honored: `CHAT_TRUSTED_PROXY` (PRD §9 / §11) is unwired. Access log uses raw `r.RemoteAddr` host. A dedicated rate-limit-IP-trust PR will plug the parser into both the access log and `auth_handlers.go`'s `clientIP` TODO.
