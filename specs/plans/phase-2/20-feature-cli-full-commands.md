@@ -18,8 +18,12 @@
 - All commands authenticate via the stored token and re-use the `packages/go-client` library.
 - `--server` flag and `CHAT_SERVER` env var override the default base URL.
 
+## Current state (as of 2026-05-03)
+- Already scaffolded in `apps/cli/`: `send`, `watch`, plus a shared `--url` flag (`cmd/url.go`). No config persistence, no auth subcommands. The Phase-0 raw WS code is what `send`/`watch` use today.
+- Net-new in this feature: `register`, `login`, `whoami`, `logout`, `channels`, `history`, the `--ws-ticket` → ticket-redemption flow inside `watch`, and the config-file token store. Existing `send`/`watch` get rewritten to consume `packages/go-client` and read the stored token instead of taking raw flags.
+
 ## Implementation steps
-1. Reorganize `apps/cli` to depend on `packages/go-client` (remove the raw WS code from Phase 0).
+1. Reorganize `apps/cli` to depend on `packages/go-client` (replace the raw WS code currently in `cmd/send.go` / `cmd/watch.go`).
 2. Implement subcommands using a small dispatcher (e.g., `cobra` or stdlib `flag`-based router):
    - `register`, `login`, `whoami`, `logout`, `channels`, `history`, `watch`, `send`.
 3. Implement config persistence: load on startup; write on `login`/`register`; clear on `logout`.
