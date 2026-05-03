@@ -15,7 +15,9 @@ export interface WebSocketLike {
 
 export type WebSocketCtor = new (url: string) => WebSocketLike;
 
-export type WSEventName = "open" | "close" | "message" | "error";
+export type WSEventName = "open" | "close" | "message" | "error" | "transition";
+
+export type WSConnectionState = "connecting" | "open" | "closed";
 
 type Listener<T> = (arg: T) => void;
 
@@ -24,7 +26,12 @@ interface Listeners {
   close: Listener<{ code: number; reason: string }>[];
   message: Listener<WsEvent>[];
   error: Listener<unknown>[];
+  transition: Listener<WSConnectionState>[];
 }
+
+type GlobalObserver = (state: WSConnectionState, client: WebSocketClient) => void;
+
+const globalObservers: GlobalObserver[] = [];
 
 export interface WebSocketClientOptions {
   http: Pick<HttpClient, "wsTicket" | "getBaseUrl">;
@@ -48,20 +55,39 @@ export class WebSocketClient {
     close: [],
     message: [],
     error: [],
+    transition: [],
   };
   private ws: WebSocketLike | null = null;
   private closed = false;
   private reconnectAttempt = 0;
   private reconnectTimer: unknown = null;
+  private state: WSConnectionState = "closed";
 
   constructor(opts: WebSocketClientOptions) {
     this.opts = opts;
+  }
+
+  // Subscribe to every state change of any WebSocketClient. Returns a
+  // disposer. Used by the e2e harness to record the transition sequence
+  // (open → closed → connecting → open) deterministically; the DOM badge
+  // collapses fast transients on a fast reconnect.
+  static observe(fn: GlobalObserver): () => void {
+    globalObservers.push(fn);
+    return (): void => {
+      const i = globalObservers.indexOf(fn);
+      if (i >= 0) globalObservers.splice(i, 1);
+    };
+  }
+
+  getState(): WSConnectionState {
+    return this.state;
   }
 
   on(event: "open", fn: Listener<void>): void;
   on(event: "close", fn: Listener<{ code: number; reason: string }>): void;
   on(event: "message", fn: Listener<WsEvent>): void;
   on(event: "error", fn: Listener<unknown>): void;
+  on(event: "transition", fn: Listener<WSConnectionState>): void;
   on(event: WSEventName, fn: Listener<never>): void {
     switch (event) {
       case "open":
@@ -75,6 +101,9 @@ export class WebSocketClient {
         return;
       case "error":
         this.listeners.error.push(fn as Listener<unknown>);
+        return;
+      case "transition":
+        this.listeners.transition.push(fn as Listener<WSConnectionState>);
         return;
     }
   }
@@ -110,7 +139,15 @@ export class WebSocketClient {
     }
   }
 
+  private emitTransition(state: WSConnectionState): void {
+    if (this.state === state) return;
+    this.state = state;
+    for (const fn of this.listeners.transition) fn(state);
+    for (const fn of globalObservers) fn(state, this);
+  }
+
   private async open(): Promise<void> {
+    this.emitTransition("connecting");
     const ticket: WSTicket = await this.opts.http.wsTicket();
     const url = buildWsUrl(this.opts.http.getBaseUrl(), ticket.ticket, this.opts.channelId);
     const Ctor = this.opts.WebSocket ?? getGlobalWebSocket();
@@ -118,6 +155,7 @@ export class WebSocketClient {
     this.ws = ws;
     ws.onopen = () => {
       this.reconnectAttempt = 0;
+      this.emitTransition("open");
       for (const fn of this.listeners.open) fn();
     };
     ws.onmessage = (ev) => {
@@ -129,6 +167,7 @@ export class WebSocketClient {
     };
     ws.onclose = (ev) => {
       this.ws = null;
+      this.emitTransition("closed");
       for (const fn of this.listeners.close) fn(ev);
       if (!this.closed && (this.opts.reconnect ?? true)) {
         this.scheduleReconnect();

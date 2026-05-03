@@ -175,18 +175,37 @@ test.describe("Web e2e (real browser via Playwright)", () => {
     // minted post-reconnect (not just the same one bouncing).
     const beforeDrop = serverSides.length;
 
+    // Snapshot the transition log length so we only assert against new
+    // entries — the initial connect emits its own connecting/open pair.
+    const beforeLen = await page.evaluate(
+      () =>
+        (window as { __chatd?: { wsTransitions: string[] } }).__chatd?.wsTransitions.length ?? 0,
+    );
+
     // Drop every live server-side handle. The browser sees a real close
     // frame, the api-client's onclose fires, scheduleReconnect kicks in.
     for (const s of serverSides) {
       await s.close();
     }
 
-    await expect(status).toHaveText(/reconnect|connecting|disconnect/i, { timeout: 5_000 });
+    // Assert the transient disconnect via the api-client transition log
+    // (recorded by main.tsx into window.__chatd.wsTransitions) instead of
+    // polling the DOM badge — the badge can be flipped back to "Connected"
+    // before Playwright re-reads it on a fast reconnect (#110).
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            (start: number) =>
+              (window as { __chatd?: { wsTransitions: string[] } }).__chatd?.wsTransitions.slice(
+                start,
+              ) ?? [],
+            beforeLen,
+          ),
+        { timeout: 10_000, message: "expected closed→connecting→open after WS drop" },
+      )
+      .toEqual(expect.arrayContaining(["closed", "connecting", "open"]));
 
-    // routeWebSocket + the in-process proxy adds a couple-hundred-ms tax on
-    // top of the api-client's first backoff slot (500ms). 5s is tight
-    // enough to catch a regression in the backoff/ticket loop without
-    // tripping on CI scheduler jitter.
     await expect(status).toHaveText(/^connected$/i, { timeout: 5_000 });
     expect(serverSides.length).toBeGreaterThan(beforeDrop);
 
