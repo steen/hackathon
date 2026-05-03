@@ -34,7 +34,7 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Accept already wrote a 4xx response with the failure reason.
 		return
 	}
-	defer c.CloseNow()
+	defer c.CloseNow() // safety net if a clean Close didn't run
 
 	sub := hub.NewSubscriber(sendBuffer)
 	h.hub.Subscribe(GeneralChannel, sub)
@@ -67,4 +67,5 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	cancel()
 	<-writerDone
+	_ = c.Close(websocket.StatusNormalClosure, "")
 }

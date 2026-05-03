@@ -6,6 +6,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/jumoel/hackathon/apps/server/internal/config"
 	"github.com/jumoel/hackathon/apps/server/internal/hub"
@@ -22,8 +23,15 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/ws", server.NewWSHandler(h))
 
+	srv := &http.Server{
+		Addr:              cfg.Addr(),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
 	log.Printf("listening on %s", cfg.Addr())
-	if err := http.ListenAndServe(cfg.Addr(), mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server: %v", err)
 	}
 }
