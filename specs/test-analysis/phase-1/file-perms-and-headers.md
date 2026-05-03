@@ -1,12 +1,12 @@
 ---
 feature: file-perms-and-headers
 phase: phase-1
-analyzed_at: 2026-05-03T14:42:24Z
-analyzed_commit: 7e3010dd771551d1f4371e00034d0bb88dae18fa
-implementation_status: partial
+analyzed_at: 2026-05-03T17:26:50Z
+analyzed_commit: fa60bfdd928918ed6813ff04b1c947e66dd78758
+implementation_status: implemented
 total_acs: 3
-covered: 1
-partial: 2
+covered: 3
+partial: 0
 missing: 0
 deferred: 0
 ---
@@ -14,15 +14,15 @@ deferred: 0
 # Test analysis: SQLite file permissions and response security headers
 
 **Spec:** `specs/plans/phase-1/feature-file-perms-and-headers.md`
-**Implementation status:** partial — `apps/server/internal/db.EnsureFile` and `apps/server/internal/http.SecurityHeaders` exist and pass strong in-package tests. **Neither is wired into `apps/server/main.go`.** A live server response does not carry the security headers; no DB file is opened (no SQLite integration shipped yet). The PR's spec marks the feature "implemented", but the runtime contract is not satisfied.
+**Implementation status:** implemented — both wiring gaps closed by gap-B (`feature-security-headers-and-sqlite-ensure-wiring`, commit `3ffd28d`). `apps/server/main.go:154` now wraps the mux with `SecurityHeaders` outermost, so every response (including `Recover`'s 500 and `BodyCap`'s 413) carries the four SEC-10 headers. `EnsureFile` is invoked transitively via `appdb.Open` (the single shipped DB-open path).
 
 ## Acceptance criteria
 
 | AC | Statement (verbatim from spec) | Status | Test reference |
 |----|-------------------------------|--------|----------------|
 | AC-1 | The SQLite database file is created with mode `0600` (owner read/write only). | covered | `apps/server/internal/db/perms_test.go::TestEnsureFile_CreatesWith0600_SEC14` + `TestEnsureFile_TightensExistingWiderMode_SEC14` + `TestEnsureFile_IsIdempotent`. The function correctly tightens the umask, opens with `0o600`, and `chmod`s. The function will become load-bearing once `feature-sqlite-schema-and-ulid` lands and main.go opens a DB. |
-| AC-2 | HTTP responses include CSP / nosniff / no-referrer / DENY headers on all routes. | partial | `apps/server/internal/http/headers_middleware_test.go::TestSecurityHeaders_OK_SEC10` + `TestSecurityHeaders_ErrorResponse_SEC10` + `TestSecurityHeaders_NotFound_SEC10` + `TestSecurityHeaders_CSPLiteralMatchesPRD_SEC10` (CSP literal ≡ PRD §9 — drift-detector). The middleware is correct **but** `apps/server/main.go` does not wrap its mux with `SecurityHeaders`, so the live `/ws` and `/debug/subs` handlers respond without the headers. |
-| AC-3 | Headers are present on both 2xx and error responses. | partial | Same test suite covers 200 (`TestSecurityHeaders_OK_SEC10`), 500 (`TestSecurityHeaders_ErrorResponse_SEC10`), and 404 (`TestSecurityHeaders_NotFound_SEC10`). Same wiring gap as AC-2: the unit tests prove composition works; `main.go` doesn't compose. |
+| AC-2 | HTTP responses include CSP / nosniff / no-referrer / DENY headers on all routes. | covered | `apps/server/internal/http/headers_middleware_test.go::TestSecurityHeaders_OK_SEC10` + `TestSecurityHeaders_ErrorResponse_SEC10` + `TestSecurityHeaders_NotFound_SEC10` + `TestSecurityHeaders_CSPLiteralMatchesPRD_SEC10` (CSP literal ≡ PRD §9 — drift-detector). With main.go now wrapping the mux outermost (closed by gap-B), every live route inherits the headers. |
+| AC-3 | Headers are present on both 2xx and error responses. | covered | Same test suite covers 200 (`TestSecurityHeaders_OK_SEC10`), 500 (`TestSecurityHeaders_ErrorResponse_SEC10`), and 404 (`TestSecurityHeaders_NotFound_SEC10`). With `SecurityHeaders` outermost in the live chain, even the 413 envelope from `BodyCap` and the 500 envelope from `Recover` carry the headers. |
 
 ## Findings
 
