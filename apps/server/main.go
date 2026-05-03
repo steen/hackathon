@@ -135,9 +135,17 @@ func run() error {
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
+	// Middleware order (outer → inner):
+	//   RequestIDMiddleware  → assigns X-Request-Id, plumbs ctx
+	//   AccessLog            → emits one log line per request (uses ctx)
+	//   Recover              → catches panics, writes generic 500
+	//   BodyCap              → caps request body to RESTBodyLimit
+	//   mux                  → handler dispatch
+	// statusRecorder.Hijack forwards the Hijacker interface so /ws upgrade
+	// still works through this chain.
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           httpapi.BodyCap(mux),
+		Handler:           httpapi.RequestIDMiddleware(httpapi.AccessLog(httpapi.Recover(httpapi.BodyCap(mux)))),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}

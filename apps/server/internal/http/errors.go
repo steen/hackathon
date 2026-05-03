@@ -71,7 +71,10 @@ func WriteError(w http.ResponseWriter, status int, code, message string) {
 
 type ctxKey int
 
-const requestIDKey ctxKey = iota
+const (
+	requestIDKey ctxKey = iota
+	userIDKey
+)
 
 // WithRequestID returns a child context carrying id. Used by middleware to
 // plumb the per-request ID into handlers.
@@ -84,6 +87,23 @@ func WithRequestID(ctx context.Context, id string) context.Context {
 // middleware, e.g. in tests).
 func RequestID(ctx context.Context) string {
 	if v, ok := ctx.Value(requestIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithUserID returns a child context carrying the authenticated user's id.
+// Auth middleware (or any handler that has resolved a user) calls this so
+// the access log and downstream handlers can attribute the request.
+func WithUserID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, userIDKey, id)
+}
+
+// UserID extracts the authenticated user id set by WithUserID. Returns the
+// empty string when no id is present (unauthenticated request, or a handler
+// invoked outside the auth middleware in tests).
+func UserID(ctx context.Context) string {
+	if v, ok := ctx.Value(userIDKey).(string); ok {
 		return v
 	}
 	return ""

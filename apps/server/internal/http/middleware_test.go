@@ -81,13 +81,66 @@ func TestAccessLogRecordsMethodPathStatusLatencyAndRequestID(t *testing.T) {
 	chain.ServeHTTP(rec, req)
 
 	out := logs.String()
-	for _, sub := range []string{"method=POST", "path=/api/foo", "status=418", "latency_ms=", "request_id="} {
+	for _, sub := range []string{"method=POST", "path=/api/foo", "status=418", "latency_ms=", "request_id=", "remote_ip=", "user_id="} {
 		if !strings.Contains(out, sub) {
 			t.Fatalf("access log missing %q: %s", sub, out)
 		}
 	}
 	if strings.Contains(out, "request_id=\n") || strings.Contains(out, "request_id= ") {
 		t.Fatalf("request_id was empty: %s", out)
+	}
+}
+
+func TestAccessLogRecordsRemoteIPHostPortion(t *testing.T) {
+	logs := captureLog(t)
+
+	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "203.0.113.7:54321"
+	chain.ServeHTTP(httptest.NewRecorder(), req)
+
+	out := logs.String()
+	if !strings.Contains(out, "remote_ip=203.0.113.7") {
+		t.Fatalf("access log missing remote_ip host: %s", out)
+	}
+	if strings.Contains(out, ":54321") {
+		t.Fatalf("access log leaked client port: %s", out)
+	}
+}
+
+func TestAccessLogRecordsUserIDFromContext(t *testing.T) {
+	logs := captureLog(t)
+
+	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req = req.WithContext(WithUserID(req.Context(), "user-01HABC"))
+	chain.ServeHTTP(httptest.NewRecorder(), req)
+
+	out := logs.String()
+	if !strings.Contains(out, "user_id=user-01HABC") {
+		t.Fatalf("access log missing user_id: %s", out)
+	}
+}
+
+func TestAccessLogUserIDIsEmptyWhenUnset(t *testing.T) {
+	logs := captureLog(t)
+
+	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	chain.ServeHTTP(httptest.NewRecorder(), req)
+
+	out := logs.String()
+	// Trailing "user_id=" with no value (line ends or whitespace follows) is
+	// the unauthenticated case. Ensure the field is present but empty.
+	trimmed := strings.TrimRight(out, "\n")
+	if !strings.Contains(out, "user_id=\n") && !strings.Contains(out, "user_id= ") && !strings.HasSuffix(trimmed, "user_id=") {
+		t.Fatalf("access log user_id should be empty when unset: %s", out)
 	}
 }
 

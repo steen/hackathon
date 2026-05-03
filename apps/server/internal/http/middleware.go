@@ -75,6 +75,11 @@ func (s *statusRecorder) Flush() {
 // Sensitive query parameters (see redactedQueryKeys) are stripped before
 // the URL is logged. Latency is wall clock; status is observed via the
 // wrapped ResponseWriter.
+//
+// remote_ip is the host portion of r.RemoteAddr; X-Forwarded-For is NOT
+// trusted here because CHAT_TRUSTED_PROXY is not yet wired (PRD §9 / §11).
+// When the trusted-proxy flag lands, the parser should plug into the
+// remoteIP helper below and into auth_handlers.go's clientIP.
 func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -84,15 +89,33 @@ func AccessLog(next http.Handler) http.Handler {
 		redacted := redactURL(r.URL)
 		// G706: r.Method is constrained by net/http to a fixed set; redacted goes
 		// through url.URL.EscapedPath() which never emits raw CR/LF — no log
-		// injection vector reachable here.
-		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s", //nolint:gosec // G706: see comment above.
+		// injection vector reachable here. remote_ip is the SplitHostPort host
+		// (no scheme bytes); user_id is set by auth middleware from a verified
+		// JWT subject (no client-controlled bytes).
+		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s remote_ip=%s user_id=%s", //nolint:gosec // G706: see comment above.
 			r.Method,
 			redacted,
 			rec.status,
 			time.Since(start).Milliseconds(),
 			RequestID(r.Context()),
+			remoteIP(r.RemoteAddr),
+			UserID(r.Context()),
 		)
 	})
+}
+
+// remoteIP returns the host portion of an http.Request RemoteAddr value.
+// Falls back to the raw input when SplitHostPort fails (e.g. Unix-socket
+// transports that omit the port). Never trusts X-Forwarded-For — see the
+// AccessLog docstring for the deferred CHAT_TRUSTED_PROXY work.
+func remoteIP(remoteAddr string) string {
+	if remoteAddr == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return remoteAddr
 }
 
 // redactURL returns the request-target form (path + query, no scheme/host)
