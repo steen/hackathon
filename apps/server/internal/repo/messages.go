@@ -58,7 +58,7 @@ func (r *Repo) ListMessages(ctx context.Context, channelID, before string, limit
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]Message, 0, limit)
 	for rows.Next() {
 		var m Message

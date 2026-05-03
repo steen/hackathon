@@ -32,6 +32,8 @@ type ChannelsHandlers struct {
 	deps ChannelsDeps
 }
 
+// NewChannelsHandlers wires the dependency bag. Defaults Now to time.Now
+// when unset so production callers do not have to think about clocks.
 func NewChannelsHandlers(deps ChannelsDeps) *ChannelsHandlers {
 	if deps.Now == nil {
 		deps.Now = time.Now
@@ -113,7 +115,7 @@ func channelIDFromPath(r *stdhttp.Request) (string, bool) {
 	}
 	for i := 0; i < len(id); i++ {
 		c := id[i]
-		if !((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z')) {
+		if (c < '0' || c > '9') && (c < 'A' || c > 'Z') {
 			return "", false
 		}
 	}
