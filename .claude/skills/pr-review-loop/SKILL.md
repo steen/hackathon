@@ -112,4 +112,4 @@ Without `auto`, exit cleanly.
 ## References
 
 - `references/reviewer-prompt-template.md` — dispatch scaffold.
-- `references/idle-banner.md` — sad ANSI character + diagnostic line. Reused from phase-loop (symlink or duplicate).
+- `references/idle-banner.md` — pr-review-loop's own idle banner spec (smaller + different mood register from phase-loop's; see that file).
