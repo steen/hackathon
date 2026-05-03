@@ -36,14 +36,14 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T20:02:50Z
-**Analyzed commit:** `7b6b9b3`
+**Last updated:** 2026-05-03T20:38:00Z
+**Analyzed commit:** `a283ba3`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
 | phase-0 | [monorepo-scaffold](phase-0/monorepo-scaffold.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 6/6 | 0 | 0 | 0 |
-| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
+| phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 3/4 | 1 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-1 | [logging-and-error-envelope](phase-1/logging-and-error-envelope.md) | implemented | 4/4 | 0 | 0 | 0 |
@@ -63,7 +63,7 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-2 | [ts-api-client-package](phase-2/ts-api-client-package.md) | implemented | 6/7 | 1 | 0 | 0 |
 | phase-2 | [presence](phase-2/presence.md) | implemented | 4/5 | 0 | 0 | 1 |
 
-**Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
+**Phase-0 totals:** 4 features · 20 ACs · 19 covered · 1 partial · 0 missing · 0 deferred. The partial is `cli-send-watch` AC-1 — `chatd send` writes a frame the server now drops post-audit-#78. CLI-side tests still pass; system-level "send delivers a message that watchers see" is broken until `chatd send` is rewritten to POST against `/api/channels/{id}/messages` (lands with `20-feature-cli-full-commands`) or deprecated.
 
 **Phase-1 totals:** 14 features analyzed of 14 spec'd · 64 ACs · 63 covered · 1 partial · 0 missing · 0 deferred.
 
@@ -93,4 +93,14 @@ Generated automatically — leave this section alone; the agent rewrites it.
 **Schema-drift flag (cross-feature):** the server emits the presence frame as `{type:"presence", data:{kind, user_id}}` but the TS api-client defines `PresenceEvent.data` as `{kind, user:User}` (full user record). One side needs to move — picking the lighter-weight `{user_id}` shape requires the client to maintain a userID→username map; embedding the full `User` matches the REST endpoint's `{id, username}` shape. **Production change required either way; out of test-agent scope.** Worth flagging when reviewing the next presence-client integration PR; the ts-api-client AC-6 partial should re-evaluate once both sides converge.
 
 **Remaining phase 2 (2 features) and phase 3 (5 features):** `phase-2/{20,40}-feature-*.md` and all of `phase-3/*` not yet started; the agent will pick them up once their implementation commits land on `main`.
+
+## Audit #78 response (`a283ba3`)
+
+A security audit of the WS path landed in three coordinated PRs:
+
+- **PR #85 (`92d447f`) `fix(wsapi): drop raw inbound WS rebroadcast`.** The phase-0 readLoop rebroadcast inbound frames verbatim, letting any authenticated peer forge `{type, data}` envelopes with arbitrary `sender_user_id` and impersonate other users — no DB write, no audit row. Fix: drop the broadcast; keep the read (drains the buffer; enforces size + rate limits). Producers must use `POST /api/channels/{id}/messages`. **Cross-impact:** `phase-0/server-ws-hub` AC-3 reframed (test was re-flipped to assert inbound-dropped + REST-broadcast); `phase-0/cli-send-watch` AC-1 silently functionally regressed (CLI test still passes; messages don't reach watchers).
+- **PR #87 (`80c1de0`) `fix(wsapi): gate /debug/subs to loopback`.** The `internal-only` wording in `phase-0/server-ws-hub` AC-6 is now enforced rather than implicit — non-loopback sources get 403. New tests in `wsapi/debug_handler_test.go` cover the gate.
+- **PR #86 (`cb1e075`) `fix(audit): access log records authenticated user_id`.** The auth middleware wrote user_id under `auth.ctxKeyUserID`; the access log read via `http.UserID` (different unexported key) — so `user_id` was always `-` for authenticated requests in production. The in-isolation middleware tests passed because they wrote+read through the same key. Fix: pointer sink installed by AccessLog, written through by RequireJWT via a new `MiddlewareConfig.WithUserID` callback. New chain-level black-box test added. **Generalizable lesson:** middleware tests must drive the production chain order to catch keying mismatches.
+
+**Remaining gap from audit follow-up:** `cli-send-watch` AC-1 is partial. Closing it is a production change (rewrite `chatd send` to POST against the messages endpoint, requires CLI auth wiring) — natural home is `20-feature-cli-full-commands`.
 <!-- AGENT-INDEX-END -->
