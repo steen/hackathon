@@ -85,19 +85,16 @@ go build -o "$SERVER_BIN" ./apps/server
 go build -o "$CHATD_BIN" ./apps/cli
 
 PORT="${CHAT_SERVER_PORT:-$(pick_free_port)}"
-WS_URL="ws://127.0.0.1:${PORT}/ws"
 API_URL="http://127.0.0.1:${PORT}"
-# CHAT_SERVER is set later, after we know the channel ID — watchers must
-# subscribe to the same channel the producer posts to (audit #78 dropped
-# the legacy raw-rebroadcast on /ws so REST is the only producer path).
+# The phase-2 CLI honors a base URL (http or https), not a ws:// endpoint.
+# Override CHAT_SERVER for the chatd invocations below.
+export CHAT_SERVER="$API_URL"
 
 # Auth flow needs a SQLite file plus the JWT secret and invite code. The
 # work-dir DB makes each invocation hermetic. Per PR #28's startup config
 # validation, the secret + invite code are generated per-run via openssl
 # (no fake-secret literal committed to git per CLAUDE.md "no hardcoded
 # secrets"; values live only for the duration of this smoke run).
-# openssl is on every CI runner and avoids the `tr </dev/urandom | head`
-# SIGPIPE trap under `set -o pipefail`.
 DB_PATH="$WORK_DIR/chat.db"
 SMOKE_JWT_SECRET="$(openssl rand -hex 20)"      # 40 hex chars, well over the 32-byte floor
 SMOKE_INVITE_CODE="$(openssl rand -hex 8)"      # 16 hex chars
@@ -127,62 +124,54 @@ fi
 SMOKE_USER="smoke-$$-$(date +%s)"
 SMOKE_PASS="smoke-password-1234567890"
 
+# Phase-2 CLI persists tokens to $XDG_CONFIG_HOME/chatd/config.json. Pin
+# it under $WORK_DIR so the run is hermetic.
+export XDG_CONFIG_HOME="$WORK_DIR/xdg"
+WATCHER1_HOME="$WORK_DIR/xdg-watch1"
+WATCHER2_HOME="$WORK_DIR/xdg-watch2"
+
 echo "[smoke] register ${SMOKE_USER}"
-REG_RESP=$(curl -fsS -X POST "${API_URL}/api/auth/register" \
-  -H 'Content-Type: application/json' \
-  -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\",\"invite_code\":\"${SMOKE_INVITE_CODE}\"}")
-TOKEN=$(printf '%s' "$REG_RESP" | json_get token)
-if [[ -z "$TOKEN" ]]; then
-  echo "[smoke] register did not return a token: ${REG_RESP}" >&2
-  exit 1
-fi
+CHAT_PASSWORD="$SMOKE_PASS" CHAT_INVITE_CODE="$SMOKE_INVITE_CODE" \
+  "$CHATD_BIN" register "$SMOKE_USER" >/dev/null
 
 echo "[smoke] login ${SMOKE_USER}"
-LOGIN_RESP=$(curl -fsS -X POST "${API_URL}/api/auth/login" \
+CHAT_PASSWORD="$SMOKE_PASS" \
+  "$CHATD_BIN" login --username "$SMOKE_USER" >/dev/null
+
+# Two watcher processes need their own config dirs so their concurrent
+# token reads don't race the sender's token writes.
+mkdir -p "$WATCHER1_HOME" "$WATCHER2_HOME"
+cp -R "$XDG_CONFIG_HOME/chatd" "$WATCHER1_HOME/chatd"
+cp -R "$XDG_CONFIG_HOME/chatd" "$WATCHER2_HOME/chatd"
+
+# Phase-2 watchers subscribe to a real channel by ID. Create a channel
+# named "general" out-of-band — the CLI surface in this issue lists
+# channels but does not create them. The /debug/subs gauge is keyed on
+# the WS hub topic (#general legacy default + per-channel keys); we
+# query channel=<created-id> after subscribing.
+TOKEN=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['token'])" "$XDG_CONFIG_HOME/chatd/config.json")
+CHANNEL_RESP=$(curl -fsS -X POST "${API_URL}/api/channels" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"${SMOKE_USER}\",\"password\":\"${SMOKE_PASS}\"}")
-TOKEN=$(printf '%s' "$LOGIN_RESP" | json_get token)
-if [[ -z "$TOKEN" ]]; then
-  echo "[smoke] login did not return a token: ${LOGIN_RESP}" >&2
-  exit 1
-fi
-
-# Tickets are single-use (SEC-12) so each WS dial needs its own. Mint
-# one per connection rather than caching a value the server will reject
-# on second use.
-mint_ticket() {
-  curl -fsS -X POST "${API_URL}/api/auth/ws-ticket" \
-    -H "Authorization: Bearer ${TOKEN}" | json_get ticket
-}
-
-# Audit #78 (medium) removed the legacy raw rebroadcast on /ws. The
-# supported producer path is REST POST /api/channels/{id}/messages,
-# which requires a channel row. Create one and subscribe both watchers
-# to it via ?channel=<id> rather than the legacy #general sentinel.
-echo "[smoke] creating smoke channel"
-CHANNEL_NAME="smoke-$$-$(date +%s)"
-CREATE_RESP=$(curl -fsS -X POST "${API_URL}/api/channels" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d "{\"name\":\"${CHANNEL_NAME}\"}")
-CHANNEL_ID=$(printf '%s' "$CREATE_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['id'])")
+  -d '{"name":"general"}')
+CHANNEL_ID=$(printf '%s' "$CHANNEL_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['id'])")
 if [[ -z "$CHANNEL_ID" ]]; then
-  echo "[smoke] create channel did not return an id: ${CREATE_RESP}" >&2
+  echo "[smoke] channel create did not return an id: ${CHANNEL_RESP}" >&2
   exit 1
 fi
-export CHAT_SERVER="${WS_URL}?channel=${CHANNEL_ID}"
 
-echo "[smoke] starting two watchers (each with its own ticket)"
-WATCH1_TICKET=$(mint_ticket)
-"$CHATD_BIN" --ws-ticket "$WATCH1_TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
+echo "[smoke] starting two watchers on channel ${CHANNEL_ID}"
+XDG_CONFIG_HOME="$WATCHER1_HOME" "$CHATD_BIN" watch "$CHANNEL_ID" >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
 WATCH1_PID=$!
-WATCH2_TICKET=$(mint_ticket)
-"$CHATD_BIN" --ws-ticket "$WATCH2_TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
+XDG_CONFIG_HOME="$WATCHER2_HOME" "$CHATD_BIN" watch "$CHANNEL_ID" >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
 WATCH2_PID=$!
 
-# Wait for both watchers to register with the hub on the smoke channel.
+# Wait for both watchers to register with the hub. Polling /debug/subs avoids
+# the race where a slow CI runner's WebSocket dial takes longer than a fixed
+# sleep and the publish below misses one or both subscribers. Channel topic
+# mirrors the channel id the watchers passed to chatd watch.
 EXPECTED_SUBS=2
-SUBS_URL="http://127.0.0.1:${PORT}/debug/subs?channel=${CHANNEL_ID}"
+SUBS_URL="${API_URL}/debug/subs?channel=${CHANNEL_ID}"
 subs_ready=0
 for _ in $(seq 1 50); do
   count=$(curl -fsS "$SUBS_URL" 2>/dev/null || echo "")
@@ -198,11 +187,8 @@ if [[ $subs_ready -ne 1 ]]; then
 fi
 
 MSG="smoke-$$-$(date +%s%N)"
-echo "[smoke] sending message via REST: ${MSG}"
-curl -fsS -X POST "${API_URL}/api/channels/${CHANNEL_ID}/messages" \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d "{\"body\":\"${MSG}\"}" >/dev/null
+echo "[smoke] sending message: ${MSG}"
+"$CHATD_BIN" send "$CHANNEL_ID" "$MSG" >/dev/null
 
 # Poll up to ~5s for both files to contain the message.
 deadline=$(( $(date +%s) + 5 ))
