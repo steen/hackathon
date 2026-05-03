@@ -32,6 +32,7 @@ func newPresenceFixture(t *testing.T) *presenceFixture {
 		SigningKey:        []byte("test-signing-key-must-be-long-enough"),
 		Lookup:            f.handlers.LookupUserInfo,
 		WriteUnauthorized: WriteUnauthorized,
+		WithUserID:        WithUserID,
 	})
 	mux.Handle("GET /api/presence", require(stdhttp.HandlerFunc(ph.List)))
 	return &presenceFixture{fixture: f, hub: h, mux: mux}

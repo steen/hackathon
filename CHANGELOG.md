@@ -10,6 +10,15 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 18:29Z — Audit: access log records authenticated user_id (#86)
+
+### Fixed
+- Access log now renders `user_id=<ULID>` for authenticated requests instead of always `-`. The auth middleware wrote the resolved id under `auth.ctxKeyUserID` while `AccessLog` read via `http.UserID` (different unexported `ctxKey` type), so the value was unreachable. Fix wires an optional `WithUserID` callback through `auth.MiddlewareConfig` and uses a request-scoped pointer sink installed by `AccessLog` so the inner middleware can publish the id back to the outer access-log scope (a plain context update is invisible there because `*http.Request.WithContext` returns a fresh `*Request`).
+
+### Notes
+- No wire/format change — only the previously-empty `user_id` field now contains data. Anonymous requests continue to render `user_id=-`.
+- This entry edits `CHANGELOG.md` directly for the same reason flagged in the #75 entry: the `CHANGELOG.d/` precursor has not landed.
+
 ## 2026-05-03 18:27Z — Gate `/debug/subs` to loopback peers (#87)
 
 ### Fixed

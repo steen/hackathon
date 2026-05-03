@@ -41,6 +41,7 @@ func newChannelsFixture(t *testing.T) *channelsFixture {
 		SigningKey:        []byte("test-signing-key-must-be-long-enough"),
 		Lookup:            f.handlers.LookupUserInfo,
 		WriteUnauthorized: WriteUnauthorized,
+		WithUserID:        WithUserID,
 	})
 	ch.Routes(mux, require, ms)
 	return &channelsFixture{
