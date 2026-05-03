@@ -33,6 +33,7 @@ class FakeSocket {
 
 const wsTicketMock = vi.fn();
 const listMessagesMock = vi.fn();
+const postMessageMock = vi.fn();
 
 vi.mock("../api.js", () => ({
   getClient: () => ({
@@ -41,6 +42,7 @@ vi.mock("../api.js", () => ({
       getBaseUrl: () => "http://test.local",
     },
     listMessages: listMessagesMock,
+    postMessage: postMessageMock,
   }),
 }));
 
@@ -75,7 +77,18 @@ afterEach(() => {
   delete (globalThis as { WebSocket?: unknown }).WebSocket;
   wsTicketMock.mockReset();
   listMessagesMock.mockReset();
+  postMessageMock.mockReset();
 });
+
+function userMsg(id: string, body: string, createdAt: string): MsgRow {
+  return {
+    id,
+    channel_id: "C1",
+    sender_user_id: "U1",
+    body,
+    created_at: createdAt,
+  };
+}
 
 describe("useMessages", () => {
   it("seeds from listMessages and appends live WS frames", async () => {
@@ -227,6 +240,123 @@ describe("useMessages", () => {
     await waitFor(() => {
       expect(result.current.messages.map((m) => m.id)).toEqual(["M1", "M2", "M3", "M4", "M5"]);
     });
+  });
+
+  it("send appends an optimistic pending entry immediately, then reconciles when the WS frame arrives", async () => {
+    listMessagesMock.mockResolvedValueOnce([]);
+    postMessageMock.mockImplementation(async () => {
+      await Promise.resolve();
+      return userMsg("M-server", "hi there", "2026-01-01T00:00:00.500Z");
+    });
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.connection).toBe("open");
+    });
+
+    await act(async () => {
+      await result.current.send("hi there");
+    });
+
+    // Immediately after send, the optimistic entry is present with a
+    // pending- prefix and status "pending".
+    expect(result.current.messages).toHaveLength(1);
+    const pending = result.current.messages[0];
+    expect(pending?.id.startsWith("pending-")).toBe(true);
+    expect(pending?.status).toBe("pending");
+    expect(pending?.body).toBe("hi there");
+    expect(postMessageMock).toHaveBeenCalledWith("C1", "hi there");
+
+    // Server's WS frame echoes the persisted message — same body, same
+    // sender, recent created_at — and the hook swaps the pending entry
+    // for the server row in place (no double-render).
+    await act(async () => {
+      FakeSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: userMsg("M-server", "hi there", "2026-01-01T00:00:00.500Z"),
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M-server"]);
+    });
+    expect(result.current.messages[0]?.status).toBeUndefined();
+  });
+
+  it("send marks the optimistic entry failed when REST POST rejects", async () => {
+    listMessagesMock.mockResolvedValueOnce([]);
+    postMessageMock.mockRejectedValueOnce(new Error("network down"));
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.send("doomed");
+    });
+
+    expect(result.current.messages).toHaveLength(1);
+    const failed = result.current.messages[0];
+    expect(failed?.id.startsWith("pending-")).toBe(true);
+    expect(failed?.status).toBe("failed");
+    expect(failed?.body).toBe("doomed");
+    // Per-entry status carries the failure; channel-level `error` stays
+    // reserved for history/socket faults.
+    expect(result.current.error).toBeNull();
+  });
+
+  it("optimistic entry is de-duped against the WS frame, not appended twice", async () => {
+    listMessagesMock.mockResolvedValueOnce([]);
+    postMessageMock.mockImplementation(async () => {
+      await Promise.resolve();
+      return userMsg("M-srv", "echo", "2026-01-01T00:00:00.250Z");
+    });
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.send("echo");
+    });
+    expect(result.current.messages).toHaveLength(1);
+
+    await act(async () => {
+      FakeSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: userMsg("M-srv", "echo", "2026-01-01T00:00:00.250Z"),
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    // Final state has exactly one row — the persisted server message —
+    // not the pending entry plus the live frame.
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M-srv"]);
+    });
+    expect(result.current.messages).toHaveLength(1);
   });
 
   it("a failed catchup leaves the existing list intact", async () => {

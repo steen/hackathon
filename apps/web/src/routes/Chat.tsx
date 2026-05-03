@@ -4,7 +4,6 @@ import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
-import { getClient } from "../api.js";
 
 function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
   const label =
@@ -28,10 +27,9 @@ export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
   const channelsState = useChannels(true);
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
-  const messagesState = useMessages(activeChannel);
+  const messagesState = useMessages(activeChannel, user?.id ?? null);
   const presenceState = usePresence(true);
   const [draft, setDraft] = useState("");
-  const [sendError, setSendError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -50,13 +48,8 @@ export function Chat(): React.JSX.Element {
     if (activeChannel === null) return;
     const body = draft.trim();
     if (body.length === 0) return;
-    setSendError(null);
-    try {
-      await getClient().postMessage(activeChannel, body);
-      setDraft("");
-    } catch (err) {
-      setSendError(err instanceof Error ? err.message : "failed to send");
-    }
+    setDraft("");
+    await messagesState.send(body);
   }
 
   return (
@@ -117,15 +110,48 @@ export function Chat(): React.JSX.Element {
               {messagesState.error}
             </p>
           ) : null}
-          {messagesState.messages.map((m) => (
-            <article key={m.id} className="msg" data-testid="msg">
-              <div className="msg__meta">
-                <span className="msg__sender">{m.sender_user_id}</span>
-                <time dateTime={m.created_at}>{m.created_at}</time>
-              </div>
-              <div className="msg__body">{m.body}</div>
-            </article>
-          ))}
+          {messagesState.messages.map((m) => {
+            const cls =
+              m.status === "pending"
+                ? "msg msg--pending"
+                : m.status === "failed"
+                  ? "msg msg--failed"
+                  : "msg";
+            const style = m.status === "pending" ? { opacity: 0.6 } : undefined;
+            return (
+              <article
+                key={m.id}
+                className={cls}
+                style={style}
+                data-testid="msg"
+                data-status={m.status ?? "sent"}
+              >
+                <div className="msg__meta">
+                  <span className="msg__sender">{m.sender_user_id}</span>
+                  {m.status === "pending" || m.created_at.length === 0 ? null : (
+                    <time dateTime={m.created_at}>{m.created_at}</time>
+                  )}
+                  {m.status === "failed" ? (
+                    <>
+                      <span className="msg__badge msg__badge--error" role="status">
+                        Failed to send
+                      </span>
+                      <button
+                        type="button"
+                        className="msg__retry"
+                        onClick={() => {
+                          void messagesState.retry(m.id);
+                        }}
+                      >
+                        Retry
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+                <div className="msg__body">{m.body}</div>
+              </article>
+            );
+          })}
         </div>
         <form
           className="composer"
@@ -146,11 +172,6 @@ export function Chat(): React.JSX.Element {
           <button type="submit" disabled={activeChannel === null || draft.trim().length === 0}>
             Send
           </button>
-          {sendError !== null ? (
-            <p role="alert" className="error">
-              {sendError}
-            </p>
-          ) : null}
         </form>
       </main>
     </div>
