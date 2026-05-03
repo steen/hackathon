@@ -183,6 +183,22 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		defer h.Unsubscribe(channel, sub)
 		defer sub.close()
 
+		// Presence events fire only for authenticated connections.
+		// Order matters: Subscribe before AddPresence so the joining
+		// user's own connection is in the broadcast target set —
+		// otherwise the first connection for a user would never see
+		// its own join event.
+		if userID != "" {
+			if first := h.AddPresence(userID); first {
+				h.BroadcastAll(presenceFrame(presenceJoin, userID))
+			}
+			defer func() {
+				if last := h.RemovePresence(userID); last {
+					h.BroadcastAll(presenceFrame(presenceLeave, userID))
+				}
+			}()
+		}
+
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 

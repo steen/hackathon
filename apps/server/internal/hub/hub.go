@@ -12,14 +12,24 @@ type Subscriber interface {
 
 // Hub is an in-memory pub/sub registry keyed by channel name. Safe for
 // concurrent Subscribe/Unsubscribe/Broadcast.
+//
+// presence is a server-wide reference count of authenticated user IDs
+// with at least one open connection. The map is keyed by user ID, the
+// value is the number of distinct connections currently held — when
+// the count drops to zero the entry is removed so OnlineUserIDs
+// reflects the live set without filtering.
 type Hub struct {
 	mu       sync.RWMutex
 	channels map[string]map[Subscriber]struct{}
+	presence map[string]int
 }
 
 // New returns an empty Hub.
 func New() *Hub {
-	return &Hub{channels: make(map[string]map[Subscriber]struct{})}
+	return &Hub{
+		channels: make(map[string]map[Subscriber]struct{}),
+		presence: make(map[string]int),
+	}
 }
 
 // Subscribe registers s as a receiver for messages broadcast to channel.
@@ -86,4 +96,86 @@ func (h *Hub) Broadcast(channel string, msg []byte) {
 	for _, s := range targets {
 		s.Send(msg)
 	}
+}
+
+// BroadcastAll delivers msg to every subscriber across every channel.
+// Used for presence events (join/leave) which are not scoped to a
+// single channel — a user joining is interesting to anyone watching
+// any channel. The set is deduplicated so a subscriber that holds
+// memberships in multiple channels still receives the event once.
+func (h *Hub) BroadcastAll(msg []byte) {
+	h.mu.RLock()
+	seen := make(map[Subscriber]struct{})
+	for _, subs := range h.channels {
+		for s := range subs {
+			seen[s] = struct{}{}
+		}
+	}
+	targets := make([]Subscriber, 0, len(seen))
+	for s := range seen {
+		targets = append(targets, s)
+	}
+	h.mu.RUnlock()
+	for _, s := range targets {
+		s.Send(msg)
+	}
+}
+
+// AddPresence records one connection for userID and reports whether
+// this is the first connection for that user (the caller will then
+// emit a presence "join" event). Empty userID is a no-op returning
+// false — phase-0 boot paths run without auth and have no user to
+// track.
+func (h *Hub) AddPresence(userID string) bool {
+	if userID == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	prev := h.presence[userID]
+	h.presence[userID] = prev + 1
+	return prev == 0
+}
+
+// RemovePresence drops one connection for userID and reports whether
+// this was the last connection (the caller will then emit a presence
+// "leave" event). Removing an unknown userID or an empty string is a
+// no-op returning false.
+func (h *Hub) RemovePresence(userID string) bool {
+	if userID == "" {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	count, ok := h.presence[userID]
+	if !ok {
+		return false
+	}
+	if count <= 1 {
+		delete(h.presence, userID)
+		return true
+	}
+	h.presence[userID] = count - 1
+	return false
+}
+
+// OnlineUserIDs returns a snapshot of every user ID with ≥1 active
+// connection. Order is unspecified; callers that need stable output
+// (e.g. a JSON list) should sort the result themselves.
+func (h *Hub) OnlineUserIDs() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	out := make([]string, 0, len(h.presence))
+	for id := range h.presence {
+		out = append(out, id)
+	}
+	return out
+}
+
+// PresenceCount returns the number of distinct users currently online.
+// Useful for tests and observability without leaking IDs.
+func (h *Hub) PresenceCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.presence)
 }
