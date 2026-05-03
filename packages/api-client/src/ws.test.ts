@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { WebSocketClient, buildWsUrl, decodeFrame, watch, type WebSocketLike } from "./ws.js";
+import {
+  WebSocketClient,
+  buildWsUrl,
+  decodeFrame,
+  watch,
+  type WebSocketLike,
+  type WSConnectionState,
+} from "./ws.js";
 import type { Event as WsEvent } from "./types.js";
 
 class FakeSocket implements WebSocketLike {
@@ -173,6 +180,74 @@ describe("WebSocketClient", () => {
     await c.connect();
     c.close();
     expect(timerSet).toBe(false);
+  });
+
+  it("emits transition events: connecting → open → closed → connecting → open across a reconnect", async () => {
+    FakeSocket.instances = [];
+    const http = fakeHttp("ticket-trans");
+    let n = 0;
+    http.wsTicket = vi.fn(async () => {
+      await Promise.resolve();
+      n += 1;
+      return { ticket: `ticket-${String(n)}`, expires_at: "" };
+    });
+
+    const timers: (() => void)[] = [];
+    const c = new WebSocketClient({
+      http,
+      channelId: "C1",
+      WebSocket: FakeSocket,
+      reconnect: true,
+      backoffMs: [1],
+      setTimeout: (fn) => {
+        timers.push(fn);
+        return timers.length;
+      },
+      clearTimeout: () => undefined,
+    });
+    const seen: WSConnectionState[] = [];
+    c.on("transition", (s) => seen.push(s));
+    await c.connect();
+    FakeSocket.instances[0]?.open();
+    FakeSocket.instances[0]?.forceClose();
+    timers[0]?.();
+    await new Promise((r) => setImmediate(r));
+    FakeSocket.instances[1]?.open();
+    expect(seen).toEqual(["connecting", "open", "closed", "connecting", "open"]);
+    c.close();
+  });
+
+  it("static observe receives transitions from any instance and disposer stops them", async () => {
+    FakeSocket.instances = [];
+    const seen: WSConnectionState[] = [];
+    const dispose = WebSocketClient.observe((s) => seen.push(s));
+    const c = new WebSocketClient({
+      http: fakeHttp(),
+      WebSocket: FakeSocket,
+      reconnect: false,
+    });
+    await c.connect();
+    FakeSocket.instances[0]?.open();
+    expect(seen).toEqual(["connecting", "open"]);
+    dispose();
+    FakeSocket.instances[0]?.forceClose();
+    expect(seen).toEqual(["connecting", "open"]);
+  });
+
+  it("getState reflects the current connection state", async () => {
+    FakeSocket.instances = [];
+    const c = new WebSocketClient({
+      http: fakeHttp(),
+      WebSocket: FakeSocket,
+      reconnect: false,
+    });
+    expect(c.getState()).toBe("closed");
+    await c.connect();
+    expect(c.getState()).toBe("connecting");
+    FakeSocket.instances[0]?.open();
+    expect(c.getState()).toBe("open");
+    FakeSocket.instances[0]?.forceClose();
+    expect(c.getState()).toBe("closed");
   });
 
   it("send throws before the socket is open", async () => {
