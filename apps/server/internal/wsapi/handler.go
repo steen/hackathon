@@ -139,6 +139,8 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		if err != nil {
 			return
 		}
+		// CloseNow's error is non-actionable in defer: by the time it returns,
+		// the underlying TCP connection is gone either way.
 		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(ReadLimitBytes)
 

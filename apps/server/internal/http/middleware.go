@@ -97,6 +97,11 @@ func AccessLog(next http.Handler) http.Handler {
 // key's presence so an operator can see "ticket was passed" without seeing
 // the value. Parsing is via net/url so byte-level oddities (encoding,
 // ordering, repeated keys) cannot smuggle a raw token into the log.
+//
+// `u.EscapedPath()` and `q.Encode()` percent-encode CR/LF, which is why
+// gosec G706 (CRLF log injection) is excluded in .golangci.yml. If you
+// add a new access-log call site, do NOT log `r.URL.RawPath` or
+// `r.URL.Opaque` — they bypass that escaping.
 func redactURL(u *url.URL) string {
 	if u == nil {
 		return ""
