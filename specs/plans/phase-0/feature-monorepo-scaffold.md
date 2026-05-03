@@ -1,7 +1,7 @@
 # Feature: Monorepo scaffold
 
 **Parent phase:** [Phase 0: Walking skeleton, system test ready](../phase-0-walking-skeleton-system-test-ready.md)
-**Status:** planned
+**Status:** done (PR #5)
 
 ## Requirements covered
 - (no user-story IDs from the PRD map to scaffolding; this is foundational infrastructure for all subsequent features)
