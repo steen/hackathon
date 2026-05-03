@@ -4,6 +4,7 @@
   "scripts": {
     "dev": "pnpm -r --if-present run dev",
     "build": "pnpm -r --if-present run build",
-    "test": "pnpm -r --if-present run test"
+    "smoke": "bash scripts/smoke.sh",
+    "test": "pnpm -r --if-present run test && bash scripts/smoke.sh"
   }
 }

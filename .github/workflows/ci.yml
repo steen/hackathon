@@ -25,6 +25,8 @@ jobs:
         run: go build ./...
       - name: Test
         run: go test ./...
+      - name: Smoke test
+        run: bash scripts/smoke.sh
 
   pnpm:
     runs-on: ubuntu-latest

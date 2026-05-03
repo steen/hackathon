@@ -21,7 +21,7 @@
 ## Test plan
 - Unit test: `send` writes the expected payload to a fake WebSocket server.
 - Unit test: `watch` prints frames received from a fake WebSocket server.
-- Integration: covered by the smoke-test feature.
+- Integration: the `chatd` binary (`apps/cli/main.go`) is exercised end-to-end by `scripts/smoke.sh`, which builds it, runs two `chatd watch` instances and one `chatd send`, and asserts both watchers receive the message.
 
 ## Files expected to be touched or created
 - `apps/cli/main.go`
