@@ -7,10 +7,10 @@
 
 Follow-up to [feature-file-perms-and-headers](./feature-file-perms-and-headers.md) (PR #26, status flipped to `implemented`). Auditing the merged code against the plan's acceptance criteria:
 
-- The `SecurityHeaders` middleware exists at `apps/server/internal/http/headers_middleware.go:14` and has a unit test, but `apps/server/main.go` builds the server with `Handler: mux` directly — no middleware wrap. The plan AC "Headers are present on both 2xx and error responses" and step 3 ("Wire the middleware as the outermost layer") are unmet at runtime.
-- The `db.EnsureFile` helper exists at `apps/server/internal/db/perms.go:21` and has a unit test, but no caller exists yet. `apps/server/main.go` does not open SQLite or call `EnsureFile`. The plan AC "The SQLite database file is created with mode 0600" therefore has no runtime effect; it relies on the future `feature-sqlite-schema-and-ulid` integration to invoke it.
+- The `SecurityHeaders` middleware exists in `apps/server/internal/http/headers_middleware.go` and has a unit test, but `apps/server/main.go` does not wrap the mux with it (the current chain is `Handler: httpx.BodyCap(mux)`, no `SecurityHeaders`). The plan AC "Headers are present on both 2xx and error responses" and step 3 ("Wire the middleware as the outermost layer") are unmet at runtime.
+- The `db.EnsureFile` helper exists in `apps/server/internal/db/perms.go` and has a unit test, but no caller exists yet. `apps/server/main.go` does not open SQLite or call `EnsureFile`. The plan AC "The SQLite database file is created with mode 0600" therefore has no runtime effect; it relies on the future `feature-sqlite-schema-and-ulid` integration to invoke it.
 
-This plan is companion-scoped with [feature-access-log-fields-and-wiring](./feature-access-log-fields-and-wiring.md) (PR #31), which already plans the wiring of `RequestIDMiddleware`, `AccessLog`, and `Recover` around the mux. `SecurityHeaders` belongs in the same chain; this plan adds it explicitly so neither follow-up drops it.
+This plan is companion-scoped with the access-log-fields-and-wiring plan in PR #31 (will land at `./feature-access-log-fields-and-wiring.md` once #31 merges), which already plans the wiring of `RequestIDMiddleware`, `AccessLog`, and `Recover` around the mux. `SecurityHeaders` belongs in the same chain; this plan adds it explicitly so neither follow-up drops it.
 
 ## Requirements covered
 
