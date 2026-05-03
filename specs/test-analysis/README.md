@@ -58,10 +58,11 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-1 | [channels-and-messages](phase-1/channels-and-messages.md) | partial | 1/6 | 5 | 0 | 0 |
 | phase-1 | [ws-hardening](phase-1/ws-hardening.md) | partial | 2/4 | 1 | 0 | 1 |
 | phase-1 | [ws-userid-binding-and-channel-existence-check](phase-1/ws-userid-binding-and-channel-existence-check.md) | stub | 0/5 | 0 | 0 | 5 |
+| phase-1 | [file-perms-and-headers](phase-1/file-perms-and-headers.md) | partial | 1/3 | 2 | 0 | 0 |
 
 **Phase-0 totals:** 4 features · 20 ACs · 20 covered · 0 partial · 0 missing · 0 deferred.
 
-**Phase-1 totals (so far):** 13 features analyzed of 14 spec'd · 61 ACs · 34 covered · 9 partial · 0 missing · 18 deferred.
+**Phase-1 totals (so far):** 14 features analyzed of 14 spec'd · 64 ACs · 35 covered · 11 partial · 0 missing · 18 deferred.
 
 `feature-ws-userid-binding-and-channel-existence-check` (new this run) is the third planned-only follow-up stub spec, exists to close `feature-ws-hardening` AC-3 (partial) and AC-4 (deferred) flagged in PR #58. Reframes AC-4 as a pre-upgrade HTTP 404 + envelope rather than the originally-promised "typed error frame" (which would require typed inbound WS frames; out of scope per the new spec). All 5 ACs deferred until impl PR ships.
 
@@ -77,7 +78,7 @@ Notable phase-1 gaps:
 
 `feature-rate-limits` (PR #41) ships clean: per-IP token-bucket on `/api/login` (10/5min) and `/api/register` (5/15min) with bounded LRU; per-username linear backoff (2 free → 500ms steps capped at 2s, 5min idle eviction, case-insensitive); 429 envelope + RFC-7231 `Retry-After`; rejection rows in `auth_events`. 17 tests across the three test files.
 
-**Phase-1 sibling PRs in flight (not yet on main):** PR #37 tracks `file-perms-and-headers` (1/3, SecurityHeaders not wired — superseded by the new wiring spec).
+**Phase-1 sibling PRs in flight (not yet on main):** none — `file-perms-and-headers` (1/3, SecurityHeaders not wired) lands with this PR; the wiring gap is superseded by the `security-headers-and-sqlite-ensure-wiring` stub spec.
 
 **Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once their implementation commits land on `main`.
 <!-- AGENT-INDEX-END -->
