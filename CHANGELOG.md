@@ -19,6 +19,9 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 0 monorepo scaffold (#5): `go.work` + `pnpm-workspace.yaml` + root `package.json` with `dev`/`build`/`test` fan-out, GitHub Actions CI (per-module Go build/test, pnpm install/build/test) with workflow-level concurrency group and least-privilege `contents: read` permissions.
 - Phase 0 server WebSocket endpoint with in-memory hub (#6): `/ws` handler backed by a per-channel subscriber registry on `#general`, environment-driven config (`SERVER_PORT`, validated 1–65535), explicit `*http.Server` with `ReadHeaderTimeout` and `IdleTimeout` (Slowloris mitigation), clean WebSocket close (`StatusNormalClosure`).
 
+### Changed
+- Go module layout collapsed from `go.work` + per-app `go.mod` to a single root `go.mod` with module name `hackathon` (#8). Imports use `hackathon/<path>`. The module name is intentionally decoupled from the GitHub coordinate so it survives org renames; the trade-off is that the module is not `go get`-able from outside the repo.
+
 ### Planned (next)
 - Phase 0 — walking skeleton: server + two CLI clients exchanging real-time messages, validated by `scripts/smoke.sh`.
 - Phase 1 — persistence, auth, full message envelope.
