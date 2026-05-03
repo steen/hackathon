@@ -7,139 +7,15 @@ description: |
 
 nodes:
   - id: parse-feature-plan
-    prompt: |
-      You are extracting structured intent from a feature plan markdown file.
-
-      The user invoked this workflow with the following input (must contain a feature plan path):
-
-      ```
-
-      ```
-
-      STEPS:
-      1. Determine the feature plan path. If the user input contains an explicit path ending in `.md`,
-         use that. Otherwise fail with a clear error: the workflow requires a feature plan path.
-      2. If the file does not exist, fail with a clear error message and stop.
-      3. Read the feature plan file with the Read tool.
-      4. Read CLAUDE.md and any `~/.claude/rules/common/*.md` files so downstream nodes inherit
-         coding-standard context (immutability, files <800 lines, validation at boundaries,
-         parameterized SQL, repository pattern, requirements-not-implementation coverage).
-      5. Extract:
-         - `feature_name` (string, from the `# Feature:` heading or first H1)
-         - `slug` (lowercase, hyphenated, derived from the file name `feature-{slug}.md`)
-         - `parent_phase` (object with `number`, `slug`, and `path` to the phase plan markdown,
-           parsed from the "Parent phase" link in the feature plan)
-         - `requirement_ids` (array of strings — every `US-\d+` or `FR-[\w.\-]+` ID listed under
-           "Requirements covered")
-         - `acceptance_criteria` (array of strings, verbatim from the plan, each must be testable)
-         - `implementation_steps` (ordered array of strings)
-         - `test_plan_skeleton` (verbatim contents of the "Test plan" section, may be empty)
-         - `files_to_touch` (array of relative paths from "Files expected to be touched or created")
-         - `risks` (array of strings; empty array if "None identified")
-      6. Locate the parent PRD. Default to `specs/PRD.md`. If the feature plan or phase plan
-         references a different PRD path, use that. If the file does not exist, fail.
-      7. Read the PRD and, for each `requirement_id`, capture its description text. Emit them as
-         `requirements`: `[{"id": "US-1", "description": "..."}]`.
-      8. Capture the PRD revision: run `git log -n 1 --pretty=format:%h -- <prd-path>` via Bash.
-         Use the literal string "uncommitted" if git fails or the file is untracked.
-
-      Output ONLY a single JSON object as your final response, with this exact shape:
-
-      {
-        "feature_plan_path": "specs/plans/phase-1/feature-auth.md",
-        "feature_name": "Auth",
-        "slug": "auth",
-        "parent_phase": {
-          "number": 1,
-          "slug": "foundation",
-          "path": "specs/plans/phase-1-foundation.md"
-        },
-        "prd_path": "specs/PRD.md",
-        "prd_revision": "abc1234",
-        "requirement_ids": ["US-1", "FR-1.1"],
-        "requirements": [
-          {"id": "US-1", "description": "..."},
-          {"id": "FR-1.1", "description": "..."}
-        ],
-        "acceptance_criteria": ["..."],
-        "implementation_steps": ["..."],
-        "test_plan_skeleton": "...",
-        "files_to_touch": ["..."],
-        "risks": ["..."]
-      }
+    command: feature-parse-plan
     output_format:
       type: json
     allowed_tools: [Read, Bash, Glob, Grep]
     denied_tools: [Edit, Write]
 
   - id: create-test-plan
+    command: feature-create-test-plan
     depends_on: [parse-feature-plan]
-    prompt: |
-      Expand the feature plan's test skeleton into a full test plan.
-
-      Parsed feature plan data (JSON):
-      ```json
-
-      ```
-
-      Steps:
-      1. Run `mkdir -p specs/plans/phase-{parent_phase.number}/{slug}` via Bash.
-      2. Use the Write tool to create `specs/plans/phase-{parent_phase.number}/{slug}/test-plan.md`
-         (idempotent — overwrite if it already exists).
-      3. For EVERY requirement ID, list both unit tests and E2E tests. A requirement with no
-         tests is a bug — flag it.
-      4. Test names MUST carry the requirement ID:
-         - Go: `TestUS1_RegisterCreatesUserAndReturnsToken`, `TestFR_1_1_PasswordHashedWithBcrypt`
-         - TS/JS: `it('US-1: register creates user and returns token', ...)`,
-           `it('FR-payload-opaque: server never logs payload', ...)`
-      5. Test names must describe behaviour from the requirement, not implementation details.
-         Tests organised by requirement, not by file/module.
-
-      Test plan file structure:
-
-      ```markdown
-      # Test plan: {feature_name}
-
-      **Feature plan:** [feature-{slug}.md](../feature-{slug}.md)
-      **Parent phase:** [Phase {N}: {phase title}](../../phase-{N}-{phase-slug}.md)
-      **PRD revision:** {prd_revision}
-
-      ## Coverage matrix
-
-      | Requirement ID | Description | Unit tests | E2E tests |
-      |----------------|-------------|------------|-----------|
-      | US-1 | ... | 2 | 1 |
-
-      ## Unit tests
-
-      ### US-1 — {description}
-
-      - **Name:** `TestUS1_RegisterCreatesUserAndReturnsToken`
-        - **Target file:** `apps/api/auth/register_test.go`
-        - **Asserts:**
-          - returns 200 with `{ ok: true, data: { token } }` envelope
-          - persists user with bcrypt-hashed password
-          - rejects duplicate email with `{ ok: false, error }`
-
-      ### FR-1.1 — {description}
-      ...
-
-      ## E2E tests
-
-      ### US-1 — {description}
-
-      - **Name:** `it('US-1: user registers, logs in, and accesses protected route', ...)`
-        - **Target file:** `tests/e2e/auth.spec.ts`
-        - **Scenario:** POST /register → POST /login → GET /me with bearer token
-        - **Asserts:** all responses use `{ ok, data, error }` envelope; token is JWT-shaped
-
-      ## Coverage rules
-      - Every requirement ID has at least one unit test AND at least one E2E test.
-      - Test names start with the requirement ID for grep-ability.
-      - Tests describe behaviour, not implementation — no asserting on private helpers.
-      ```
-
-      When done, print `wrote: <path>`.
     allowed_tools: [Read, Write, Bash]
     denied_tools: [Edit]
 
@@ -149,8 +25,10 @@ nodes:
       #!/bin/bash
       set -euo pipefail
 
-      SLUG=""
-      if [ -z "$SLUG" ]; then
+      JSON='$parse-feature-plan.output'
+      SLUG=$(echo "$JSON" | jq -r '.slug')
+
+      if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
         echo "ERROR: slug from parse-feature-plan is empty" >&2
         exit 1
       fi
@@ -179,11 +57,12 @@ nodes:
         You are running a STRICT red-green-refactor TDD loop for unit tests.
 
         Feature plan data (JSON):
-        ```json
 
+        ```json
+        $parse-feature-plan.output
         ```
 
-        Test plan path: `specs/plans/phase-/{slug}/test-plan.md`
+        The test plan path is the `test_plan_path` field of the JSON above.
 
         Coding standards (read once if not already loaded):
         - CLAUDE.md and ~/.claude/rules/common/*.md
@@ -242,11 +121,12 @@ nodes:
         breaking any unit tests.
 
         Feature plan data (JSON):
-        ```json
 
+        ```json
+        $parse-feature-plan.output
         ```
 
-        Test plan path: `specs/plans/phase-/{slug}/test-plan.md`
+        The test plan path is the `test_plan_path` field of the JSON above.
 
         Each iteration:
         1. Read the test plan and pick the next E2E test that is NOT YET implemented or NOT
@@ -295,63 +175,8 @@ nodes:
     timeout: 1800000
 
   - id: review-implementation
+    command: feature-review
     depends_on: [run-full-suite]
-    prompt: |
-      You are reviewing the implementation and tests against the feature plan, the parent PRD,
-      and the project's coding standards.
-
-      Feature plan data (JSON):
-      ```json
-
-      ```
-
-      Test plan path: `specs/plans/phase-/{slug}/test-plan.md`
-
-      Review dimensions (each finding belongs to exactly ONE):
-
-      (a) **Acceptance criteria coverage** — every item in `acceptance_criteria` is exercised
-          by at least one passing test. Missing coverage is `critical`.
-
-      (b) **Requirement ID coverage** — every ID in `requirement_ids` appears in at least one
-          test name (unit or E2E). Use grep to verify. Missing tags are `high`.
-
-      (c) **Coding standards** (from CLAUDE.md and ~/.claude/rules/common/*.md):
-          - Immutability — code creates new objects, never mutates inputs. Violations: `high`.
-          - File size — no implementation file exceeds 800 lines. Violations: `medium`.
-          - Validation at boundaries — user input / API responses / file content validated
-            before use. Violations: `high`.
-          - Parameterized SQL only — never string-interpolate values into queries. Violations:
-            `critical`.
-          - Repository pattern — data access behind an interface, not inline ORM calls scattered
-            in handlers. Violations: `medium`.
-          - API envelope `{ ok, data, error }` on new endpoints. Violations: `medium`.
-
-      (d) **Test quality**:
-          - Tests describe behaviour, not implementation details. Violations: `medium`.
-          - No tests asserting on private helpers when a public path covers the same behaviour.
-            Violations: `medium`.
-          - Tests organised by requirement ID, not by file/module shape. Violations: `low`.
-          - No mutation-based tests that pass against bugs (e.g. asserting current buggy
-            output). Violations: `high`.
-
-      Process:
-      1. Use Read/Glob/Grep extensively. Do NOT modify files in this node.
-      2. For each finding, include: `severity`, `dimension` (a-d), `file` (relative path),
-         `line` (number or null), `requirement_id` (or null), `summary`, `recommendation`.
-      3. Determine the verdict:
-         - `pass` — zero `critical` and zero `high` findings.
-         - `needs_fixes` — any `critical` or `high` finding.
-
-      Output ONLY a single JSON object:
-
-      {
-        "verdict": "pass",
-        "critical": [],
-        "high": [],
-        "medium": [],
-        "low": [],
-        "summary": "..."
-      }
     output_format:
       type: json
     allowed_tools: [Read, Glob, Grep, Bash]
@@ -365,13 +190,15 @@ nodes:
         You are fixing review findings from `review-implementation`.
 
         Findings (JSON):
-        ```json
 
+        ```json
+        $review-implementation.output
         ```
 
-        Feature plan data:
-        ```json
+        Feature plan data (JSON):
 
+        ```json
+        $parse-feature-plan.output
         ```
 
         Each iteration:
@@ -414,14 +241,17 @@ nodes:
       #!/bin/bash
       set -euo pipefail
 
-      SLUG=""
-      FEATURE_NAME=""
-      FEATURE_PLAN=""
-      PHASE_PLAN=""
-      PRD_PATH=""
-      VERDICT=""
+      JSON='$parse-feature-plan.output'
+      REVIEW='$review-implementation.output'
 
-      if [ -z "$SLUG" ] || [ -z "$FEATURE_NAME" ]; then
+      SLUG=$(echo "$JSON" | jq -r '.slug')
+      FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
+      FEATURE_PLAN=$(echo "$JSON" | jq -r '.feature_plan_path')
+      PHASE_PLAN=$(echo "$JSON" | jq -r '.parent_phase.path')
+      PRD_PATH=$(echo "$JSON" | jq -r '.prd_path')
+      VERDICT=$(echo "$REVIEW" | jq -r '.verdict')
+
+      if [ -z "$SLUG" ] || [ "$SLUG" = "null" ] || [ -z "$FEATURE_NAME" ] || [ "$FEATURE_NAME" = "null" ]; then
         echo "ERROR: missing slug or feature_name from parse-feature-plan" >&2
         exit 1
       fi
@@ -429,7 +259,6 @@ nodes:
       BRANCH="feat/$SLUG"
       git push -u origin "$BRANCH"
 
-      # Build PR body in a temp file
       BODY_FILE="$(mktemp)"
       trap 'rm -f "$BODY_FILE"' EXIT
 
@@ -444,7 +273,7 @@ nodes:
         echo "- PRD: \`$PRD_PATH\`"
         echo
         echo "## Requirement IDs covered"
-        for ID in ; do
+        echo "$JSON" | jq -r '.requirement_ids[]' | while read -r ID; do
           echo "- [x] $ID"
         done
         echo
@@ -452,17 +281,18 @@ nodes:
         echo
         echo "Test names tagged with their requirement IDs (see \`specs/plans/phase-*/$SLUG/test-plan.md\`):"
         echo
-        # List Go test functions and TS it() blocks that mention any requirement ID
-        for ID in ; do
+        echo "$JSON" | jq -r '.requirement_ids[]' | while read -r ID; do
+          ID_UNDERSCORE="${ID//-/_}"
           echo "### $ID"
-          grep -rEn "func Test[A-Za-z0-9_]*${ID//-/_}|it\\(['\"]${ID}" \
+          grep -rEn "func Test[A-Za-z0-9_]*${ID_UNDERSCORE}|it\\(['\"]${ID}" \
             --include='*.go' --include='*.ts' --include='*.tsx' --include='*.js' \
             -- . 2>/dev/null | sed 's/^/- /' || echo "- (none found — investigate)"
           echo
         done
         echo "## Risks / Out of Scope"
-        if [ -n "" ]; then
-          echo
+        RISKS=$(echo "$JSON" | jq -r '.risks[]?' 2>/dev/null)
+        if [ -n "$RISKS" ]; then
+          echo "$RISKS" | sed 's/^/- /'
         else
           echo "None identified."
         fi
@@ -471,7 +301,7 @@ nodes:
         echo "- $VERDICT"
       } > "$BODY_FILE"
 
-      # Use repo PR template if present (append our body after it)
+      # Use repo PR template if present (prepend it)
       if [ -f .github/pull_request_template.md ]; then
         TMP="$(mktemp)"
         cat .github/pull_request_template.md > "$TMP"
@@ -502,18 +332,17 @@ nodes:
       #!/bin/bash
       set -e
 
-      SLUG=""
-      FEATURE_NAME=""
-      ARTIFACTS_DIR="/Users/emilchristensen/.archon/workspaces/steen/Hackathon/artifacts/runs/91074e6e9875918f647111b7260c45ab"
+      JSON='$parse-feature-plan.output'
+      SLUG=$(echo "$JSON" | jq -r '.slug')
+      FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
+
       mkdir -p "$ARTIFACTS_DIR"
 
-      PR_URL=""
+      PR_URL=$(gh pr view "feat/$SLUG" --json url -q .url 2>/dev/null || echo "")
 
-      # Count tests by requirement ID
       UNIT_COUNT=$(grep -rE 'func Test[A-Za-z0-9_]+' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ' || echo 0)
       TS_UNIT_COUNT=$(grep -rE "it\\(['\"]" --include='*.test.ts' --include='*.test.tsx' --include='*.spec.ts' . 2>/dev/null | wc -l | tr -d ' ' || echo 0)
       E2E_COUNT=$(find tests/e2e -type f \( -name '*.spec.ts' -o -name '*.spec.js' \) 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-
       FILES_CHANGED=$(git diff --name-only "main...HEAD" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 
       SUMMARY_FILE="$ARTIFACTS_DIR/summary.md"
@@ -529,9 +358,7 @@ nodes:
         echo "- **E2E test files:** $E2E_COUNT"
         echo
         echo "## Requirement IDs covered"
-        for ID in ; do
-          echo "- $ID"
-        done
+        echo "$JSON" | jq -r '.requirement_ids[]' | sed 's/^/- /'
       } > "$SUMMARY_FILE"
 
       cat "$SUMMARY_FILE"
