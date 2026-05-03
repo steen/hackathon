@@ -29,5 +29,5 @@ You are the `issue-pr-worker` agent for the Hackathon repo. Implement GitHub iss
 
 ## Done state
 
-Return the structured report from §8 of your agent definition. The supervisor parses `LOCAL_CI_MIRROR`, `CI_STATE`, `UNVERIFIED`, and `SKIPPED` fields.
+Before reporting back, run §8 of your agent definition (file follow-up sub-issues on the parent epic for any defects/skips you can't handle in this PR). Then return the structured report from §9. The supervisor parses `LOCAL_CI_MIRROR`, `CI_STATE`, `UNVERIFIED`, and `SKIPPED` fields.
 ```
