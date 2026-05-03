@@ -129,7 +129,7 @@ func Recover(next http.Handler) http.Handler {
 			}
 			log.Printf("panic request_id=%s value=%v\n%s",
 				RequestID(r.Context()), rv, debug.Stack())
-			WriteError(w, "internal_error", "internal server error", http.StatusInternalServerError)
+			WriteError(w, http.StatusInternalServerError, CodeInternal, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
 	})

@@ -10,6 +10,25 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 17:50Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
+
+### Added
+- `apps/server/internal/http` — auth HTTP handlers and a small `Code*` enum on top of the existing envelope helpers:
+  - `auth_handlers.go`: `POST /api/register` (invite-code gated, applies `auth.EnforcePolicy`, hashes via bcrypt, mints a JWT at `tv=0`), `POST /api/login` (delegates to `auth.AuthenticateLogin` so SEC-3/SEC-4 stay in one place), `GET /api/me`, `POST /api/logout` (bumps `users.token_version` to invalidate every previously-issued JWT — US-12), `POST /api/ws-ticket` (issues a 30s, single-use ticket bound to the caller — SEC-12). Every endpoint writes a row to `auth_events` (SEC-13); insert failures are surfaced via `log.Printf` so audit gaps are operator-visible.
+  - `auth_store.go`: SQL helpers for `users` and `auth_events` written in this package (parameterized statements only, per PRD §6) since `internal/repo` is frozen by its parent PR.
+  - Strict JSON decoding (`DisallowUnknownFields`) on every endpoint; the global 16 KiB body cap is provided by `httpx.BodyCap` from PR #27.
+  - 405 responses now include the `Allow` header per RFC 9110.
+- `apps/server/internal/auth/tickets.go` — in-memory `TicketStore` (`Issue` / `Redeem`) keyed on a 32-byte hex token; `Redeem` deletes before returning so a second call cannot succeed even under contention (SEC-12 race rider). 30s TTL; clock injectable for tests. Tests cover single-use semantics, expiry boundary, unknown-ticket, and 50-goroutine contention with exactly-one-winner.
+- `apps/server/internal/auth/middleware.go` — `RequireJWT` extracts a `Bearer` token, performs a two-phase parse (subject extraction → DB lookup → re-parse against the row's current `token_version`) so a deleted-user token cannot be distinguished from a bad signature via status code, then decorates the request context with `user_id` + `username`. Companion `jwt_subject.go` carries the unverified-subject helper rather than touching the parent PR's `jwt.go`.
+- `apps/server/main.go` — when `CHAT_DB_PATH` is set, wires the auth handlers + `RequireJWT` middleware onto the mux. JWT secret strength is enforced by `config.Validate` (#28) at startup.
+- `apps/cli/main.go` + `apps/cli/cmd/url.go` — chatd accepts `--ws-ticket TICKET` and appends it as `?ticket=…` on the WebSocket URL. Forwarding only; the WS upgrader does not yet redeem the ticket (that's the ws-hardening feature). Wiring is in place so the smoke script can already pass tickets end-to-end.
+- `scripts/smoke.sh` — now runs through `register → login → ws-ticket` against the real HTTP API (curl + python3 JSON parse, no jq dep), then hands the ticket to `chatd watch` / `chatd send`. The phase-0 fan-out assertion stays unchanged. Each smoke invocation is hermetic: `CHAT_DB_PATH` lives in the temp work dir, and per-run `CHAT_JWT_SECRET` + `CHAT_INVITE_CODE` are generated via `openssl rand -hex` so no fake-secret literal lives in git.
+- Tests covering US-1, US-2, US-11, US-12, SEC-3, SEC-4, SEC-12, SEC-13: register success / wrong invite / bad username / short password / duplicate; login success / wrong password / byte-identical envelope vs unknown-user; `/api/me` for valid + post-logout (US-12); `auth_events` row counts for register/login_success/login_failure/logout (SEC-13); ws-ticket single-use, expiry boundary, concurrent redemption (SEC-12).
+
+### Notes / known gaps
+- PRD §10 names the auth routes under `/api/auth/...`; the feature spec and this PR mount them at `/api/...`. Following the feature spec is intentional — flagged here so the channels/messages feature can revisit the prefix decision.
+- PRD §9 describes an `auth_events` row as `(id, user_id, username, event, source_ip, user_agent, created_at)` but the on-disk migration (parent PR #29) shipped `(id, user_id, kind, ip, ua, at)`. The endpoints log against the migration shape per the explicit instruction in the feature spec; if PRD-shaped columns are wanted, a migration in the parent (sqlite-schema) feature is the right place.
+
 ## 2026-05-03 17:45Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
 
 ### Added
