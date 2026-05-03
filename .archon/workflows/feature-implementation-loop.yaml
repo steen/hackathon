@@ -158,25 +158,9 @@ nodes:
       fresh_context: true
     allowed_tools: [Read, Write, Edit, Bash, Glob, Grep]
 
-  - id: run-full-suite
-    depends_on: [e2e-implementation]
-    bash: |
-      #!/bin/bash
-      set -e
-      echo "=== Running full Go test suite ==="
-      go test ./...
-      if command -v pnpm >/dev/null 2>&1; then
-        echo "=== Running full TS test suite ==="
-        pnpm -r test
-      else
-        echo "pnpm not found — skipping TS suite"
-      fi
-      echo "OK: full suite green"
-    timeout: 1800000
-
   - id: review-implementation
     command: feature-review
-    depends_on: [run-full-suite]
+    depends_on: [e2e-implementation]
     output_format:
       type: json
     allowed_tools: [Read, Glob, Grep, Bash]
@@ -207,14 +191,15 @@ nodes:
              test file too.
         3. Run the full suite (`go test ./... && pnpm -r test`) after each batch.
         4. After all critical/high issues are addressed, write a marker file
-           `.archon/.feature-loop-second-pass-OK` containing the current git short SHA.
-           This marker tells the loop the second pass succeeded.
+           `$ARTIFACTS_DIR/second-pass-ok` containing the current git short SHA.
+           This marker tells the loop the second pass succeeded. (It lives in the
+           workflow artifacts dir so it stays out of the git working tree.)
 
         Do NOT introduce new features. Do NOT refactor unrelated code. Do NOT weaken tests
         to make them pass — fix the implementation.
 
         When all CRITICAL and HIGH findings are resolved, the full test suite is green, and
-        the marker file `.archon/.feature-loop-second-pass-OK` exists, emit the literal
+        the marker file `$ARTIFACTS_DIR/second-pass-ok` exists, emit the literal
         token `<promise>FINDINGS_ADDRESSED</promise>` as the last line of your output.
         Otherwise, do not emit it — the loop will continue.
       until: FINDINGS_ADDRESSED
@@ -225,7 +210,7 @@ nodes:
         if command -v pnpm >/dev/null 2>&1; then
           pnpm -r test
         fi
-        test -f .archon/.feature-loop-second-pass-OK
+        test -f "$ARTIFACTS_DIR/second-pass-ok"
       max_iterations: 5
       fresh_context: true
     allowed_tools: [Read, Write, Edit, Bash, Glob, Grep]
