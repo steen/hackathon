@@ -113,6 +113,7 @@ func run() error {
 			SigningKey:        jwtSecret,
 			Lookup:            ah.LookupUserInfo,
 			WriteUnauthorized: httpapi.WriteUnauthorized,
+			WithUserID:        httpapi.WithUserID,
 		})
 		loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
 		registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())

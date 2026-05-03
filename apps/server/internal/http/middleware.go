@@ -84,10 +84,23 @@ func AccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		next.ServeHTTP(rec, r)
+		// Install a pointer sink in the outgoing request context so any
+		// inner middleware (typically RequireJWT) can write the
+		// authenticated user id into a location this outer scope still
+		// reads after ServeHTTP returns. http.Request.WithContext returns
+		// a fresh *Request, so a context-only update by inner code would
+		// be invisible here without the indirection.
+		var uid string
+		ctx := withUserIDSink(r.Context(), &uid)
+		next.ServeHTTP(rec, r.WithContext(ctx))
 
 		redacted := redactURL(r.URL)
-		userID := UserID(r.Context())
+		userID := uid
+		if userID == "" {
+			// Fall back to the request context for callers (and tests)
+			// that set the id pre-AccessLog via WithUserID.
+			userID = UserID(r.Context())
+		}
 		if userID == "" {
 			// "-" is the standard access-log convention for an absent value
 			// (see Apache combined log). Keeps field count stable and avoids
