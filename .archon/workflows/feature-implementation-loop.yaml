@@ -13,12 +13,6 @@ nodes:
     allowed_tools: [Read, Bash, Glob, Grep]
     denied_tools: [Edit, Write]
 
-  - id: create-test-plan
-    command: feature-create-test-plan
-    depends_on: [parse-feature-plan]
-    allowed_tools: [Read, Write, Bash]
-    denied_tools: [Edit]
-
   - id: setup-branch
     depends_on: [parse-feature-plan]
     bash: |
@@ -28,7 +22,8 @@ nodes:
       # archon auto-shell-quotes $nodeId.output; reference it bare
       JSON=$parse-feature-plan.output
       # Strip markdown code fences if the model wrapped JSON in ```json ... ```
-      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
+      # Extract first valid JSON object (defends against code-fenced or prose-wrapped output)
+      JSON=$(printf '%s' "$JSON" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$JSON")
       SLUG=$(echo "$JSON" | jq -r '.slug')
 
       if [ -z "$SLUG" ] || [ "$SLUG" = "null" ]; then
@@ -53,17 +48,21 @@ nodes:
 
       git rev-parse --abbrev-ref HEAD
 
+  - id: create-test-plan
+    command: feature-create-test-plan
+    depends_on: [setup-branch]
+    allowed_tools: [Read, Write, Bash]
+    denied_tools: [Edit]
+
   - id: tdd-unit-loop
-    depends_on: [create-test-plan, setup-branch]
+    depends_on: [create-test-plan]
     loop:
       prompt: |
         You are running a STRICT red-green-refactor TDD loop for unit tests.
 
-        Feature plan data (JSON):
+        Feature plan data (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $parse-feature-plan.output
-        ```
 
         The test plan path is the `test_plan_path` field of the JSON above.
 
@@ -123,11 +122,9 @@ nodes:
         You are implementing E2E tests from the test plan and making them pass — without
         breaking any unit tests.
 
-        Feature plan data (JSON):
+        Feature plan data (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $parse-feature-plan.output
-        ```
 
         The test plan path is the `test_plan_path` field of the JSON above.
 
@@ -192,17 +189,13 @@ nodes:
       prompt: |
         You are fixing review findings from `review-implementation`.
 
-        Findings (JSON):
+        Findings (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $review-implementation.output
-        ```
 
-        Feature plan data (JSON):
+        Feature plan data (JSON, raw — do not re-emit wrapped in code fences):
 
-        ```json
         $parse-feature-plan.output
-        ```
 
         Each iteration:
         1. Address every `critical` finding first, then every `high`. Tackle `medium`
@@ -248,8 +241,9 @@ nodes:
       JSON=$parse-feature-plan.output
       REVIEW=$review-implementation.output
       # Strip markdown code fences if the model wrapped JSON in ```json ... ```
-      JSON=$(echo "$JSON" | sed -e '/^[[:space:]]*```/d')
-      REVIEW=$(echo "$REVIEW" | sed -e '/^[[:space:]]*```/d')
+      # Extract first valid JSON object (defends against code-fenced or prose-wrapped output)
+      JSON=$(printf '%s' "$JSON" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$JSON")
+      REVIEW=$(printf '%s' "$REVIEW" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$REVIEW")
 
       SLUG=$(echo "$JSON" | jq -r '.slug')
       FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
@@ -339,7 +333,10 @@ nodes:
       #!/bin/bash
       set -e
 
-      JSON='$parse-feature-plan.output'
+      # archon auto-shell-quotes $nodeId.output; reference bare and strip fences defensively
+      JSON=$parse-feature-plan.output
+      # Extract first valid JSON object (defends against code-fenced or prose-wrapped output)
+      JSON=$(printf '%s' "$JSON" | jq -Rrs 'capture("(?<j>\\{[\\s\\S]*\\})") | .j' 2>/dev/null || printf '%s' "$JSON")
       SLUG=$(echo "$JSON" | jq -r '.slug')
       FEATURE_NAME=$(echo "$JSON" | jq -r '.feature_name')
 
@@ -350,7 +347,8 @@ nodes:
       UNIT_COUNT=$(grep -rE 'func Test[A-Za-z0-9_]+' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ' || echo 0)
       TS_UNIT_COUNT=$(grep -rE "it\\(['\"]" --include='*.test.ts' --include='*.test.tsx' --include='*.spec.ts' . 2>/dev/null | wc -l | tr -d ' ' || echo 0)
       E2E_COUNT=$(find tests/e2e -type f \( -name '*.spec.ts' -o -name '*.spec.js' \) 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-      FILES_CHANGED=$(git diff --name-only "main...HEAD" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+      # Use origin/main since the worktree may not have a local main ref
+      FILES_CHANGED=$(git diff --name-only "origin/main...HEAD" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
 
       SUMMARY_FILE="$ARTIFACTS_DIR/summary.md"
       {
