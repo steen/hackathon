@@ -13,10 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
+	httpapi "hackathon/apps/server/internal/http"
+	"hackathon/apps/server/internal/ratelimit"
 	"hackathon/apps/server/internal/repo"
 	"hackathon/apps/server/internal/wsapi"
 )
@@ -24,6 +27,8 @@ import (
 const (
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
+	jwtSecretEnv      = "CHAT_JWT_SECRET"
+	inviteCodeEnv     = "CHAT_INVITE_CODE"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
@@ -74,6 +79,46 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", wsapi.Handler(h))
 	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
+
+	if repository != nil {
+		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
+		if len(jwtSecret) == 0 {
+			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
+		}
+		tickets := auth.NewTicketStore()
+		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())
+		registerIPLimiter := ratelimit.NewIPLimiter(ratelimit.RegisterIPConfig())
+		userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
+		ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
+			DB:          repository.DB(),
+			Tickets:     tickets,
+			SigningKey:  jwtSecret,
+			InviteCode:  os.Getenv(inviteCodeEnv),
+			UserLimiter: userLimiter,
+		})
+		require := auth.RequireJWT(auth.MiddlewareConfig{
+			SigningKey:        jwtSecret,
+			Lookup:            ah.LookupUserInfo,
+			WriteUnauthorized: httpapi.WriteUnauthorized,
+		})
+		loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
+		registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())
+		mux.Handle("/api/register", registerRL(http.HandlerFunc(ah.Register)))
+		mux.Handle("/api/login", loginRL(http.HandlerFunc(ah.Login)))
+		mux.Handle("/api/me", require(http.HandlerFunc(ah.Me)))
+		mux.Handle("/api/logout", require(http.HandlerFunc(ah.Logout)))
+		mux.Handle("/api/ws-ticket", require(http.HandlerFunc(ah.WSTicket)))
+
+		ch := httpapi.NewChannelsHandlers(httpapi.ChannelsDeps{
+			Repo: repository,
+			Hub:  h,
+		})
+		msg := httpapi.NewMessagesHandlers(httpapi.MessagesDeps{
+			Repo: repository,
+			Hub:  h,
+		})
+		ch.Routes(mux, require, msg)
+	}
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —

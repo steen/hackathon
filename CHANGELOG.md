@@ -10,6 +10,51 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 18:30Z — Channels and messages endpoints (REST + WS) (phase 1) (#42)
+
+### Added
+- `apps/server/internal/repo/channels.go` — `Channel` row type plus `ListChannels`, `GetChannel`, `CreateChannel`. `CreateChannel` maps SQLite's UNIQUE-constraint error on `channels.name` to a typed `ErrChannelNameTaken` so handlers can return a 409 without inspecting driver-specific error text.
+- `apps/server/internal/repo/messages.go` — `Message` row type plus `InsertMessage` and `ListMessages`. Pagination uses the message ULID as a cursor (ULIDs are lex-sortable, so `id < ?` paired with `ORDER BY id DESC` returns the next-older page without a separate `created_at` index round-trip). `MaxMessagesLimit = 200`, `DefaultMessagesLimit = 50`; the repo caps absurd `limit` values rather than letting them through.
+- `apps/server/internal/http/channels_handlers.go` — `GET /api/channels` (list) and `POST /api/channels` (create). Channel name validation is `^[a-z0-9][a-z0-9-]{0,39}$` — lowercase only avoids the Slack-style "is `#General` the same as `#general`?" foot-gun. The handler uses Go 1.22+ ServeMux pattern matching (`{id}`); a tight `channelIDFromPath` validator rejects any non-26-char or non-Crockford-base32 path segment before it reaches the DB.
+- `apps/server/internal/http/messages_handlers.go` — `GET /api/channels/{id}/messages?before=&limit=` (paginated history, newest-first) and `POST /api/channels/{id}/messages` (persist + broadcast). The POST path inserts the row first, then broadcasts the persisted record so a client can never see a WS message that a subsequent history fetch would not return. Body cap is 4 KiB (PRD §9); empty/whitespace bodies return 400.
+- `apps/server/internal/wsapi/handler.go` — `/ws` now honors a `?channel=<id>` query parameter and subscribes the upgraded connection to that hub channel. Default stays `#general` so the phase-0 smoke flow keeps round-tripping. The PRD's `{type:subscribe,...}` frame protocol is intentionally not implemented yet — query-param subscription is the minimum the channels feature needs and a frame protocol can layer on top without breaking the wire.
+- `apps/server/main.go` wires `ChannelsHandlers` + `MessagesHandlers` against the existing repository and hub when `CHAT_DB_PATH` is set, behind the same `auth.RequireJWT` middleware as the rest of the `/api/*` surface.
+- New error code `not_found` in `errors.go`, used by the messages handlers when a channel id does not resolve.
+- Tests carrying US-3, US-4, US-5, US-6 IDs across `apps/server/internal/repo/*_test.go` and `apps/server/internal/http/*_test.go`. End-to-end coverage in `ws_broadcast_test.go` stands up a real `httptest.Server` with `/api/*` and `/ws` on the same hub and asserts a POSTed message arrives at a connected WS subscriber as a `{"type":"message","data":<Message>}` frame.
+
+### Notes / known gaps
+- PRD §10 sketches a richer WS protocol (`{type:subscribe|unsubscribe|send,channel_id}`); this PR ships only the query-param subscription form. `POST /api/channels/{id}/messages` is the canonical producer for new messages (persists + emits a `{"type":"message","data":<Message>}` JSON envelope). Inbound WS text frames are still rebroadcast verbatim per the phase-0 AC-3 contract — so subscribers may see two on-the-wire shapes today. A future feature will converge them by parsing WS frames through the same envelope and dropping the raw rebroadcast.
+- Per the previous changelog entry, auth endpoints live at `/api/...` rather than `/api/auth/...`; the new channels/messages endpoints follow the same convention. PRD §10 names them under `/api/channels` (no `/auth/` prefix), so this PR matches the PRD for its own surface.
+
+## 2026-05-03 18:00Z — Rate limits: per-IP login/register, per-username login backoff (phase 1) (#41)
+
+### Added
+- `apps/server/internal/ratelimit/iplimit.go` — token-bucket limiter keyed by IP, fronted by a bounded LRU so an attacker rotating source IPs cannot grow memory (PRD §14 risk). `LoginIPConfig` (burst 10 / 5 min) and `RegisterIPConfig` (burst 5 / 15 min) match PRD §9. `LoginIPConfig` is the source of truth for SEC-5 (the 11th login attempt within 5 min from one IP returns 429).
+- `apps/server/internal/ratelimit/userlimit.go` — per-username login-failure tracker with linear backoff (configurable Step + GraceFailures), capped at MaxDelay so a forgotten password cannot lock an account out (PRD §9: "without enabling lockout-DoS"). Username keys are case-folded so case-only variation cannot bypass the gate. Records age out after `ResetAfter`.
+- `apps/server/internal/http/middleware_ratelimit.go` — `IPRateLimit` middleware that consumes one token per request, writes the user-safe envelope on 429 (new `CodeRateLimited` error code), sets `Retry-After`, and writes one `auth_events` row (kind `rate_limited`) so rejections are observable per the spec AC.
+- `apps/server/internal/http/auth_handlers.go` — `Login` consults the per-username gate before authenticating, increments on failure, clears it on success. `AuthDeps` grows an optional `UserLimiter` so tests can opt in/out.
+- `apps/server/main.go` — wires both IP limiters and the username limiter onto `/api/login` (5-minute Retry-After) and `/api/register` (15-minute Retry-After).
+- Tests: `TestIPRateLimitBlocksEleventhLoginAttemptWithin5min` (SEC-5, name and assertion both pin the exact threshold), per-IP register burst limit, refill-over-time, LRU eviction, concurrent access, per-username backoff growth, MaxDelay cap, Reset on success, ResetAfter expiry, case-insensitivity, and the `auth_events` rate-limit audit row.
+
+## 2026-05-03 17:50Z — Auth endpoints: register / login / me / logout / ws-ticket (phase 1) (#38)
+
+### Added
+- `apps/server/internal/http` — auth HTTP handlers and a small `Code*` enum on top of the existing envelope helpers:
+  - `auth_handlers.go`: `POST /api/register` (invite-code gated, applies `auth.EnforcePolicy`, hashes via bcrypt, mints a JWT at `tv=0`), `POST /api/login` (delegates to `auth.AuthenticateLogin` so SEC-3/SEC-4 stay in one place), `GET /api/me`, `POST /api/logout` (bumps `users.token_version` to invalidate every previously-issued JWT — US-12), `POST /api/ws-ticket` (issues a 30s, single-use ticket bound to the caller — SEC-12). Every endpoint writes a row to `auth_events` (SEC-13); insert failures are surfaced via `log.Printf` so audit gaps are operator-visible.
+  - `auth_store.go`: SQL helpers for `users` and `auth_events` written in this package (parameterized statements only, per PRD §6) since `internal/repo` is frozen by its parent PR.
+  - Strict JSON decoding (`DisallowUnknownFields`) on every endpoint; the global 16 KiB body cap is provided by `httpx.BodyCap` from PR #27.
+  - 405 responses now include the `Allow` header per RFC 9110.
+- `apps/server/internal/auth/tickets.go` — in-memory `TicketStore` (`Issue` / `Redeem`) keyed on a 32-byte hex token; `Redeem` deletes before returning so a second call cannot succeed even under contention (SEC-12 race rider). 30s TTL; clock injectable for tests. Tests cover single-use semantics, expiry boundary, unknown-ticket, and 50-goroutine contention with exactly-one-winner.
+- `apps/server/internal/auth/middleware.go` — `RequireJWT` extracts a `Bearer` token, performs a two-phase parse (subject extraction → DB lookup → re-parse against the row's current `token_version`) so a deleted-user token cannot be distinguished from a bad signature via status code, then decorates the request context with `user_id` + `username`. Companion `jwt_subject.go` carries the unverified-subject helper rather than touching the parent PR's `jwt.go`.
+- `apps/server/main.go` — when `CHAT_DB_PATH` is set, wires the auth handlers + `RequireJWT` middleware onto the mux. JWT secret strength is enforced by `config.Validate` (#28) at startup.
+- `apps/cli/main.go` + `apps/cli/cmd/url.go` — chatd accepts `--ws-ticket TICKET` and appends it as `?ticket=…` on the WebSocket URL. Forwarding only; the WS upgrader does not yet redeem the ticket (that's the ws-hardening feature). Wiring is in place so the smoke script can already pass tickets end-to-end.
+- `scripts/smoke.sh` — now runs through `register → login → ws-ticket` against the real HTTP API (curl + python3 JSON parse, no jq dep), then hands the ticket to `chatd watch` / `chatd send`. The phase-0 fan-out assertion stays unchanged. Each smoke invocation is hermetic: `CHAT_DB_PATH` lives in the temp work dir, and per-run `CHAT_JWT_SECRET` + `CHAT_INVITE_CODE` are generated via `openssl rand -hex` so no fake-secret literal lives in git.
+- Tests covering US-1, US-2, US-11, US-12, SEC-3, SEC-4, SEC-12, SEC-13: register success / wrong invite / bad username / short password / duplicate; login success / wrong password / byte-identical envelope vs unknown-user; `/api/me` for valid + post-logout (US-12); `auth_events` row counts for register/login_success/login_failure/logout (SEC-13); ws-ticket single-use, expiry boundary, concurrent redemption (SEC-12).
+
+### Notes / known gaps
+- PRD §10 names the auth routes under `/api/auth/...`; the feature spec and this PR mount them at `/api/...`. Following the feature spec is intentional — flagged here so the channels/messages feature can revisit the prefix decision.
+- PRD §9 describes an `auth_events` row as `(id, user_id, username, event, source_ip, user_agent, created_at)` but the on-disk migration (parent PR #29) shipped `(id, user_id, kind, ip, ua, at)`. The endpoints log against the migration shape per the explicit instruction in the feature spec; if PRD-shaped columns are wanted, a migration in the parent (sqlite-schema) feature is the right place.
+
 ## 2026-05-03 17:45Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
 
 ### Added
