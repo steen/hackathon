@@ -27,7 +27,7 @@ import (
 const (
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
-	jwtSecretEnv      = "CHAT_JWT_SECRET"
+	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
 	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
@@ -91,7 +91,7 @@ func run() error {
 	if repository != nil {
 		jwtSecret := []byte(os.Getenv(jwtSecretEnv))
 		if len(jwtSecret) == 0 {
-			log.Fatalf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
+			return fmt.Errorf("config: %s must be set when %s is set", jwtSecretEnv, dbPathEnv)
 		}
 		tickets = auth.NewTicketStore()
 		loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())

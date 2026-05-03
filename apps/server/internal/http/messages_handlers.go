@@ -34,6 +34,8 @@ type MessagesHandlers struct {
 	deps MessagesDeps
 }
 
+// NewMessagesHandlers wires the dependency bag. Defaults Now to time.Now
+// when unset so production callers do not have to think about clocks.
 func NewMessagesHandlers(deps MessagesDeps) *MessagesHandlers {
 	if deps.Now == nil {
 		deps.Now = time.Now

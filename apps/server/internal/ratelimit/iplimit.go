@@ -111,7 +111,7 @@ func (l *IPLimiter) Allow(key string) bool {
 		if e.tokens < 1 {
 			return false
 		}
-		e.tokens -= 1
+		e.tokens--
 		return true
 	}
 
