@@ -10,15 +10,19 @@ type Subscriber interface {
 	Send(msg []byte)
 }
 
+// Hub is an in-memory pub/sub registry keyed by channel name. Safe for
+// concurrent Subscribe/Unsubscribe/Broadcast.
 type Hub struct {
 	mu       sync.RWMutex
 	channels map[string]map[Subscriber]struct{}
 }
 
+// New returns an empty Hub.
 func New() *Hub {
 	return &Hub{channels: make(map[string]map[Subscriber]struct{})}
 }
 
+// Subscribe registers s as a receiver for messages broadcast to channel.
 func (h *Hub) Subscribe(channel string, s Subscriber) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -30,6 +34,8 @@ func (h *Hub) Subscribe(channel string, s Subscriber) {
 	subs[s] = struct{}{}
 }
 
+// Unsubscribe removes s from channel. Removing an unknown subscriber or an
+// unknown channel is a no-op.
 func (h *Hub) Unsubscribe(channel string, s Subscriber) {
 	h.mu.Lock()
 	defer h.mu.Unlock()

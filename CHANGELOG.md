@@ -10,6 +10,18 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 16:18Z — Post-phase-1 cleanup: strict linters + envelope/limits consolidation (#51)
+
+### Added
+- `.golangci.yml`, `.prettierrc.json`, `.prettierignore`, `eslint.config.js` — strict lint configs (gosec, gocritic, revive, gofmt for Go; ESLint strict-type-checked + Prettier for TS) — and a new `lint` job in `.github/workflows/ci.yml` that gates every PR on them.
+- `apps/server/internal/http/limits.go` (+ `_test.go`) — the body-cap middleware and `RESTBodyLimit`/`MessageBodyLimit` constants previously living in the duplicate `internal/httpx` package.
+
+### Changed
+- `internal/httpx` deleted; its surface (`BodyCap`, `WriteMessageTooLarge`, `MessageBodyLimit`, `RESTBodyLimit`) is now part of `internal/http` so every handler imports one envelope helper package, not two with subtly different signatures. Production callers (`Recover`, `apps/server/main.go`) updated to the consolidated API.
+- `WriteJSON` is now a public helper alongside `WriteOK`/`WriteError` so callers that need a custom envelope shape don't have to assemble it from scratch.
+
+### Notes / known gaps
+- The `userID` from a successful WS ticket redemption is still `_ = userID` in `wsapi/handler.go`. Binding it onto per-conn metadata is a hub-level change (feature, not cleanup) and stays a follow-up.
 ## 2026-05-03 14:57Z — WS hardening: origin check + ws-ticket redemption (phase 1) (#39)
 
 ### Added

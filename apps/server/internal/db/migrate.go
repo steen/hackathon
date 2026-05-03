@@ -78,7 +78,7 @@ func loadApplied(ctx context.Context, sqlDB *sql.DB) (map[string]bool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("db: select schema_migrations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	applied := make(map[string]bool)
 	for rows.Next() {
 		var name string

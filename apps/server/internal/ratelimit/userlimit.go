@@ -20,12 +20,12 @@ import (
 // once that long has passed since the last failure (so casual
 // bad-day-typing doesn't accumulate forever).
 type UserLimiterConfig struct {
-	Step           time.Duration
-	MaxDelay       time.Duration
-	GraceFailures  int
-	Capacity       int
-	ResetAfter     time.Duration
-	Now            func() time.Time
+	Step          time.Duration
+	MaxDelay      time.Duration
+	GraceFailures int
+	Capacity      int
+	ResetAfter    time.Duration
+	Now           func() time.Time
 }
 
 // LoginUserConfig is the shared default for the per-username login
@@ -58,6 +58,9 @@ type userEntry struct {
 	updatedAt time.Time
 }
 
+// NewUserLimiter constructs a per-username backoff tracker with sensible
+// defaults for any zero-valued cfg field (Step 500ms, MaxDelay 2s,
+// GraceFailures 0, ResetAfter 5m, Now time.Now).
 func NewUserLimiter(cfg UserLimiterConfig) *UserLimiter {
 	if cfg.Step <= 0 {
 		cfg.Step = 500 * time.Millisecond

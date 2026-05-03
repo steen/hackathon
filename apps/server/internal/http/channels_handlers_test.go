@@ -178,4 +178,3 @@ func TestCreateChannelRejectsInvalidName(t *testing.T) {
 		}
 	}
 }
-
