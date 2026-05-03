@@ -136,23 +136,20 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-echo "[smoke] ws-ticket"
-TICKET_RESP=$(curl -fsS -X POST "${API_URL}/api/ws-ticket" \
-  -H "Authorization: Bearer ${TOKEN}")
-TICKET=$(printf '%s' "$TICKET_RESP" | json_get ticket)
-if [[ -z "$TICKET" ]]; then
-  echo "[smoke] ws-ticket did not return a ticket: ${TICKET_RESP}" >&2
-  exit 1
-fi
+# Tickets are single-use (SEC-12) so each WS dial needs its own. Mint
+# one per connection rather than caching a value the server will reject
+# on second use.
+mint_ticket() {
+  curl -fsS -X POST "${API_URL}/api/ws-ticket" \
+    -H "Authorization: Bearer ${TOKEN}" | json_get ticket
+}
 
-# WS handshake hardening (ticket redemption at /ws upgrade) lands in
-# the ws-hardening feature; for now /ws ignores the query parameter.
-# We still pass --ws-ticket so the smoke wiring is in place — the
-# server's coder/websocket Accept ignores unknown query params.
-echo "[smoke] starting two watchers (with ticket)"
-"$CHATD_BIN" --ws-ticket "$TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
+echo "[smoke] starting two watchers (each with its own ticket)"
+WATCH1_TICKET=$(mint_ticket)
+"$CHATD_BIN" --ws-ticket "$WATCH1_TICKET" watch >"$WATCH1_OUT" 2>"$WATCH1_ERR" &
 WATCH1_PID=$!
-"$CHATD_BIN" --ws-ticket "$TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
+WATCH2_TICKET=$(mint_ticket)
+"$CHATD_BIN" --ws-ticket "$WATCH2_TICKET" watch >"$WATCH2_OUT" 2>"$WATCH2_ERR" &
 WATCH2_PID=$!
 
 # Phase-0 simplification: a brief sleep to let the WebSocket dials complete
@@ -162,7 +159,8 @@ sleep 0.5
 
 MSG="smoke-$$-$(date +%s%N)"
 echo "[smoke] sending message: ${MSG}"
-"$CHATD_BIN" --ws-ticket "$TICKET" send "$MSG"
+SEND_TICKET=$(mint_ticket)
+"$CHATD_BIN" --ws-ticket "$SEND_TICKET" send "$MSG"
 
 # Poll up to ~5s for both files to contain the message.
 deadline=$(( $(date +%s) + 5 ))
