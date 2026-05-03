@@ -225,13 +225,7 @@ describe("useMessages", () => {
       expect(listMessagesMock).toHaveBeenCalledTimes(2);
     });
     await waitFor(() => {
-      expect(result.current.messages.map((m) => m.id)).toEqual([
-        "M1",
-        "M2",
-        "M3",
-        "M4",
-        "M5",
-      ]);
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M1", "M2", "M3", "M4", "M5"]);
     });
   });
 
