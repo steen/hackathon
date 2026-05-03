@@ -1,0 +1,114 @@
+name: prd-to-plans
+description: |
+  Use when: You have a PRD markdown file and want to generate implementation plans organized by phases and features.
+  Triggers: User invokes with a PRD path (default: specs/PRD.md), or phrases like "prd to plans", "generate plans from PRD", "create phase and feature plans".
+  Does: Parses the PRD to extract phases, requirements, and deliverables; generates one phase plan per phase and one feature plan per deliverable under specs/plans/; creates an index; validates that every requirement ID and deliverable is covered; appends a Planning entry to CHANGELOG.md.
+  NOT for: Committing the generated files, pushing branches, or opening a pull request — this workflow only writes markdown files locally.
+
+nodes:
+  - id: parse-prd
+    command: prd-parse
+    output_format:
+      type: json
+    allowed_tools: [Read, Bash, Glob]
+
+  - id: generate-phase-plans
+    command: prd-generate-phase-plans
+    depends_on: [parse-prd]
+    allowed_tools: [Read, Write, Bash]
+    denied_tools: [Edit]
+
+  - id: generate-feature-plans
+    command: prd-generate-feature-plans
+    depends_on: [parse-prd]
+    allowed_tools: [Read, Write, Bash]
+    denied_tools: [Edit]
+
+  - id: generate-index
+    command: prd-generate-index
+    depends_on: [generate-phase-plans, generate-feature-plans]
+    allowed_tools: [Read, Write, Bash, Glob]
+    denied_tools: [Edit]
+
+  - id: validate-coverage
+    depends_on: [generate-index]
+    runtime: bun
+    script: |
+      import { readdirSync, readFileSync, existsSync } from "fs";
+      import { join } from "path";
+
+      const data = $parse-prd.output;
+      const requirements: { id: string; description: string }[] = data.requirements ?? [];
+      const phases: { number: number; deliverables: string[] }[] = data.phases ?? [];
+
+      const plansDir = "specs/plans";
+      const featureFiles: string[] = [];
+      let allFeatureContent = "";
+
+      function walk(dir: string) {
+        if (!existsSync(dir)) return;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const fp = join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(fp);
+          } else if (
+            entry.name.endsWith(".md") &&
+            entry.name !== "README.md" &&
+            !/^phase-\d+-/.test(entry.name)
+          ) {
+            featureFiles.push(fp);
+            allFeatureContent += "\n" + readFileSync(fp, "utf-8");
+          }
+        }
+      }
+      walk(plansDir);
+
+      const missingReqs: string[] = [];
+      for (const req of requirements) {
+        const escaped = req.id.replace(/[.\-]/g, "\\$&");
+        const re = new RegExp("\\b" + escaped + "\\b");
+        if (!re.test(allFeatureContent)) missingReqs.push(req.id);
+      }
+
+      const missingDeliverables: string[] = [];
+      for (const phase of phases) {
+        const phaseDir = join(plansDir, `phase-${phase.number}`);
+        let phaseContent = "";
+        if (existsSync(phaseDir)) {
+          for (const f of readdirSync(phaseDir)) {
+            if (f.endsWith(".md")) {
+              phaseContent += readFileSync(join(phaseDir, f), "utf-8");
+            }
+          }
+        }
+        const phaseLower = phaseContent.toLowerCase();
+        for (const d of phase.deliverables ?? []) {
+          const words = d.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3);
+          if (words.length === 0) continue;
+          const hits = words.filter((w) => phaseLower.includes(w)).length;
+          const threshold = Math.max(1, Math.ceil(words.length / 2));
+          if (hits < threshold) {
+            missingDeliverables.push(`Phase ${phase.number}: ${d}`);
+          }
+        }
+      }
+
+      console.log("=== Coverage report ===");
+      console.log(`PRD revision:        ${data.prd_revision ?? "unknown"}`);
+      console.log(`Requirements:        ${requirements.length}`);
+      console.log(`Feature plan files:  ${featureFiles.length}`);
+      console.log(`Missing requirement IDs: ${missingReqs.length}`);
+      for (const r of missingReqs) console.log(`  - ${r}`);
+      console.log(`Uncovered deliverables:  ${missingDeliverables.length}`);
+      for (const d of missingDeliverables) console.log(`  - ${d}`);
+
+      if (missingReqs.length > 0 || missingDeliverables.length > 0) {
+        console.error("FAILED: coverage gaps detected");
+        process.exit(1);
+      }
+      console.log("OK: full coverage");
+
+  - id: update-changelog
+    command: prd-update-changelog
+    depends_on: [validate-coverage]
+    allowed_tools: [Read, Edit, Write, Bash]
