@@ -31,6 +31,11 @@ const (
 	SendRatePerSec = 10.0
 )
 
+// MessageBodyLimit caps the decoded chat-message body (PRD §9, SEC-8).
+// Mirrors internal/http.MessageBodyLimit; the WS path enforces it
+// independently so wsapi has no HTTP-side dependency.
+const MessageBodyLimit = 4 * 1024
+
 // Config carries the per-handler dependencies that vary between
 // production wiring and tests. OriginPatterns is forwarded to
 // coder/websocket.AcceptOptions; same-origin (Host == Origin) is
@@ -38,11 +43,6 @@ const (
 type Config struct {
 	OriginPatterns []string
 }
-
-// MessageBodyLimit caps the decoded chat-message body (PRD §9, SEC-8).
-// Mirrors httpx.MessageBodyLimit; the WS path enforces it independently
-// so wsapi has no HTTP-side dependency.
-const MessageBodyLimit = 4 * 1024
 
 // connSubscriber bridges hub.Subscriber to a websocket.Conn via a buffered
 // queue so a slow client cannot stall the hub. When the queue is full the
@@ -97,9 +97,9 @@ func (c *connSubscriber) close() {
 //
 // Each connection subscribes to one channel for its lifetime:
 // defaultChannel by default, or the value of the ?channel= query
-// parameter when present (channels-and-messages feature). A richer
-// frame-based subscribe protocol can layer on top later without
-// breaking this contract.
+// parameter when present (channels-and-messages feature). The PRD's
+// typed {type:subscribe,...} frame protocol can layer on top later
+// without breaking this contract.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
@@ -139,6 +139,8 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		if err != nil {
 			return
 		}
+		// CloseNow's error is non-actionable in defer: by the time it returns,
+		// the underlying TCP connection is gone either way.
 		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(ReadLimitBytes)
 

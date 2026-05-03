@@ -1,4 +1,4 @@
-package httpx
+package http
 
 import (
 	"bytes"
@@ -35,7 +35,7 @@ func BodyCap(next http.Handler) http.Handler {
 				WriteBodyTooLarge(w)
 				return
 			}
-			WriteError(w, "bad_request", "could not read request body", http.StatusBadRequest)
+			WriteError(w, http.StatusBadRequest, CodeBadRequest, "could not read request body")
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(buf))
@@ -56,11 +56,11 @@ func IsBodyTooLarge(err error) bool {
 
 // WriteBodyTooLarge writes the canonical 413 envelope.
 func WriteBodyTooLarge(w http.ResponseWriter) {
-	WriteError(w, "body_too_large", "request body exceeds 16 KiB limit", http.StatusRequestEntityTooLarge)
+	WriteError(w, http.StatusRequestEntityTooLarge, "body_too_large", "request body exceeds 16 KiB limit")
 }
 
 // WriteMessageTooLarge writes the canonical 400 envelope for an
 // oversize chat-message body (SEC-8, REST path).
 func WriteMessageTooLarge(w http.ResponseWriter) {
-	WriteError(w, "message_too_large", "message body exceeds 4 KiB limit", http.StatusBadRequest)
+	WriteError(w, http.StatusBadRequest, "message_too_large", "message body exceeds 4 KiB limit")
 }

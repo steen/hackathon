@@ -18,13 +18,13 @@ type authStore struct{ db *sql.DB }
 
 func newAuthStore(db *sql.DB) *authStore { return &authStore{db: db} }
 
-// ErrUsernameTaken is returned by CreateUser when the UNIQUE constraint on
-// users.username trips, so the handler can return a 409 envelope without
-// exposing the SQL error.
+// ErrUsernameTaken is returned by CreateUser when the UNIQUE constraint
+// on users.username trips so the handler can return a 409 envelope
+// without exposing the SQL error.
 var ErrUsernameTaken = errors.New("auth_store: username already taken")
 
-// CreateUser inserts a new user row. Returns ErrUsernameTaken on a uniqueness
-// collision so the handler can map it to a 409 envelope.
+// CreateUser inserts a new user row. Returns ErrUsernameTaken when the
+// UNIQUE constraint on users.username trips.
 func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash string, now time.Time) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO users(id, username, password_hash, token_version, created_at)

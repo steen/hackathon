@@ -18,7 +18,6 @@ import (
 	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
 	httpapi "hackathon/apps/server/internal/http"
-	"hackathon/apps/server/internal/httpx"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/ratelimit"
 	"hackathon/apps/server/internal/repo"
@@ -28,7 +27,7 @@ import (
 const (
 	portEnv           = "CHAT_SERVER_PORT"
 	dbPathEnv         = "CHAT_DB_PATH"
-	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // env-var name, not a credential
+	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
 	inviteCodeEnv     = "CHAT_INVITE_CODE"
 	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
@@ -42,9 +41,11 @@ func main() {
 	}
 }
 
-// repository is the process-wide SQLite handle for the phase-1 features
+// repository is the process-wide SQLite handle for later phase-1 features
 // (auth, channels, messages). Nil when CHAT_DB_PATH is unset (phase-0 boot
 // path, e.g. scripts/smoke.sh, must not require a SQLite file on disk).
+//
+//nolint:unused // wired into run() once phase-1 handlers land.
 var repository *repo.Repo
 
 func run() error {
@@ -83,6 +84,7 @@ func run() error {
 
 	h := hub.New()
 	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
 	allowedOrigins := parseAllowedOrigins(os.Getenv(allowedOriginsEnv))
 	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(allowedOrigins))
 	wsCfg := wsapi.Config{OriginPatterns: allowedOrigins}
@@ -129,14 +131,13 @@ func run() error {
 	}
 
 	mux.HandleFunc("/ws", wsapi.Handler(h, tickets, wsCfg))
-	mux.HandleFunc("/debug/subs", wsapi.DebugSubsHandler(h))
 
 	// ReadHeaderTimeout caps a slow upgrade handshake (Slowloris). IdleTimeout
 	// caps post-upgrade silence on idle keep-alives. WriteTimeout stays zero —
 	// it would fight the WebSocket upgrade's hijacked connection.
 	srv := &http.Server{
 		Addr:              listenAddr,
-		Handler:           httpx.BodyCap(mux),
+		Handler:           httpapi.BodyCap(mux),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
@@ -144,22 +145,14 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	listenErr := make(chan error, 1)
 	go func() {
 		log.Printf("chat server listening on %s", listenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			listenErr <- err
+			log.Fatalf("listen: %v", err)
 		}
-		close(listenErr)
 	}()
 
-	select {
-	case <-ctx.Done():
-	case err := <-listenErr:
-		if err != nil {
-			return fmt.Errorf("listen: %w", err)
-		}
-	}
+	<-ctx.Done()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

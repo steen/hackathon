@@ -32,9 +32,8 @@ type ChannelsHandlers struct {
 	deps ChannelsDeps
 }
 
-// NewChannelsHandlers wires the dependencies the channels handlers need.
-// Defaults Now to time.Now when unset so production callers do not have to
-// think about clocks.
+// NewChannelsHandlers wires the dependency bag. Defaults Now to time.Now
+// when unset so production callers do not have to think about clocks.
 func NewChannelsHandlers(deps ChannelsDeps) *ChannelsHandlers {
 	if deps.Now == nil {
 		deps.Now = time.Now

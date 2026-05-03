@@ -47,9 +47,17 @@ describe("smoke-test: wiring + script structure", () => {
     // reaches 2 (5s budget). Catches a regression where someone reverts to a
     // sleep-based wait.
     const body = smokeBody();
-    expect(body.includes("/debug/subs"), "must poll /debug/subs to wait for subscribers").toBe(true);
-    expect(body.includes("channel=%23general"), "must poll /debug/subs with URL-encoded #general").toBe(true);
-    expect(/EXPECTED_SUBS=\s*2\b/.test(body), "must wait for exactly 2 subscribers (one per watcher)").toBe(true);
+    expect(body.includes("/debug/subs"), "must poll /debug/subs to wait for subscribers").toBe(
+      true,
+    );
+    expect(
+      body.includes("channel=%23general"),
+      "must poll /debug/subs with URL-encoded #general",
+    ).toBe(true);
+    expect(
+      /EXPECTED_SUBS=\s*2\b/.test(body),
+      "must wait for exactly 2 subscribers (one per watcher)",
+    ).toBe(true);
   });
 
   it("TestAC2_smoke_test_script_uses_strict_mode_and_explicit_failure_output", () => {
@@ -83,10 +91,16 @@ describe("smoke-test: wiring + script structure", () => {
     // bounded wait. Catches a regression where someone simplifies cleanup
     // back to a single `kill $pid; wait` (which deadlocks on a wedged child).
     const body = smokeBody();
-    expect(/kill\s+-KILL\s+"\$pid"/.test(body) || /kill\s+-9\s+"\$pid"/.test(body), "cleanup must escalate to SIGKILL for children that ignore SIGTERM").toBe(true);
+    expect(
+      /kill\s+-KILL\s+"\$pid"/.test(body) || /kill\s+-9\s+"\$pid"/.test(body),
+      "cleanup must escalate to SIGKILL for children that ignore SIGTERM",
+    ).toBe(true);
     // The escalation must be guarded by a kill -0 liveness check so we don't
     // -KILL an already-exited PID (which would race with `wait`).
-    expect(/kill\s+-0\s+"\$pid"/.test(body), "cleanup must probe with kill -0 before escalating to SIGKILL").toBe(true);
+    expect(
+      /kill\s+-0\s+"\$pid"/.test(body),
+      "cleanup must probe with kill -0 before escalating to SIGKILL",
+    ).toBe(true);
   });
 
   it("TestAC4_smoke_test_script_is_wired_into_root_package_json_test_script", () => {

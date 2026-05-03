@@ -58,9 +58,9 @@ type userEntry struct {
 	updatedAt time.Time
 }
 
-// NewUserLimiter returns a limiter using cfg. Zero-valued fields fall back to
-// the defaults documented on UserLimiterConfig so callers can pass a partial
-// struct.
+// NewUserLimiter constructs a per-username backoff tracker with sensible
+// defaults for any zero-valued cfg field (Step 500ms, MaxDelay 2s,
+// GraceFailures 0, ResetAfter 5m, Now time.Now).
 func NewUserLimiter(cfg UserLimiterConfig) *UserLimiter {
 	if cfg.Step <= 0 {
 		cfg.Step = 500 * time.Millisecond

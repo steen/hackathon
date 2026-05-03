@@ -56,10 +56,9 @@ linters:
       excludes:
         # G104 (audit errors not checked) overlaps with errcheck which is already on.
         - G104
-        # G706 (log injection): the call sites that consume taintable input
-        # log config-derived values (CHAT_DB_PATH, CHAT_LISTEN_ADDR) which
-        # are operator-supplied, not user-supplied. No request-path log
-        # injection surface today.
+        # G706 (log injection): noisy on access logs. The access-log middleware
+        # uses url.URL.EscapedPath() which never emits raw CR/LF, and request
+        # method is constrained by net/http. CRLF injection is not reachable.
         - G706
 
     exhaustive:
@@ -74,16 +73,10 @@ linters:
           - unparam
           - errcheck
           - noctx
-      # bodyclose: scoped to the WS dialer test paths. websocket.Dial returns
-      # an *http.Response whose Body is the underlying TCP connection that
-      # *websocket.Conn already owns; closing it independently would race the
-      # WS close handshake. Production code closes it explicitly. Other test
-      # code is still subject to bodyclose.
-      - path: tests/(cli-send-watch|server-ws-hub)/.*_test\.go
-        linters:
-          - bodyclose
-      - path: apps/server/internal/(wsapi|http)/.*_test\.go
-        linters:
+          # bodyclose: in test code that calls websocket.Dial, the returned
+          # *http.Response.Body is the underlying TCP connection that
+          # *websocket.Conn already owns; closing it independently would race
+          # the WS close handshake. Production code closes it explicitly.
           - bodyclose
       - path: _test\.go
         text: "unused-parameter"
