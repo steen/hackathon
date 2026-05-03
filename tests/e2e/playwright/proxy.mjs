@@ -153,6 +153,24 @@ function startProxy({ distDir, fixtureBaseUrl }) {
       if (upHead.length > 0) sock.write(upHead);
       upSock.pipe(sock);
       sock.pipe(upSock);
+      // Concurrent WS closes (e.g. useMessages + usePresence on browser
+      // teardown) surface as ECONNRESET on one half of the pipe; without
+      // listeners node treats it as an unhandled 'error' and crashes the
+      // proxy process, taking the test runner with it.
+      sock.on("error", () => {
+        try {
+          upSock.destroy();
+        } catch {
+          /* ignore */
+        }
+      });
+      upSock.on("error", () => {
+        try {
+          sock.destroy();
+        } catch {
+          /* ignore */
+        }
+      });
     });
     upstream.on("error", () => {
       try {
