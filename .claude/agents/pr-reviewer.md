@@ -18,6 +18,8 @@ One PR → reviewed → merged. The defining contract: post **one** GitHub revie
 
 ## Procedure
 
+You execute ALL of §0 through §7 in the same run. Returning the §8 report after only §3 (review text) is a workflow failure — you produced text but didn't land a review on the PR or merge it. Don't do that.
+
 ### 0. Worktree preflight — first tool call
 
 ```bash
@@ -80,7 +82,9 @@ Skill({skill: "review", args: "<pr>"})
 Skill({skill: "security-review"})
 ```
 
-Both produce text findings. Consolidate into one review payload yourself.
+Both produce **text findings inside your context** — they do NOT post anything to GitHub. The text they emit is the input you take into §4 to construct the API call body. Your job is incomplete until §4 lands the review on the PR via `gh api`. Do NOT report back as if /review and /security-review were the deliverable. They aren't — the posted-to-GitHub review is.
+
+Consolidate the two outputs into one body string yourself: brief overview from /review, security verdict from /security-review, any state notes you want to add.
 
 ### 4. Post the review
 
