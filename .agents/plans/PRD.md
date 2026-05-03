@@ -43,12 +43,14 @@ Privacy-respecting, friend-scale chat that you fully control — accessible from
 ### In Scope
 
 **Core functionality**
-- User registration and login (username + password)
+- User registration (invite-code gated) and login (username + password)
 - Persistent text channels (create + list)
 - Real-time message send/receive over WebSocket
 - Per-channel message history (paginated)
 - Online presence (who is currently connected)
 - Default `#general` channel seeded on first run
+- Server-side logout (JWT invalidation via per-user token version)
+- Auth audit log (register / login success / login fail / logout)
 
 **Technical**
 - Go HTTP + WebSocket server, single binary, embedded web assets
@@ -102,6 +104,8 @@ Each story has an ID (`US-N`) used to tag tests and demo steps. A story is "cove
 - **US-8** — As a scripter, I want a CLI command, so I can pipe automated notifications into chat.
 - **US-9** — As a non-terminal user, I want a web UI, so I don't need to install anything.
 - **US-10** — As the host, I want a single binary with env-var config, so deploying for friends is trivial.
+- **US-11** — As the host, I want registration gated by an invite code, so a publicly reachable instance is not joinable by strangers.
+- **US-12** — As a user, I want logout to actually invalidate my token server-side, so a stolen token stops working when I notice.
 
 ## 6. Core Architecture & Patterns
 
@@ -249,38 +253,98 @@ Vite + React 18 + TypeScript + Zustand + Tailwind.
 
 ## 9. Security & Configuration
 
+This is a security-critical app — a friend-group chat that may eventually sit behind a reverse proxy on the public internet. The MVP must not be the soft target.
+
+### Threat model
+
+- **In-scope attackers**: unauthenticated network attacker (port-scanning, scripted login/register attempts, XSS payloads in messages); logged-in user attempting to escalate, enumerate, flood, or deface.
+- **Trust boundary**: anyone holding a valid invite code + account is trusted with read/write to all channels in MVP (no per-channel ACLs).
+- **Out of scope**: host compromise, malicious admin, nation-state, physical access, side-channel attacks on the host.
+
 ### Authentication
 
-- Username + bcrypt-hashed password (cost 10).
-- JWT (HS256) signed with `CHAT_JWT_SECRET`; 7-day TTL.
-- HTTP: `Authorization: Bearer <token>`.
-- WebSocket: `?token=<jwt>` on upgrade URL (browsers can't set headers on `WebSocket`).
+- Username + bcrypt-hashed password (cost 10, OWASP floor; tunable via `CHAT_BCRYPT_COST`).
+- Password policy: minimum 10 characters. Bcrypt truncates input at 72 bytes — server rejects passwords > 72 bytes with a clear error rather than silently truncating.
+- Constant-time login: on unknown username, server still runs a bcrypt compare against a fixed dummy hash, so response time does not enumerate accounts.
+- Login error messages are generic ("invalid username or password") and identical for unknown-user and wrong-password cases.
+- JWT (HS256) signed with `CHAT_JWT_SECRET`; 7-day TTL; claims include `sub` (user ID) and `tv` (token version).
+- **Server-side revocation**: each user row has a `token_version` integer. JWT `tv` claim must equal current `token_version` or the token is rejected. `POST /api/auth/logout` and any future password change increment it.
+- HTTP: `Authorization: Bearer <token>`. Tokens are **never** stored in cookies (eliminates CSRF on REST). Web client holds the token in memory; optionally mirrored to `localStorage` for reload survival.
+- WebSocket: browsers cannot set `Authorization` on `WebSocket`. Auth flow:
+  1. Client `POST /api/auth/ws-ticket` (Bearer) → returns single-use, 30s ticket bound to the user.
+  2. Client opens `/ws?ticket=<ticket>`.
+  3. Server consumes the ticket atomically (one-shot) and upgrades.
+- The 7-day session JWT never appears in URLs, access logs, or browser history. The 30s ticket may, but its blast radius is one connection within 30 seconds.
+
+### Registration gating
+
+- Registration requires `CHAT_INVITE_CODE` env var to be set; client must present matching `invite_code` in the register payload.
+- Without this, a publicly reachable instance is open to the internet. Server refuses to start with both `CHAT_INVITE_CODE` unset *and* `CHAT_ALLOW_PUBLIC_BIND=1`.
+
+### Network exposure
+
+- Default bind: `127.0.0.1:8080`.
+- Server refuses to bind to a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1` is set explicitly. Prevents accidental exposure from a typo in `CHAT_LISTEN_ADDR`.
+- WebSocket upgrade enforces same-origin by default (compares `Origin` header to the request host). `CHAT_ALLOWED_ORIGINS` (comma-separated) overrides for reverse-proxy deployments.
+- Login rate limit is keyed on source IP; behind a proxy this collapses to one IP. `X-Forwarded-For` is honored **only** when `CHAT_TRUSTED_PROXY=1` is set.
+
+### Rate limits & resource bounds
+
+- **Login**: 10 attempts / 5 min / source IP (in-memory token bucket). Plus per-username delay (linear backoff up to ~2s) to slow targeted attacks without enabling lockout-DoS.
+- **Registration**: 5 attempts / 15 min / source IP.
+- **WebSocket read limit**: 64 KiB per frame (`Conn.SetReadLimit`).
+- **Per-connection send rate limit**: 10 msg/s, burst 30. Excess frames drop the offending connection with a `1008` policy-violation close.
+- **Message body cap**: 4 KiB, enforced in the handler before reaching the service. Same cap on REST and WS paths.
+- **REST request body cap**: 16 KiB via `http.MaxBytesReader` on every handler.
+- **WS `send`**: server validates the channel exists and rejects sends to non-existent channels rather than silently dropping.
+
+### Input handling & rendering
+
+- Parameterized SQL only — no string concatenation in queries.
+- Validation at handler boundary; services trust their inputs.
+- Message bodies are **rendered as plain text** in the web client. No `dangerouslySetInnerHTML`. No markdown. No auto-linkification in MVP. One missed escape on user-controlled text = stored XSS hitting every client.
+- Server sets these response headers on all routes:
+  - `Content-Security-Policy: default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`
+  - `X-Content-Type-Options: nosniff`
+  - `Referrer-Policy: no-referrer`
+  - `X-Frame-Options: DENY`
+
+### Secrets & config hygiene
+
+- `CHAT_JWT_SECRET`: required, ≥32 ASCII bytes. Server refuses to start if it is missing, shorter than 32 bytes, or matches any of a hardcoded denylist of obvious dev defaults (e.g. `change-me`, `secret`, `dev`, repeated single chars).
+- `CHAT_INVITE_CODE`: required when registration is enabled.
+- Server logs never include passwords, JWTs, or tickets. Access-log middleware strips `token` and `ticket` query parameters before writing the log line.
+- Error envelope `error.message` is user-safe — never SQL errors, stack traces, file paths, or driver messages. The `error.code` is a stable enum; details go to server logs only.
+
+### Persistence hygiene
+
+- SQLite file is created with mode `0600`; parent directory should be `0700`. Server logs a warning if it observes wider modes.
+- README documents `sqlite3 chat.db ".backup chat.bak"` for cold backups.
+
+### Audit log
+
+- Append-only table `auth_events(id, user_id NULLABLE, username, event, source_ip, user_agent, created_at)` capturing: `register`, `login_success`, `login_failure`, `logout`, `token_version_bump`. No passwords, no tokens.
 
 ### Configuration (env vars)
 
 | Var | Default | Notes |
 |---|---|---|
-| `CHAT_LISTEN_ADDR` | `127.0.0.1:8080` | Local-only by default |
-| `CHAT_DB_PATH` | `./chat.db` | SQLite file path |
-| `CHAT_JWT_SECRET` | *(required)* | ≥32 bytes; server refuses to start without it |
+| `CHAT_LISTEN_ADDR` | `127.0.0.1:8080` | Non-loopback requires `CHAT_ALLOW_PUBLIC_BIND=1` |
+| `CHAT_ALLOW_PUBLIC_BIND` | `0` | Must be `1` to bind a non-loopback address |
+| `CHAT_DB_PATH` | `./chat.db` | SQLite file path; created `0600` |
+| `CHAT_JWT_SECRET` | *(required)* | ≥32 bytes; not in dev-default denylist |
+| `CHAT_BCRYPT_COST` | `10` | OWASP floor; raise on faster hosts |
+| `CHAT_INVITE_CODE` | *(required)* | Gate on registration; required when bound publicly |
+| `CHAT_ALLOWED_ORIGINS` | *(same-origin)* | Comma-separated; for reverse-proxy deploys |
+| `CHAT_TRUSTED_PROXY` | `0` | If `1`, honor `X-Forwarded-For` for rate-limit IP |
 | `CHAT_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
-### Security in MVP scope
+### Security explicitly out of MVP scope
 
-- bcrypt password hashing.
-- Parameterized SQL only.
-- JWT validation on every protected route and WS upgrade.
-- WebSocket origin check against `CHAT_LISTEN_ADDR` host.
-- Login rate limit (in-memory, 10 attempts / 5 min / source IP). Keyed on IP, not username, so failed attempts cannot be used to enumerate accounts.
-- Login error messages do not leak whether the username exists.
-- Server logs never include passwords or JWTs.
-
-### Security out of MVP scope
-
-- TLS — local deploy only.
-- E2E encryption.
-- Encryption at rest.
+- TLS — terminate at a reverse proxy if exposed; local deploy otherwise.
+- E2E encryption, encryption at rest.
 - 2FA, account recovery, email verification.
+- Per-channel ACLs / private channels — all authenticated users see all channels in MVP.
 
 ## 10. API Specification
 
@@ -294,14 +358,20 @@ Base URL: `http://127.0.0.1:8080`. All JSON responses use the standard envelope.
 ### Auth
 
 ```
-POST /api/auth/register   { "username": "...", "password": "..." }
+POST /api/auth/register   { "username": "...", "password": "...", "invite_code": "..." }
                           → { "token": "...", "user": { "id", "username" } }
 
 POST /api/auth/login      { "username": "...", "password": "..." }
                           → { "token": "...", "user": { ... } }
 
+POST /api/auth/logout     (Bearer)
+                          → { "ok": true }                  # bumps token_version, invalidates all tokens for the user
+
 GET  /api/auth/me         (Bearer)
                           → { "user": { ... } }
+
+POST /api/auth/ws-ticket  (Bearer)
+                          → { "ticket": "...", "expires_at": "..." }   # single-use, 30s TTL, bound to user
 ```
 
 ### Channels
@@ -323,8 +393,10 @@ POST /api/channels/{id}/messages
 ### WebSocket
 
 ```
-GET /ws?token=<jwt>
+GET /ws?ticket=<ws-ticket>
 ```
+
+The ticket is obtained via `POST /api/auth/ws-ticket`. Tickets are single-use, 30-second TTL, and bound to the issuing user. The session JWT itself is never accepted as a query parameter.
 
 Inbound (client → server):
 ```json
@@ -358,6 +430,28 @@ Outbound (server → client):
 | US-8 | CLI `send` followed by CLI `watch` round-trips a message (smoke script) |
 | US-9 | Web manual demo: login, send, receive across two browser windows |
 | US-10 | Server boots from a clean directory with only env vars set |
+| US-11 | Register without (or with wrong) `invite_code` returns generic auth error; with correct code, succeeds |
+| US-12 | After `POST /api/auth/logout`, the previously issued JWT is rejected on `/api/auth/me` and `/api/auth/ws-ticket` |
+
+### Security checks (must pass before MVP ships)
+
+| Check | How |
+|---|---|
+| SEC-1 | Server refuses to start with missing/short/denylisted `CHAT_JWT_SECRET` |
+| SEC-2 | Server refuses non-loopback bind unless `CHAT_ALLOW_PUBLIC_BIND=1` |
+| SEC-3 | Login response time for unknown user is within 20% of wrong-password time (constant-time check) |
+| SEC-4 | Login error message is byte-identical for unknown-user and wrong-password |
+| SEC-5 | 11th login attempt within 5 min from one IP is rejected with 429 |
+| SEC-6 | WS frame > 64 KiB closes the connection with `1009` |
+| SEC-7 | REST body > 16 KiB returns 413 |
+| SEC-8 | Message body > 4 KiB returns 400 on REST and `error` frame on WS |
+| SEC-9 | Stored XSS attempt (`<script>` and `<img onerror>`) renders as text in web client |
+| SEC-10 | Response headers include CSP, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` |
+| SEC-11 | Access logs of a login + WS upgrade contain no `token` or `ticket` value |
+| SEC-12 | WS `?ticket=` rejected on second use within TTL |
+| SEC-13 | `auth_events` table records register, login success/fail, logout for a scripted run |
+| SEC-14 | SQLite file is mode `0600` after first boot |
+| SEC-15 | `chatd logout` then reusing the cached token returns 401 (covers US-12) |
 
 ### Quality gates
 
@@ -395,13 +489,20 @@ Deliverables:
 **Goal**: real users, channels, messages persisted to SQLite.
 
 Deliverables:
-- SQLite schema (`migrations/0001_init.sql`).
+- SQLite schema (`migrations/0001_init.sql`) including `users.token_version` and `auth_events` table.
 - ULID generation.
-- `internal/auth`: bcrypt + JWT.
-- Auth endpoints: register / login / me.
-- Channels endpoints.
-- Messages endpoints (REST + WS).
-- Tests for US-1, US-2, US-3, US-4, US-5, US-6.
+- `internal/auth`: bcrypt + JWT with `tv` claim; constant-time login path; password length policy.
+- Auth endpoints: register (invite-code gated) / login / me / logout / ws-ticket.
+- Channels endpoints; messages endpoints (REST + WS).
+- Hardening that must land in Phase 1 (not Phase 3):
+  - Startup checks: JWT secret length + dev-default denylist; non-loopback bind requires `CHAT_ALLOW_PUBLIC_BIND=1`; registration requires `CHAT_INVITE_CODE`.
+  - Per-IP rate limits on login and registration; per-username login backoff.
+  - WS read limit (64 KiB), per-conn send rate limit, 4 KiB body cap, REST 16 KiB body cap.
+  - Same-origin WS upgrade check; one-shot 30s ws-ticket flow; WS rejects sends to non-existent channels.
+  - Access-log middleware strips `token` and `ticket` query params; user-safe error envelope.
+  - SQLite file created `0600`.
+  - Response security headers (CSP, nosniff, no-referrer, frame-deny).
+- Tests for US-1, US-2, US-3, US-4, US-5, US-6, US-11, US-12 and SEC-1…SEC-15.
 
 **Validation**: smoke test still green (now over authenticated WS).
 
@@ -457,6 +558,13 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 | WebSocket hub deadlocks / leaks | Medium | High | Per-connection bounded write channel; close on slow consumer; tests assert subscribe/unsubscribe count under churn |
 | Scope creep into post-MVP features | High | High | This PRD is the contract. Anything in §13 stays out until §11 ships. |
 | SQLite write-lock contention under multiple writers | Low | Low | Single-process server with serialized writes; friend-scale traffic is far below SQLite's threshold |
+| Accidental public exposure of an unhardened instance | Medium | Critical | Loopback bind by default; non-loopback requires `CHAT_ALLOW_PUBLIC_BIND=1`; registration requires `CHAT_INVITE_CODE`; same-origin WS check |
+| Stored XSS in message body defaces all clients | Medium | High | Plain-text rendering only; no `dangerouslySetInnerHTML`; strict CSP; no markdown/auto-link in MVP |
+| Stolen JWT usable for 7 days | Medium | High | `token_version` claim; logout and password change bump it; all prior tokens reject |
+| JWT leaks via URL (logs / history / Referer) | Medium | Medium | WS uses one-shot 30s ticket, not the session JWT; access-log middleware strips `token`/`ticket` query params |
+| Account enumeration via login timing or error text | Medium | Medium | Constant-time bcrypt against dummy hash on unknown user; identical error message |
+| Brute-force login or registration spam | Medium | Medium | Per-IP rate limits on both; per-username linear backoff on login |
+| WS abuse: oversize frames, flooding, channel-ID spoofing | Medium | High | 64 KiB read limit; 10 msg/s send limit; channel existence check; 4 KiB body cap |
 
 ## 15. Appendix
 
