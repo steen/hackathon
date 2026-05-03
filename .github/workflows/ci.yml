@@ -59,6 +59,9 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
+          # Pinned to v2.12.x — the v2 line is the schema this .golangci.yml
+          # targets (`version: "2"`). Bump deliberately and re-run locally
+          # before changing.
           version: v2.12.1
           args: --timeout=5m
 
