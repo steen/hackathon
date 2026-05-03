@@ -10,6 +10,13 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 17:30Z — Startup config checks (phase 1, SEC-1 + SEC-2 + US-11) (#28)
+
+### Added
+- `apps/server/internal/config` package: loads `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOW_PUBLIC_BIND` from env and runs `Validate()` once at startup. Refuses to boot when the JWT secret is missing, shorter than 32 bytes, non-ASCII, a single repeated character, low-entropy (fewer than 5 distinct bytes), or matches a dev-default denylist (`change-me`, `secret`, `dev`, `password`, `hackathon`, etc., padded variants included). Refuses to bind a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1`. Refuses to start without an invite code while registration is enabled.
+- `apps/server/main.go` calls `config.Validate()` before any HTTP setup; failures print a non-secret error to stderr and exit 1, success logs each check that passed by name. The validated `cfg.ListenAddr` is now what the server actually binds (with optional `CHAT_SERVER_PORT` overriding only the port) so the SEC-2 loopback enforcement has runtime effect, not just log effect.
+- Tests in `apps/server/internal/config/config_test.go` covering SEC-1 (missing/short/denylisted/repeated/low-entropy/non-ASCII secret), SEC-2 (loopback default, public-bind override, malformed addr), and US-11 startup invite-code enforcement. A leakage test asserts no error message echoes the secret value.
+
 ## 2026-05-03 17:15Z — Body and WebSocket size/rate caps (phase 1) (#27)
 
 ### Added
