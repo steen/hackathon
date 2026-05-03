@@ -68,7 +68,7 @@ func run() error {
 	// keys on the proxy IP, collapsing per-IP buckets into one global bucket.
 	// Surface it loudly when the operator opts into a public bind.
 	if cfg.AllowPublicBind {
-		log.Printf("WARN: %s=1 without a trusted-proxy parser; if you are behind a reverse proxy, IP rate limits will key on the proxy IP (see PRD §9, %s)", config.EnvAllowPublicBind, "CHAT_TRUSTED_PROXY")
+		log.Printf("WARN: %s=1 without a trusted-proxy parser; if you are behind a reverse proxy, IP rate limits will key on the proxy IP (see PRD §9, %s)", config.EnvAllowPublicBind, config.EnvTrustedProxy)
 	}
 
 	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
