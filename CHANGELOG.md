@@ -10,6 +10,12 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## 2026-05-03 16:00Z — Security headers middleware + SQLite 0600 file perms (phase 1)
+
+### Added
+- `apps/server/internal/http/headers_middleware.go` (SEC-10) sets `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, and `X-Frame-Options` on every response. The CSP literal is held verbatim from PRD §9 in a single constant; tests assert byte-for-byte equality with the PRD string and that all four headers appear on 200, 404, and 500 paths.
+- `apps/server/internal/db/perms.go` (SEC-14) exposes `EnsureFile` which pre-creates the SQLite database file with mode `0600` and chmods existing files to `0600` (covers cases where the process umask widened a freshly created file). Test asserts `os.Stat` returns `0600`.
+
 ## 2026-05-03 15:30Z — chatd CLI binary entrypoint + smoke test (phase 0) (#18)
 
 ### Added
