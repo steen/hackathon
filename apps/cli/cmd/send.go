@@ -2,25 +2,47 @@ package cmd
 
 import (
 	"context"
+	"flag"
+	"fmt"
+	"io"
 	"strings"
-
-	"github.com/coder/websocket"
 )
 
-// Send writes args (joined by single spaces) as one text frame to the given
-// WebSocket URL and performs a clean close handshake.
-func Send(ctx context.Context, url string, args []string) error {
-	c, resp, err := websocket.Dial(ctx, url, nil)
+// Send implements `chatd send <channel> <message>`. When <message> is
+// "-", the body is read from stdin (terminating newline trimmed). The
+// server's posted-message id is printed to stdout so scripts can chain.
+func Send(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("send", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) < 2 {
+		return fmt.Errorf("usage: chatd send <channel> <message|->")
+	}
+	channel := rest[0]
+	body := strings.Join(rest[1:], " ")
+
+	if body == "-" {
+		raw, err := io.ReadAll(env.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
+		}
+		body = strings.TrimRight(string(raw), "\r\n")
+		if body == "" {
+			return fmt.Errorf("send: stdin produced an empty message")
+		}
+	}
+
+	client, _, err := newClient(env, true)
 	if err != nil {
 		return err
 	}
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
-	}
-	defer func() { _ = c.CloseNow() }()
-
-	if err := c.Write(ctx, websocket.MessageText, []byte(strings.Join(args, " "))); err != nil {
+	msg, err := client.PostMessage(ctx, channel, body)
+	if err != nil {
 		return err
 	}
-	return c.Close(websocket.StatusNormalClosure, "")
+	_, _ = fmt.Fprintln(env.Stdout, msg.ID)
+	return nil
 }
