@@ -40,22 +40,37 @@ const MessageBodyLimit = 4 * 1024
 // production wiring and tests. OriginPatterns is forwarded to
 // coder/websocket.AcceptOptions; same-origin (Host == Origin) is
 // always allowed by the library and does not need to be listed.
+//
+// ChannelLookup, when non-nil, is invoked before websocket.Accept for
+// any requested channel that is not the legacy defaultChannel sentinel
+// (#general). On (false, nil) the upgrade is rejected with HTTP 404
+// "channel not found" before the WebSocket handshake. On a non-nil
+// error the upgrade is rejected with HTTP 500 and the error is logged.
 type Config struct {
 	OriginPatterns []string
+	ChannelLookup  func(ctx context.Context, id string) (bool, error)
 }
 
 // connSubscriber bridges hub.Subscriber to a websocket.Conn via a buffered
 // queue so a slow client cannot stall the hub. When the queue is full the
 // message is dropped for that subscriber.
+//
+// userID and channel are bound at connect time so messages.user_id writes
+// can attribute the sender (gap-D wiring). Both are read-only after
+// construction; no mutex needed.
 type connSubscriber struct {
-	send chan []byte
-	done chan struct{}
+	send    chan []byte
+	done    chan struct{}
+	userID  string
+	channel string
 }
 
-func newConnSubscriber() *connSubscriber {
+func newConnSubscriber(userID, channel string) *connSubscriber {
 	return &connSubscriber{
-		send: make(chan []byte, sendBuffer),
-		done: make(chan struct{}),
+		send:    make(chan []byte, sendBuffer),
+		done:    make(chan struct{}),
+		userID:  userID,
+		channel: channel,
 	}
 }
 
@@ -135,6 +150,25 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 			channel = c
 		}
 
+		// Reject upgrades for unknown channels with HTTP 404 BEFORE the
+		// WebSocket handshake. The legacy defaultChannel sentinel skips
+		// the lookup so phase-0 boot paths and tests without a DB keep
+		// working. Use http.Error (text/plain) — the JSON envelope lives
+		// in internal/http and importing it here would create a cycle
+		// (the http package's ws_broadcast_test.go imports wsapi).
+		if cfg.ChannelLookup != nil && channel != defaultChannel {
+			ok, err := cfg.ChannelLookup(r.Context(), channel)
+			if err != nil {
+				log.Printf("ws channel lookup: %v", err)
+				http.Error(w, "channel lookup failed", http.StatusInternalServerError)
+				return
+			}
+			if !ok {
+				http.Error(w, "channel not found", http.StatusNotFound)
+				return
+			}
+		}
+
 		conn, err := websocket.Accept(w, r, acceptOpts)
 		if err != nil {
 			return
@@ -144,13 +178,7 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(ReadLimitBytes)
 
-		// TODO(channels-and-messages): bind userID onto a per-connection
-		// state struct so messages.user_id writes can attribute the
-		// sender. The redemption above already satisfies SEC-12; this
-		// TODO is the seam for the next feature, not a security gap.
-		_ = userID
-
-		sub := newConnSubscriber()
+		sub := newConnSubscriber(userID, channel)
 		h.Subscribe(channel, sub)
 		defer h.Unsubscribe(channel, sub)
 		defer sub.close()

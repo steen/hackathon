@@ -40,6 +40,22 @@ func (r *Repo) ListChannels(ctx context.Context) ([]Channel, error) {
 	return out, rows.Err()
 }
 
+// ChannelExists reports whether a channel row with the given id exists.
+// Cheaper than GetChannel for hot paths (e.g. the WS upgrade lookup) that
+// don't need the full row. Returns (false, nil) for an unknown id.
+func (r *Repo) ChannelExists(ctx context.Context, id string) (bool, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT 1 FROM channels WHERE id = ? LIMIT 1`, id)
+	var dummy int
+	if err := row.Scan(&dummy); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // GetChannel returns a single channel by id. Returns (nil, nil) when no
 // such row exists so handlers can branch on a missing channel without
 // inspecting sql.ErrNoRows themselves.
