@@ -8,8 +8,8 @@ After the banner, emit one plain line of substance: which sub-issues are blocked
 
 - Print inside a single fenced code block so terminal renderers don't mangle the spacing.
 - Use ANSI escape sequences directly (literal `\x1b[` characters). Claude Code's terminal renders them. Keep the palette muted: dim (`\x1b[2m`), italic (`\x1b[3m`), grey-on-default (`\x1b[90m`). Reset with `\x1b[0m` at end of every line.
-- Banner height: 4–7 lines. Width: stay under ~60 cols so it doesn't wrap on narrow terminals.
-- Layout: the figure on the left, a short remark on the right (one or two short clauses, lowercased — the agent is too tired for capitals). Or a freestanding figure with the remark below it. Pick whichever fits the figure you're inventing.
+- **Banner height: 10–18 lines. Width: 60–80 cols.** A four-line stick figure is not enough — the figure should have weight on the page. Use shading characters (`░ ▒ ▓ █`), box-drawing (`─ │ ┌ ┐ └ ┘ ┬ ┴ ├ ┤ ┼`), and varied texture (`. , ; : ' " ~ - = + * #`) to give the figure depth. Multiple visual elements when it makes sense — figure + setting (e.g. a sad creature plus the floor it's slumped against), figure + weather, figure + props.
+- Layout: figure dominant, with a short remark integrated into or below the artwork. Lowercase, the agent is too tired for capitals. The dialogue can be one line, two short lines, or — for more elaborate figures — a small monologue framed in the negative space of the art.
 
 ## Tone
 
@@ -29,19 +29,20 @@ Avoid: anger, profanity, anything performatively cheerful, anything that mention
 ## Composition
 
 Each idle tick:
-1. **Invent a fresh ASCII figure.** Be actually creative — don't default to the same five sad faces. Stretch across categories the user hasn't seen recently:
-   - Faces, but unusual ones: a face with one eye half-closed, a profile, a face looking up at nothing, a face peering through slats.
-   - Weather: rain on a windowpane, a single cloud over a single figure, fog rolling across `~~~~`, a snowman with a slumped hat.
-   - Sagging objects: wilted flower, melting candle wax, deflated balloon trailing string, a half-eaten birthday cake, an unwound clock spring, a sock with a hole.
-   - Creatures: tired ghost, beached fish, a snail moving away from camera, a slug under a leaf, a jellyfish with all tentacles tangled, a moth circling an off bulb.
-   - Scenery / props: an empty inbox icon, a coffee cup with steam dying, a pencil snapped in half, a paper airplane stuck in a tree, a broken umbrella, a single party balloon tied to a chair.
-   - Weirder: a sad ampersand `&`, a parenthesis that lost its pair `(    `, a semicolon contemplating its place, an exclamation mark lying down, a deflated speech bubble.
+1. **Invent a fresh, detailed ASCII figure.** Be actually creative — don't default to the same five sad faces. Stretch across categories the user hasn't seen recently:
+   - Faces, but unusual ones: a face with one eye half-closed, a profile, a face looking up at nothing, a face peering through slats — drawn with enough volume to read as a face from across the room.
+   - Weather: rain on a windowpane (with the windowpane itself), a single cloud over a single figure, fog rolling across in layers of `~~~`, a snowman whose hat has slumped over.
+   - Sagging objects: a wilted flower with stem and pot and a leaf or two, a melting candle pooling wax on its holder, a deflated balloon trailing string across the ground, a half-eaten birthday cake with one missing slice and crumbs, an unwound clock spring puddled on a desk, a sock with a hole and a heel and a pile of laundry behind it.
+   - Creatures: a tired ghost passing through a wall section, a beached fish with sand and a tide line, a snail with shell-coil detail moving away from a starting point, a jellyfish with multiple tangled tentacles, a moth orbiting an off bulb in a dark frame.
+   - Scenery / props: an empty inbox shown as a labeled box with cobwebs, a coffee cup whose steam is reduced to a few `'` flecks above a still mug, a pencil snapped at the middle with shavings, a paper airplane lodged in tree branches with leaves, a broken umbrella with bent ribs in the rain, a single party balloon tied to an empty chair.
+   - Weirder: a sad ampersand `&` with droopy curves, a parenthesis whose pair has left town `(   ····· `, a semicolon contemplating its place between code blocks, an exclamation mark lying down with its dot rolled away, a deflated speech bubble with the text drained out.
    The figure should match the dialogue's mood — a deflated balloon paired with "well that's one way to celebrate", a snail trail paired with "i'm working on it. apparently". Surprise the user with the pairing.
-2. **Write 1–2 lines of dialogue** in the tone register above. Lowercase. Passive-aggressive but not mean. Vary the cadence: sometimes a sigh, sometimes a single word, sometimes a small monologue. Don't reach for the same opener twice ("fine.", "cool.", "of course." — pick at most one per tick, and then a different one next tick).
-3. Apply the ANSI dim/italic/grey palette per the format rules.
-4. Render in a fenced code block.
+2. **Add detail.** Multiple lines of texture or shading. A creature plus the floor it slumps on. A flower plus the pot, the soil, maybe a wilting leaf at the side. Use shading (`░ ▒ ▓ █`), box-drawing (`─ │ ┌ ┐ └ ┘`), and small texture marks (`,` `.` `'` `~` `*`) to give the figure mass. The user asked for detail; deliver volume.
+3. **Write the dialogue** in the tone register above. Lowercase. Passive-aggressive but not mean. Vary the cadence — sometimes a sigh, sometimes a single word, sometimes a small monologue framed in the figure's negative space. Don't reach for the same opener twice ("fine.", "cool.", "of course." — pick at most one per tick, and then a different one next tick).
+4. Apply the ANSI dim/italic/grey palette per the format rules.
+5. Render in a fenced code block.
 
-If a tick's first idea feels safe or generic, try once more. The figure-dialogue pairing is the joke; if the joke isn't there, keep drafting.
+If a tick's first idea feels safe, generic, or thin, try once more. The figure-dialogue pairing is the joke; if the joke isn't there or the figure looks lazy, keep drafting.
 
 ## Illustrative shape (do NOT reuse — for reference only)
 
@@ -70,6 +71,7 @@ Step 4 (no eligible sub-issues at all) AND any other tick that ends with zero ne
 - Emitting the banner when at least one new subagent was just dispatched.
 - Adding emoji. The figure is ASCII; the dialog is plain prose.
 - Cheerful tone ("hang in there!", "almost done!"). Off-brand.
-- Banners taller than 7 lines. The user gets it.
+- Tiny stick-figure-only banners with no setting, texture, or shading. Under 10 lines is too thin — the user has explicitly asked for detail.
+- Banners over 18 lines or wider than 80 cols (chat will wrap them).
 - Naming the user. Passive-aggression is general, not personal.
 - Capital letters in the dialogue. The agent is too tired.
