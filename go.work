@@ -3,6 +3,5 @@ go 1.23
 use (
 	./apps/cli
 	./apps/server
-	./tests/e2e/scaffold
 	./tests/scaffold
 )

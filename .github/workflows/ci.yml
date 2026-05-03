@@ -5,6 +5,13 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   go:
     runs-on: ubuntu-latest
@@ -16,10 +23,24 @@ jobs:
           cache: true
       - name: Verify go.work
         run: go env GOWORK && test -f go.work
-      - name: Build
-        run: go build ./...
-      - name: Test
-        run: go test ./...
+      - name: Build (each module)
+        run: |
+          set -e
+          while read -r mod; do
+            [ -z "$mod" ] && continue
+            echo "::group::go build $mod"
+            (cd "$mod" && go build ./...)
+            echo "::endgroup::"
+          done < <(awk '/^use \(/,/^\)/' go.work | sed -n 's|^\s*\./||p')
+      - name: Test (each module)
+        run: |
+          set -e
+          while read -r mod; do
+            [ -z "$mod" ] && continue
+            echo "::group::go test $mod"
+            (cd "$mod" && go test ./...)
+            echo "::endgroup::"
+          done < <(awk '/^use \(/,/^\)/' go.work | sed -n 's|^\s*\./||p')
 
   pnpm:
     runs-on: ubuntu-latest
@@ -34,7 +55,7 @@ jobs:
           cache: pnpm
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Test
-        run: pnpm -r --if-present test
       - name: Build
         run: pnpm -r --if-present build
+      - name: Test
+        run: pnpm -r --if-present test

@@ -274,6 +274,23 @@ nodes:
         git commit -m "feat($SLUG): $FEATURE_NAME"
       fi
 
+      # Authoritative test gate. The loops' `until` tokens are LLM-emitted and
+      # can short-circuit the `until_bash` exit condition; this re-runs the full
+      # suite before opening the PR. Failures don't abort — they force draft mode
+      # and surface the failing output in the PR body so a human can triage.
+      mkdir -p "$ARTIFACTS_DIR"
+      VERIFY_LOG="$ARTIFACTS_DIR/verify.log"
+      VERIFY_RC=0
+      {
+        if [ -f go.work ] || ls -1 */go.mod >/dev/null 2>&1; then
+          go test ./... 2>&1
+        fi
+        if command -v pnpm >/dev/null 2>&1 && [ -f pnpm-workspace.yaml ]; then
+          pnpm -r --if-present test 2>&1
+        fi
+      } >"$VERIFY_LOG" 2>&1 || VERIFY_RC=$?
+      echo "verify-tests exit code: $VERIFY_RC"
+
       # Refuse to push an empty branch.
       AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
       if [ "$AHEAD" -eq 0 ]; then
@@ -323,6 +340,22 @@ nodes:
         echo
         echo "## Review verdict"
         echo "- $VERDICT"
+        if [ "$VERIFY_RC" -ne 0 ]; then
+          echo
+          echo "## ⚠ Local test gate FAILED (PR forced to draft)"
+          echo
+          echo "The workflow re-ran the full suite after the inner loops marked"
+          echo "themselves complete and got a non-zero exit. The LLM may have"
+          echo "claimed completion prematurely. Triage before merging."
+          echo
+          echo "<details><summary>Last 80 lines of verify output</summary>"
+          echo
+          echo '```'
+          tail -n 80 "$VERIFY_LOG"
+          echo '```'
+          echo
+          echo "</details>"
+        fi
       } > "$BODY_FILE"
 
       # Use repo PR template if present (prepend it)
@@ -337,7 +370,7 @@ nodes:
       fi
 
       DRAFT_FLAG=""
-      if [ "$VERDICT" = "needs_fixes" ]; then
+      if [ "$VERDICT" = "needs_fixes" ] || [ "$VERIFY_RC" -ne 0 ]; then
         DRAFT_FLAG="--draft"
       fi
 
