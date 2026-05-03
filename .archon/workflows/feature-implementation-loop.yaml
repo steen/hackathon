@@ -42,11 +42,20 @@ nodes:
         exit 1
       fi
 
+      # Capture the parent branch (whatever archon checked out: main, or another
+      # feat/* branch when --from was used). create-pr will use this as the PR's
+      # base so stacked features get the correct base branch (BASE_BRANCH archon
+      # variable always points at the repo default, so it can't carry --from).
+      PARENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+      mkdir -p "$ARTIFACTS_DIR"
+      printf '%s' "$PARENT_BRANCH" > "$ARTIFACTS_DIR/parent-branch"
+      echo "parent branch captured: $PARENT_BRANCH"
+
       if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
         echo "branch $BRANCH already exists — checking out"
         git checkout "$BRANCH"
       else
-        echo "creating branch $BRANCH from $(git rev-parse --abbrev-ref HEAD)"
+        echo "creating branch $BRANCH from $PARENT_BRANCH"
         git checkout -b "$BRANCH"
       fi
 
@@ -264,6 +273,16 @@ nodes:
 
       BRANCH="feat/$SLUG"
 
+      # Resolve parent branch (captured by setup-branch). Falls back to
+      # origin's default if the marker is missing.
+      if [ -f "$ARTIFACTS_DIR/parent-branch" ]; then
+        PARENT_BRANCH=$(cat "$ARTIFACTS_DIR/parent-branch")
+      else
+        PARENT_BRANCH=$(git remote show origin | sed -n 's/.*HEAD branch: //p')
+        PARENT_BRANCH=${PARENT_BRANCH:-main}
+      fi
+      echo "PR will target base: $PARENT_BRANCH"
+
       # Commit any outstanding implementation work. The TDD/E2E loops edit files
       # but don't commit; without this the branch would be empty and gh pr create
       # would fail with "No commits between main and feat/<slug>".
@@ -272,6 +291,27 @@ nodes:
         echo "no staged changes to commit"
       else
         git commit -m "feat($SLUG): $FEATURE_NAME"
+      fi
+
+      # Bring the branch up to date with the parent. Try rebase first (clean
+      # linear history); if conflicts, abort the rebase and fall back to merge.
+      # If both fail, leave the branch as-is and force draft so a human can
+      # resolve.
+      git fetch origin "$PARENT_BRANCH" --quiet || true
+      REBASE_RC=0
+      MERGE_RC=0
+      if ! git rebase "origin/$PARENT_BRANCH" >"$ARTIFACTS_DIR/rebase.log" 2>&1; then
+        REBASE_RC=$?
+        git rebase --abort 2>/dev/null || true
+        if ! git merge --no-edit "origin/$PARENT_BRANCH" >"$ARTIFACTS_DIR/merge.log" 2>&1; then
+          MERGE_RC=$?
+          git merge --abort 2>/dev/null || true
+          echo "WARN: could not rebase or merge origin/$PARENT_BRANCH; opening PR as-is" >&2
+        fi
+      fi
+      SYNC_FAILED=0
+      if [ "$REBASE_RC" -ne 0 ] && [ "$MERGE_RC" -ne 0 ]; then
+        SYNC_FAILED=1
       fi
 
       # Authoritative test gate. The loops' `until` tokens are LLM-emitted and
@@ -292,13 +332,14 @@ nodes:
       echo "verify-tests exit code: $VERIFY_RC"
 
       # Refuse to push an empty branch.
-      AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+      AHEAD=$(git rev-list --count "origin/$PARENT_BRANCH..HEAD" 2>/dev/null || echo 0)
       if [ "$AHEAD" -eq 0 ]; then
-        echo "ERROR: branch $BRANCH has no commits ahead of origin/main — nothing to PR" >&2
+        echo "ERROR: branch $BRANCH has no commits ahead of origin/$PARENT_BRANCH — nothing to PR" >&2
         exit 1
       fi
 
-      git push -u origin "$BRANCH"
+      # Force-with-lease in case rebase rewrote local history above.
+      git push -u --force-with-lease origin "$BRANCH"
 
       BODY_FILE="$(mktemp)"
       trap 'rm -f "$BODY_FILE"' EXIT
@@ -340,6 +381,13 @@ nodes:
         echo
         echo "## Review verdict"
         echo "- $VERDICT"
+        if [ "$SYNC_FAILED" -ne 0 ]; then
+          echo
+          echo "## ⚠ Could not sync with parent branch (PR forced to draft)"
+          echo
+          echo "Both \`git rebase origin/$PARENT_BRANCH\` and \`git merge origin/$PARENT_BRANCH\` failed."
+          echo "Resolve manually before merging."
+        fi
         if [ "$VERIFY_RC" -ne 0 ]; then
           echo
           echo "## ⚠ Local test gate FAILED (PR forced to draft)"
@@ -370,16 +418,12 @@ nodes:
       fi
 
       DRAFT_FLAG=""
-      if [ "$VERDICT" = "needs_fixes" ] || [ "$VERIFY_RC" -ne 0 ]; then
+      if [ "$VERDICT" = "needs_fixes" ] || [ "$VERIFY_RC" -ne 0 ] || [ "$SYNC_FAILED" -ne 0 ]; then
         DRAFT_FLAG="--draft"
       fi
 
-      # Use $BASE_BRANCH so --from feat/<prev> stacks PRs onto the prior branch.
-      # Defaults to main when unset.
-      PR_BASE="${BASE_BRANCH:-main}"
-
       gh pr create \
-        --base "$PR_BASE" \
+        --base "$PARENT_BRANCH" \
         --head "$BRANCH" \
         --title "feat($SLUG): $FEATURE_NAME" \
         --body-file "$BODY_FILE" \
