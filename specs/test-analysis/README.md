@@ -36,8 +36,8 @@ writes findings to this directory without creating a branch or opening a PR. Use
 Generated automatically — leave this section alone; the agent rewrites it.
 
 <!-- AGENT-INDEX-BEGIN -->
-**Last updated:** 2026-05-03T14:06:50Z
-**Analyzed commit:** `4902b5f`
+**Last updated:** 2026-05-03T15:02:47Z
+**Analyzed commit:** `e689e8f`
 
 | Phase | Feature | Status | Covered | Partial | Missing | Deferred |
 |-------|---------|--------|---------|---------|---------|----------|
@@ -45,10 +45,14 @@ Generated automatically — leave this section alone; the agent rewrites it.
 | phase-0 | [server-ws-hub](phase-0/server-ws-hub.md) | implemented | 5/5 | 0 | 0 | 0 |
 | phase-0 | [cli-send-watch](phase-0/cli-send-watch.md) | implemented | 4/4 | 0 | 0 | 0 |
 | phase-0 | [smoke-test](phase-0/smoke-test.md) | implemented | 5/5 | 0 | 0 | 0 |
+| phase-1 | [body-and-ws-caps](phase-1/body-and-ws-caps.md) | implemented | 4/4 | 0 | 0 | 0 |
 
-**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred.
+**Phase-0 totals:** 4 features · 19 ACs · 19 covered · 0 partial · 0 missing · 0 deferred. (PRs #25, #32, #35 are open and rework totals once merged; this index reflects current `main`.)
+**Phase-1 totals (so far):** 1 feature analyzed of 10 spec'd · 4 ACs · 4 covered · 0 partial · 0 missing · 0 deferred.
 
-Phase-0 is now fully covered. PR #18 closed the last gaps by adding `apps/cli/main.go` (the `chatd` binary) and `scripts/smoke.sh` (the system smoke test wired into `package.json` `test`).
+`feature-body-and-ws-caps` (PR #27) ships clean: WS read limit (64 KiB → close 1009), body cap (4 KiB), per-conn token bucket (close 1008), and REST 16 KiB cap (413). All four ACs covered by package-level tests with explicit library-constant guards.
 
-**Phases 1–3:** specs exist (`specs/plans/phase-{1,2,3}/feature-*.md`) but have not been analyzed yet. The agent will pick them up once Phase-1 implementation commits start landing on `main`.
+**Phase-1 sibling PRs in flight (not yet on main):** PR #32 tracks `logging-and-error-envelope` (3/4, AC-1 IP gap); PR #37 tracks `file-perms-and-headers` (1/3, SecurityHeaders not wired); PR #40 tracks `sqlite-schema-and-ulid` (4/5, AC-4 partial pending insert code). Findings docs land in the index as their PRs merge.
+
+**Phases 2–3:** specs exist (`specs/plans/phase-{2,3}/feature-*.md`) but have not been analyzed yet.
 <!-- AGENT-INDEX-END -->
