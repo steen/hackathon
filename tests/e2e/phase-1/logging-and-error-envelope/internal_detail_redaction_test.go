@@ -28,15 +28,15 @@ import (
 // (*AuthHandlers).Register and (*AuthHandlers).Login in
 // apps/server/internal/http/auth_handlers.go. Those handlers swallow
 // the underlying json.Decoder error and emit `{code: "bad_request",
-// message: "invalid JSON body"}`, while the AccessLog middleware
-// (apps/server/internal/http/middleware.go AccessLog) writes one log
-// line per request including `request_id=<uuid>` and `status=400`.
-// That pair satisfies the AC: the client body shows no internal
-// detail; the server log carries a request-id-correlated record of
-// the failed request.
+// message: "invalid JSON body"}`, while AccessLog in
+// apps/server/internal/http/middleware.go writes one log line per
+// request including `request_id=<uuid>` and `status=400`. That pair
+// satisfies the AC: the client body shows no internal detail; the
+// server log carries a request-id-correlated record of the failed
+// request.
 //
-// The panic half (stack-trace + panic value emitted by the Recover
-// middleware in middleware.go) requires a build-tag-gated
+// The panic half (stack-trace + panic value emitted by Recover in
+// apps/server/internal/http/middleware.go) requires a build-tag-gated
 // /debug/panic route that does not exist on `main` today; that route
 // is tracked at #306. The panic_logs_stack_with_request_id sub-test
 // below is `t.Skip`'d until that probe lands and documents the full
