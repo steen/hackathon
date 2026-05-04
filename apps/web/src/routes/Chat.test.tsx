@@ -151,6 +151,25 @@ describe("test_web_chat_page_renders_history_then_appends_live_messages", () => 
   });
 });
 
+describe("test_web_messages_list_has_aria_live_log_region", () => {
+  it("messages list carries role=log + aria-live=polite so SR users hear new arrivals", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const list = await screen.findByTestId("message-list");
+    expect(list).toHaveAttribute("role", "log");
+    expect(list).toHaveAttribute("aria-live", "polite");
+    expect(list).toHaveAttribute("aria-relevant", "additions");
+    // aria-atomic="false" so SR announces only the newly added <article>,
+    // not the full transcript every time a message arrives.
+    expect(list).toHaveAttribute("aria-atomic", "false");
+  });
+});
+
 describe("test_web_chat_renders_history_in_chronological_order_on_first_load", () => {
   it("renders history rows oldest→newest (composer under the newest)", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });
