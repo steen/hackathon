@@ -11,5 +11,11 @@
     "allowImportingTsExtensions": false,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "playwright/**/*.ts", "playwright.config.ts", "vitest.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "playwright/**/*.ts",
+    "playwright.config.ts",
+    "vitest.config.ts",
+    "phase-2/**/*.ts"
+  ]
 }
