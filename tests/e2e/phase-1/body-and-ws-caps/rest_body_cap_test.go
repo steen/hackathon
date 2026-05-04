@@ -198,7 +198,20 @@ func atLimitRegisterBody(t *testing.T, size int) []byte {
 	const (
 		username = "atlimit"
 		password = "abcdefghij"
+		// registerPasswordMinLen mirrors apps/server/internal/auth/constants.go
+		// PasswordMinLen (=10). Duplicated locally because this E2E lives
+		// outside apps/server/internal/, so the production const is not
+		// importable. If the handler-side minimum grows past this and the
+		// fixture password is not lengthened to match, Register would 400
+		// on policy instead of 403 on invite_code — the test would still
+		// pass the [200, 500) window but the invariant under test
+		// (parseable JSON reaches Register and produces 403) would
+		// silently shift. The guard below catches that drift loudly.
+		registerPasswordMinLen = 10
 	)
+	if len(password) < registerPasswordMinLen {
+		t.Fatalf("atLimitRegisterBody: fixture password=%d chars, shorter than handler-side PasswordMinLen=%d; bump the fixture (and absorb the slack from invite_code padding) so Register sees policy-valid credentials and answers 403 on invite_code", len(password), registerPasswordMinLen)
+	}
 	prefix := fmt.Sprintf(`{"username":%q,"password":%q,"invite_code":"`, username, password)
 	const suffix = `"}`
 	overhead := len(prefix) + len(suffix)
