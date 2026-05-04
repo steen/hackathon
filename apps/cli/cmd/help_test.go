@@ -20,6 +20,8 @@ var expectedHelpTokens = []string{
 	"send",
 	"watch",
 	"help",
+	"version",
+	"--version",
 	"--server",
 	"CHAT_SERVER",
 	"CHAT_PASSWORD",
