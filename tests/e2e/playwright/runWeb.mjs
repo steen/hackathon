@@ -112,6 +112,13 @@ async function main() {
       CHAT_JWT_SECRET: jwtSecret,
       CHAT_INVITE_CODE: inviteCode,
       CHAT_ALLOWED_ORIGINS: webBaseUrl,
+      // Production default is Burst=5/15min (PRD §9). Every Playwright test
+      // here registers 1-2 fresh users from 127.0.0.1, so the suite exhausts
+      // the bucket once it grows past four tests — and CI's retries=1 amps
+      // that further. Loosen the per-IP register limit for the fixture only;
+      // ratelimit.RegisterIPConfigFromEnv reads CHAT_REGISTER_BURST and logs
+      // a WARN so a stray production override would still surface loudly.
+      CHAT_REGISTER_BURST: "200",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

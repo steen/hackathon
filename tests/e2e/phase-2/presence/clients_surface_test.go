@@ -343,7 +343,7 @@ func buildChatd(t *testing.T) string {
 		// chatdBuildOnce gates this once per test process, so the
 		// build directory must outlive any single test's t.TempDir.
 		// Use os.TempDir + a random suffix and let the OS reap it.
-		stable := filepath.Join(os.TempDir(), "presence-ac4-chatd-"+randHex(8))
+		stable := filepath.Join(os.TempDir(), "presence-ac4-chatd-"+randHex(t, 8))
 		if err := os.MkdirAll(stable, 0o755); err != nil {
 			chatdBuildErr = fmt.Errorf("mkdir chatd build dir: %w", err)
 			return
@@ -363,10 +363,11 @@ func buildChatd(t *testing.T) string {
 	return chatdBuildPath
 }
 
-func randHex(n int) string {
+func randHex(t *testing.T, n int) string {
+	t.Helper()
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
-		return "fallback"
+		t.Fatalf("rand.Read: %v", err)
 	}
 	return fmt.Sprintf("%x", b)
 }
