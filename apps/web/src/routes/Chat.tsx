@@ -46,6 +46,8 @@ export function Chat(): React.JSX.Element {
   const [draft, setDraft] = useState("");
   const composingRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => {
     if (activeChannel === null && channelsState.channels.length > 0) {
@@ -57,6 +59,31 @@ export function Chat(): React.JSX.Element {
     const el = listRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messagesState.messages]);
+
+  // Mount-time focus delivery: composer when enabled, else the channel heading,
+  // else the message list. Replaces App.tsx's imperative `document.querySelector`
+  // chain (issue #189). Sign-out unmounts <Chat />, so a later sign-in re-runs.
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => {
+      const composer = composerRef.current;
+      if (composer !== null && !composer.disabled) {
+        composer.focus();
+        return;
+      }
+      const heading = headingRef.current;
+      if (heading !== null) {
+        heading.focus();
+        return;
+      }
+      const list = listRef.current;
+      if (list !== null) {
+        list.focus();
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, []);
 
   const draftBytes = useMemo(() => byteLength(draft), [draft]);
   const overCap = draftBytes > MAX_BODY_BYTES;
@@ -138,7 +165,7 @@ export function Chat(): React.JSX.Element {
       </aside>
       <main className="messages">
         <header className="messages__header">
-          <h2>
+          <h2 ref={headingRef} tabIndex={-1}>
             {channelsState.channels.find((c) => c.id === activeChannel)?.name ?? "Select a channel"}
           </h2>
           <ConnectionBadge state={messagesState.connection} />
@@ -152,6 +179,7 @@ export function Chat(): React.JSX.Element {
           aria-relevant="additions"
           aria-atomic="false"
           aria-label="conversation"
+          tabIndex={-1}
         >
           {messagesState.error !== null ? (
             <p role="alert" className="error">
@@ -214,6 +242,7 @@ export function Chat(): React.JSX.Element {
           aria-describedby={showCounter ? "composer-counter" : undefined}
         >
           <textarea
+            ref={composerRef}
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);

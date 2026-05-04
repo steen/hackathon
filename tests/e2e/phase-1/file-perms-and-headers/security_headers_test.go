@@ -53,7 +53,10 @@ func requireSecHeaders(t *testing.T, label string, h http.Header) {
 //   - GET /debug/subs?channel=%23general — 200 from loopback.
 //   - GET /api/auth/me with no Authorization — 401 from the auth-required
 //     middleware.
-//   - GET /nope — 404 from the default ServeMux fallback.
+//   - GET /api/nope — 404 from the wiring's /api/ shadow guard
+//     (apps/server/internal/wiring/web.go), which reserves the /api/
+//     subtree so unmatched routes stay 404 rather than falling
+//     through to the embedded SPA's index.html.
 //
 // AC-3 ("headers are present on both 2xx and error responses") layers
 // failure-mode coverage on top of this; that is a separate test.
@@ -81,9 +84,14 @@ func TestAC2_ResponseHeadersIncludeSecurityHeaders(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name:       "unknown_route_404",
+			// Phase 3's embedded-web SPA fallback serves index.html
+			// for unknown non-API paths, so /nope no longer 404s.
+			// /api/nope stays a 404 because the wiring's static
+			// handler explicitly reserves the /api/ subtree from
+			// SPA fallback (apps/server/internal/wiring/web.go).
+			name:       "unknown_api_route_404",
 			method:     http.MethodGet,
-			path:       "/nope",
+			path:       "/api/nope",
 			wantStatus: http.StatusNotFound,
 		},
 	}

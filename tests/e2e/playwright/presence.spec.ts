@@ -100,14 +100,15 @@ test.describe("Web presence panel (AC-4 web half)", () => {
       const pageAlice = await ctxAlice.newPage();
       const pageBob = await ctxBob.newPage();
 
-      // Order matters for which path puts each user into the other's panel:
-      // alice loads first (panel may be empty or list herself only); bob
-      // logs in next, which fires a `presence` join event alice's WS picks up.
+      // Alice clicks into the channel so the Chat view (which hosts the
+      // presence panel) renders. Bob only needs an open WS connection for
+      // presence to fire — presence is hub-global, ref-counted on userID,
+      // not channel-scoped (see apps/server/internal/hub/), so bob does not
+      // need to enter any channel.
       await loginInBrowser(pageAlice, aliceName);
       await pageAlice.getByRole("button", { name: `#${channel.name}` }).click();
 
       await loginInBrowser(pageBob, bobName);
-      await pageBob.getByRole("button", { name: `#${channel.name}` }).click();
 
       // Asserts bob shows up in alice's panel. Selecting by id-suffixed
       // testid sidesteps the username-blank shape of live join frames

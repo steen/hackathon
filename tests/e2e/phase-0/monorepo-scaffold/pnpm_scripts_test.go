@@ -114,11 +114,12 @@ func runPnpm(t *testing.T, dir string, timeout time.Duration, args ...string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start pnpm %s: %v", strings.Join(args, " "), err)
 	}
-	pgid := cmd.Process.Pid
+	// PID == PGID because Setpgid: true above makes the child a process-group leader.
+	pid := cmd.Process.Pid
 
 	runErr := cmd.Wait()
 	if ctx.Err() == context.DeadlineExceeded {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		t.Fatalf("pnpm %s exceeded %s\n--- stdout ---\n%s\n--- stderr ---\n%s",
 			strings.Join(args, " "), timeout, stdout.String(), stderr.String())
 	}
@@ -154,7 +155,8 @@ func runLongRunningPnpm(t *testing.T, dir string, args ...string) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start pnpm %s: %v", strings.Join(args, " "), err)
 	}
-	pgid := cmd.Process.Pid
+	// PID == PGID because Setpgid: true above makes the child a process-group leader.
+	pid := cmd.Process.Pid
 
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
@@ -174,9 +176,9 @@ func runLongRunningPnpm(t *testing.T, dir string, args ...string) {
 	case <-time.After(startupBudget):
 	}
 
-	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		t.Fatalf("SIGTERM pgid %d: %v", pgid, err)
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		t.Fatalf("SIGTERM pid %d: %v", pid, err)
 	}
 
 	select {
@@ -208,9 +210,9 @@ func runLongRunningPnpm(t *testing.T, dir string, args ...string) {
 		t.Fatalf("pnpm %s exited %d after SIGTERM (want 0 or signal): %v\n--- stdout ---\n%s\n--- stderr ---\n%s",
 			strings.Join(args, " "), code, runErr, stdout.String(), stderr.String())
 	case <-time.After(shutdownBudget):
-		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
 		<-exited
-		t.Fatalf("pnpm %s did not exit within %s of SIGTERM (pgid %d)\n--- stdout ---\n%s\n--- stderr ---\n%s",
-			strings.Join(args, " "), shutdownBudget, pgid, stdout.String(), stderr.String())
+		t.Fatalf("pnpm %s did not exit within %s of SIGTERM (pid %d)\n--- stdout ---\n%s\n--- stderr ---\n%s",
+			strings.Join(args, " "), shutdownBudget, pid, stdout.String(), stderr.String())
 	}
 }
