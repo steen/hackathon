@@ -269,12 +269,24 @@ export function Chat(): React.JSX.Element {
                 : m.status === "failed"
                   ? "msg msg--failed"
                   : "msg";
+            // Suppress SR announcement of the user's own messages — the
+            // optimistic-send path appends them immediately on submit, and
+            // SR users typed them so the polite-log readback is annoying
+            // (#139, #468). The WS echo (`useMessages` reconcile) reuses
+            // the same pending row, so the article keeps aria-hidden once
+            // its sender resolves to self. Failed-status rows stay
+            // announceable (the failed-badge `role="status"` plus the
+            // Retry button must remain in the a11y tree) — failed-send
+            // SR behaviour is tracked separately as #147.
+            const isSelf = user !== null && m.sender_user_id === user.id;
+            const ariaHidden = isSelf && m.status !== "failed" ? "true" : undefined;
             return (
               <article
                 key={m.id}
                 className={cls}
                 data-testid="msg"
                 data-status={m.status ?? "sent"}
+                aria-hidden={ariaHidden}
               >
                 <div className="msg__meta">
                   <span className="msg__sender">{resolveSender(m.sender_user_id)}</span>

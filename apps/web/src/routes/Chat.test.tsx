@@ -886,6 +886,81 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
   });
 });
 
+describe("test_web_self_authored_optimistic_message_is_aria_hidden_for_sr", () => {
+  it("self-authored optimistic-send <article> carries aria-hidden=true while data-status=pending so the polite log region does not read the user's own message back to them", async () => {
+    happyPath();
+    // Hold postMessage open so the optimistic entry stays pending across
+    // the assertions. Resolvers drained after the test prevents leaked
+    // promises.
+    const resolvers: (() => void)[] = [];
+    postMessageMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(() => {
+            resolve();
+          });
+        }),
+    );
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(ta).not.toBeDisabled();
+    });
+
+    fireEvent.change(ta, { target: { value: "my own message" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith("C1", "my own message");
+    });
+
+    const list = screen.getByTestId("message-list");
+    const pendingArticle = await waitFor(() => {
+      const a = list.querySelector<HTMLElement>('article[data-status="pending"]');
+      expect(a).not.toBeNull();
+      return a;
+    });
+    expect(pendingArticle?.getAttribute("aria-hidden")).toBe("true");
+
+    for (const r of resolvers) r();
+  });
+});
+
+describe("test_web_other_authored_message_is_not_aria_hidden", () => {
+  it("a message whose sender is another user is not aria-hidden — SR users still hear inbound traffic", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    // History fixture in happyPath includes M1 from sender U2 (not self U1).
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const articles = list.querySelectorAll<HTMLElement>('article[data-testid="msg"]');
+    expect(articles.length).toBeGreaterThan(0);
+    for (const a of articles) {
+      // History row is from U2, so no article should be aria-hidden here —
+      // belt-and-suspenders against a future regression that aria-hides
+      // the wrong rows.
+      expect(a.getAttribute("aria-hidden")).toBeNull();
+    }
+  });
+});
+
 describe("humanizeTimestamp", () => {
   // Build local-zone ISO so the helper's local-day comparison is
   // deterministic regardless of where the test runs.
