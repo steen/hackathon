@@ -756,12 +756,10 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
     const pendingArticle = list.querySelector<HTMLElement>('article[data-status="pending"]');
     expect(pendingArticle).not.toBeNull();
 
-    // AC-2: no inline `style` attribute, and no `opacity` in the inline
-    // style declaration. Either condition catches a regression that
+    // AC-2: no inline `style` attribute. Catches a regression that
     // reintroduces `style={{ opacity: 0.6 }}`.
     const inlineStyle = pendingArticle?.getAttribute("style");
     expect(inlineStyle === null || inlineStyle === "").toBe(true);
-    expect(pendingArticle?.style.opacity ?? "").toBe("");
 
     // AC-3: italic body. Read computed style via the imported stylesheet
     // (`.msg--pending .msg__body { font-style: italic }`).
