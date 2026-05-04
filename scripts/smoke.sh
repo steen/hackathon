@@ -144,19 +144,23 @@ mkdir -p "$WATCHER1_HOME" "$WATCHER2_HOME"
 cp -R "$XDG_CONFIG_HOME/chatd" "$WATCHER1_HOME/chatd"
 cp -R "$XDG_CONFIG_HOME/chatd" "$WATCHER2_HOME/chatd"
 
-# Phase-2 watchers subscribe to a real channel by ID. Create a channel
-# named "general" out-of-band — the CLI surface in this issue lists
-# channels but does not create them. The /debug/subs gauge is keyed on
-# the WS hub topic (#general legacy default + per-channel keys); we
-# query channel=<created-id> after subscribing.
+# Phase-2 watchers subscribe to a real channel by ID. Phase 3 seeds a
+# #general channel on first server boot (apps/server/internal/seed/seed.go),
+# so we read its id back via GET /api/channels rather than creating it
+# (a POST with name=general would 409 against the seeded row).
 TOKEN=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['token'])" "$XDG_CONFIG_HOME/chatd/config.json")
-CHANNEL_RESP=$(curl -fsS -X POST "${API_URL}/api/channels" \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer ${TOKEN}" \
-  -d '{"name":"general"}')
-CHANNEL_ID=$(printf '%s' "$CHANNEL_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['id'])")
+CHANNELS_RESP=$(curl -fsS "${API_URL}/api/channels" \
+  -H "Authorization: Bearer ${TOKEN}")
+CHANNEL_ID=$(printf '%s' "$CHANNELS_RESP" | python3 -c '
+import json, sys
+env = json.load(sys.stdin)
+for c in env["data"]["channels"]:
+    if c["name"] == "general":
+        print(c["id"])
+        break
+')
 if [[ -z "$CHANNEL_ID" ]]; then
-  echo "[smoke] channel create did not return an id: ${CHANNEL_RESP}" >&2
+  echo "[smoke] could not find seeded #general channel: ${CHANNELS_RESP}" >&2
   exit 1
 fi
 
