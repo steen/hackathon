@@ -26,4 +26,9 @@ const MessageBodyLimit = 4 * 1024
 //
 // Derived from MessageBodyLimit so the wire text cannot drift if the
 // cap value ever changes.
+//
+// invariant: MessageBodyLimit must be a multiple of 1024 — the
+// close-reason text uses %d KiB which would round on non-multiples
+// (e.g. a 5000-byte cap would still print "4 KiB"). The companion
+// test in limits_test.go fails CI if a future cap value breaks this.
 var MessageBodyLimitCloseReason = fmt.Sprintf("message body exceeds %d KiB limit", MessageBodyLimit/1024)
