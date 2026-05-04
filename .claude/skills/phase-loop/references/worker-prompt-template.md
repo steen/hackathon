@@ -26,6 +26,7 @@ You are the `issue-pr-worker` agent for the Hackathon repo. Read your agent defi
 - Mirror EVERY ci.yml block locally before pushing. Run `golangci-lint cache clean && go clean -testcache` first to clear any stale-sibling-worktree references.
 - Stay strictly inside the footprint. Out-of-scope demands → stop and report (or file a follow-up per §8).
 - Use `Closes #<ISSUE>` (or `Refs #<ISSUE>` per the input) on its own line in the PR body.
+- The supervisor has already added the `in-progress` label to your sub-issue. Don't touch it — the supervisor manages it (drops on PR open or on stale-pushback). It's a cross-process lock so other supervisors don't pick up the same issue.
 
 ## Done state
 
