@@ -1,7 +1,6 @@
 package wsproto
 
 import (
-	"fmt"
 	"testing"
 )
 
@@ -17,7 +16,7 @@ func TestMessageBodyLimitIsKiBMultiple(t *testing.T) {
 			"MessageBodyLimitCloseReason rounds via /1024 and would "+
 			"print %q while the real cap is %d bytes",
 			MessageBodyLimit,
-			fmt.Sprintf("message body exceeds %d KiB limit", MessageBodyLimit/1024),
+			MessageBodyLimitCloseReason,
 			MessageBodyLimit)
 	}
 }
