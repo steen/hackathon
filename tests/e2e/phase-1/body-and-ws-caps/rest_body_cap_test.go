@@ -120,14 +120,20 @@ func TestAC4_RESTBodyOver16KiBReturns413(t *testing.T) {
 			t.Fatalf("status = 413 at exactly 16 KiB; cap fired one byte too early — RESTBodyLimit must be inclusive of 16384")
 		}
 		// Stronger invariant than just "not 413": a parseable JSON
-		// body must reach the handler. The fixture supplies a random
-		// (wrong) invite_code via randomSecret(t, 8) — 8 random bytes
-		// hex-encoded to 16 chars, ~2^64 collision space against the
-		// server's per-process CHAT_INVITE_CODE — so Register answers
-		// 403. A 2xx here would indicate a fixture regression (e.g.
-		// the helper degenerating to a constant), not flake. 5xx (or
-		// anything outside 2xx-4xx) means the handler did not produce
-		// the response.
+		// body must reach the handler. The client-side invite_code is
+		// the slack-absorbing pad built by atLimitRegisterBody below
+		// (bytes.Repeat([]byte("a"), size-overhead) — a deterministic
+		// ~16383-char string of 'a's), while the server's
+		// CHAT_INVITE_CODE is randomSecret(t, 8) (8 random bytes
+		// hex-encoded to 16 chars, set in startServerWithDB below).
+		// The two strings differ in length deterministically, so
+		// subtle.ConstantTimeCompare in
+		// apps/server/internal/http/auth_handlers.go returns 0 every
+		// run and Register answers 403 with probability 1 — not
+		// flake-prone ~2^-64 collision odds. A 2xx here would indicate
+		// a fixture regression (e.g. the pad degenerating to match the
+		// server invite), not flake. 5xx (or anything outside 2xx-4xx)
+		// means the handler did not produce the response.
 		if resp.StatusCode < 200 || resp.StatusCode >= 500 {
 			t.Fatalf("status = %d at 16 KiB; want 2xx or non-413 4xx (parseable body must reach handler)", resp.StatusCode)
 		}
