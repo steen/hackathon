@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,9 +30,9 @@ func TestAC6_RESTEndpointsRequireAuth(t *testing.T) {
 	tok, _ := register(t, srv, randomUsername(t), randomPassword(t))
 	ch := createChannel(t, srv, tok, randomChannelName(t))
 
-	// Tampered = flip the last char of a real token. Garbage = a literal
-	// non-JWT string.
-	tampered := tok[:len(tok)-1] + flipChar(tok[len(tok)-1])
+	// Tampered = flip a high-bit (signature-bearing) byte of a real
+	// token's signature. Garbage = a literal non-JWT string.
+	tampered := tamperJWTSignature(t, tok)
 	garbage := "not-a-real-jwt"
 
 	cases := []struct {
@@ -155,12 +156,22 @@ func doRequest(t *testing.T, srv *runningServer, token, method, path string, bod
 	return resp
 }
 
-// flipChar flips the last byte to a different printable JWT char so
-// the tampered token is well-formed (length-preserving) but signature-
-// invalid.
-func flipChar(b byte) string {
-	if b == 'a' {
-		return "b"
+// tamperJWTSignature flips the first base64url char of the JWT's
+// signature segment to a different valid base64url char. The first 42
+// of the 43 signature chars each contribute 6 fully-used bits to the
+// HMAC-SHA256 output, so any change here is guaranteed to alter a
+// signature byte (unlike flipping the last char, whose low 2 bits are
+// unused tail padding ignored on decode).
+func tamperJWTSignature(t *testing.T, tok string) string {
+	t.Helper()
+	dot := strings.LastIndexByte(tok, '.')
+	if dot < 0 || dot == len(tok)-1 {
+		t.Fatalf("tamperJWTSignature: token has no signature segment: %q", tok)
 	}
-	return "a"
+	first := tok[dot+1]
+	flipped := byte('A')
+	if first == 'A' {
+		flipped = 'B'
+	}
+	return tok[:dot+1] + string(flipped) + tok[dot+2:]
 }

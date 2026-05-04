@@ -121,9 +121,13 @@ func TestAC4_RESTBodyOver16KiBReturns413(t *testing.T) {
 		}
 		// Stronger invariant than just "not 413": a parseable JSON
 		// body must reach the handler. The fixture supplies a random
-		// (wrong) invite_code so Register answers 403; 2xx would
-		// mean the random invite collided. 5xx (or anything outside
-		// 2xx-4xx) means the handler did not produce the response.
+		// (wrong) invite_code via randomSecret(t, 8) — 8 random bytes
+		// hex-encoded to 16 chars, ~2^64 collision space against the
+		// server's per-process CHAT_INVITE_CODE — so Register answers
+		// 403. A 2xx here would indicate a fixture regression (e.g.
+		// the helper degenerating to a constant), not flake. 5xx (or
+		// anything outside 2xx-4xx) means the handler did not produce
+		// the response.
 		if resp.StatusCode < 200 || resp.StatusCode >= 500 {
 			t.Fatalf("status = %d at 16 KiB; want 2xx or non-413 4xx (parseable body must reach handler)", resp.StatusCode)
 		}
