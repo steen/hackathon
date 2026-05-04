@@ -63,12 +63,10 @@ export function App(): React.JSX.Element {
     };
   }, [signedIn]);
 
-  if (loading) {
-    return <div className="loading">Loading...</div>;
-  }
-
   let body: React.JSX.Element;
-  if (token === null || user === null) {
+  if (loading) {
+    body = <div className="loading">Loading...</div>;
+  } else if (token === null || user === null) {
     if (route === "register") {
       body = (
         <Register
