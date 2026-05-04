@@ -9,10 +9,10 @@ import (
 // AC-6: All auth endpoints write entries to auth_events.
 //
 // The kind strings come from apps/server/internal/http/auth_handlers.go:
-// register, login_success, login_failure, logout, ws_ticket_issued. We
-// drive register → login (success) → ws-ticket → logout → login (wrong
-// password) and assert each lands in auth_events with the right kind
-// and a non-null `at`.
+// register, register_failed, login_success, login_failure, logout,
+// ws_ticket_issued. We drive register → login (success) → ws-ticket →
+// logout → login (wrong password) → register (bad invite) and assert
+// each lands in auth_events with the right kind and a non-null `at`.
 func TestAC6_AuthEvents_AllEndpointsLog(t *testing.T) {
 	srv := startServer(t)
 
@@ -29,13 +29,23 @@ func TestAC6_AuthEvents_AllEndpointsLog(t *testing.T) {
 		t.Fatalf("/logout: status %d body %s", status, raw)
 	}
 
-	// One deliberate failure: login with wrong password.
+	// One deliberate login failure: wrong password.
 	status, _, _ = postJSON(t, srv, "/api/auth/login", "", map[string]string{
 		"username": username,
 		"password": "definitely-wrong-" + randomSecret(t, 4),
 	})
 	if status != http.StatusUnauthorized {
 		t.Fatalf("wrong-password login expected 401, got %d", status)
+	}
+
+	// One deliberate register failure: invalid invite code.
+	status, _, raw = postJSON(t, srv, "/api/auth/register", "", map[string]string{
+		"username":    "bob",
+		"password":    randomSecret(t, 12),
+		"invite_code": "wrong-" + randomSecret(t, 4),
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("bad-invite register expected 403, got %d body %s", status, raw)
 	}
 
 	db := openDBReadOnly(t, srv)
@@ -50,6 +60,13 @@ func TestAC6_AuthEvents_AllEndpointsLog(t *testing.T) {
 	failures := selectAuthEventsByKind(t, db, "login_failure")
 	if len(failures) == 0 {
 		t.Errorf("auth_events: no login_failure rows after wrong-password login")
+	}
+
+	// register_failed is recorded with user_id NULL (no user is created
+	// when the invite check rejects the request — same handler).
+	regFailures := selectAuthEventsByKind(t, db, "register_failed")
+	if len(regFailures) == 0 {
+		t.Errorf("auth_events: no register_failed rows after bad-invite register")
 	}
 
 	// Every recorded row must carry a non-null `at`.

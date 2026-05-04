@@ -31,7 +31,9 @@ func TestAC4_ULIDsAsPrimaryKeysForUsersChannelsMessages(t *testing.T) {
 
 	const username = "alice"
 	password := randomSecret(t, 12)
-	const channelName = "general"
+	// Phase 3 seeds a #general channel on first boot, so this test
+	// uses a random name to avoid colliding with the seeded row.
+	channelName := "ch-" + randomSecret(t, 6)
 
 	wantTime := time.Now()
 
