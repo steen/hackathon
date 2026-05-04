@@ -322,14 +322,6 @@ func dialWSChannel(t *testing.T, srv *runningServer, ticket, channel string) (*w
 	return websocket.Dial(ctx, url, nil)
 }
 
-// dialWSChannelRaw is the same as dialWSChannel but exists as a named
-// alias for the test-analysis findings doc — they distinguish the two
-// to make intent obvious at the call site (Raw = caller cares about the
-// raw *http.Response body, not just the upgrade outcome).
-func dialWSChannelRaw(t *testing.T, srv *runningServer, ticket, channel string) (*websocket.Conn, *http.Response, error) {
-	return dialWSChannel(t, srv, ticket, channel)
-}
-
 // AC-3: WS dial succeeds for the legacy `#general` sentinel and for a
 // freshly created ULID channel. The verbatim AC reads:
 //
@@ -410,7 +402,7 @@ func TestAC2_WSUpgrade_UnknownChannel_404(t *testing.T) {
 		t.Fatalf("test setup: unknownULID len=%d, want 26", got)
 	}
 
-	conn, resp, err := dialWSChannelRaw(t, srv, ticket, unknownULID)
+	conn, resp, err := dialWSChannel(t, srv, ticket, unknownULID)
 	if err == nil {
 		conn.CloseNow()
 		t.Fatalf("AC-2: dial unknown ULID succeeded; want failure")
@@ -458,7 +450,7 @@ func TestAC5_WSUpgrade_BadChannelID_404(t *testing.T) {
 	bearer := register(t, srv)
 	ticket := mintWSTicket(t, srv, bearer)
 
-	conn, resp, err := dialWSChannelRaw(t, srv, ticket, "BAD-CHANNEL-ID")
+	conn, resp, err := dialWSChannel(t, srv, ticket, "BAD-CHANNEL-ID")
 	if err == nil {
 		conn.CloseNow()
 		t.Fatalf("AC-5: dial BAD-CHANNEL-ID succeeded; want failure")
