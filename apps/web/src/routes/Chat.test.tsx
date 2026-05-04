@@ -963,6 +963,25 @@ describe("test_web_chat_focus_management_mount_no_channels_focuses_heading", () 
   });
 });
 
+describe("test_web_chat_focus_management_mount_with_channel_focuses_composer", () => {
+  it("focuses the composer once a channel becomes active (composer branch wins over heading)", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(composer).not.toBeDisabled();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
+  });
+});
+
 describe("test_web_chat_landmarks_have_accessible_names", () => {
   it("aside, main, and sidebar lists each expose an accessible name", async () => {
     happyPath();
