@@ -5,7 +5,7 @@
 // Rule (24h, locale-neutral by design — fixed widths read consistently
 // in a chat list):
 //   - today (same Y-M-D in viewer's local zone)        → "HH:MM"
-//   - within the last 7 days but not today             → "Mon HH:MM"
+//   - within the last 6 days but not today             → "Mon HH:MM"
 //   - older                                            → "MMM D HH:MM"
 //
 // `now` is parameterized so tests can pin the clock without mocking Date.
