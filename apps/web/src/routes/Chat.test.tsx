@@ -149,6 +149,130 @@ describe("test_web_chat_page_renders_history_then_appends_live_messages", () => 
   });
 });
 
+describe("test_web_chat_renders_history_in_chronological_order_on_first_load", () => {
+  it("renders history rows oldest→newest (composer under the newest)", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Server contract: newest-first window. The hook flips this to
+    // oldest-first; the DOM must reflect the flipped order.
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M3",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "third",
+        created_at: "2026-01-01T00:00:03Z",
+      },
+      {
+        id: "M2",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "second",
+        created_at: "2026-01-01T00:00:02Z",
+      },
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "first",
+        created_at: "2026-01-01T00:00:01Z",
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("first")).toBeInTheDocument();
+    });
+    const list = screen.getByTestId("message-list");
+    const bodies = Array.from(list.querySelectorAll<HTMLElement>(".msg__body")).map(
+      (el) => el.textContent,
+    );
+    expect(bodies).toEqual(["first", "second", "third"]);
+  });
+});
+
+describe("test_web_chat_appends_live_messages_below_most_recent_history", () => {
+  it("a live WS frame lands below the newest history row", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M3",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "third",
+        created_at: "2026-01-01T00:00:03Z",
+      },
+      {
+        id: "M2",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "second",
+        created_at: "2026-01-01T00:00:02Z",
+      },
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "first",
+        created_at: "2026-01-01T00:00:01Z",
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("third")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M4",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live",
+            created_at: "2026-01-01T00:00:04Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    const list = screen.getByTestId("message-list");
+    await waitFor(() => {
+      const bodies = Array.from(list.querySelectorAll<HTMLElement>(".msg__body")).map(
+        (el) => el.textContent,
+      );
+      expect(bodies).toEqual(["first", "second", "third", "live"]);
+    });
+  });
+});
+
 describe("test_web_reconnects_after_ws_disconnect", () => {
   it("forced close triggers reconnect that mints a fresh ticket", async () => {
     happyPath();

@@ -110,7 +110,10 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       try {
         const history = await getClient().listMessages(channelId, { limit: CATCHUP_LIMIT });
         if (tok.cancelled) return;
-        setMessages(history);
+        // Server returns newest-first to match the `before` cursor contract.
+        // The view wants oldest→newest (composer sits under the newest row),
+        // so reverse at the boundary and keep every in-state op unchanged.
+        setMessages([...history].reverse());
       } catch (err) {
         if (tok.cancelled) return;
         const msg = err instanceof Error ? err.message : "failed to load history";
