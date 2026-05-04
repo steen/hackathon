@@ -1,8 +1,8 @@
 ---
 feature: server-ws-hub
 phase: phase-0
-analyzed_at: 2026-05-03T19:11:26Z
-analyzed_commit: f2d750de9dbdf5b20e48b4a226633bcac3127fec
+analyzed_at: 2026-05-04T01:40Z
+analyzed_commit: 00b10ce9349fb1372c624e01d8c77bf0738747de
 implementation_status: implemented
 total_acs: 6
 covered: 0
