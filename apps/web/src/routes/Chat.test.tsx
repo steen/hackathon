@@ -457,8 +457,12 @@ describe("test_web_presence_live_region_announces_join_with_known_username", () 
     );
 
     const live = await screen.findByTestId("presence-live-region");
-    expect(live).toHaveAttribute("role", "status");
+    // aria-live="polite" is sufficient on its own — the explicit role
+    // is omitted to keep `getByRole("status")` (used by the e2e
+    // suite to locate the connection badge) returning exactly one
+    // element.
     expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live).toHaveAttribute("aria-atomic", "true");
     expect(live.textContent).toBe("");
 
     await waitFor(() => {

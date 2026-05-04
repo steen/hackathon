@@ -175,9 +175,15 @@ export function Chat(): React.JSX.Element {
             </li>
           ))}
         </ul>
+        {/* aria-live="polite" alone is the load-bearing announcement
+            mechanism; an explicit role="status" is omitted so the
+            element doesn't collide with `getByRole("status")` queries
+            already used by the connection badge (the e2e
+            `page.getByRole("status")` locator expects exactly one
+            match). aria-atomic="true" so the SR re-reads the whole
+            phrase on each event, not just the diff. */}
         <div
           className="visually-hidden"
-          role="status"
           aria-live="polite"
           aria-atomic="true"
           data-testid="presence-live-region"
