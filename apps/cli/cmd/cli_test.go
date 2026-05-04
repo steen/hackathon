@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -306,6 +309,102 @@ func TestCLILogoutClearsLocalConfig(t *testing.T) {
 	}
 	if cfg.User != nil {
 		t.Errorf("user still set after logout: %+v", cfg.User)
+	}
+}
+
+// AC for issue #151: `chatd version` exits 0 and prints a non-empty
+// version string. The test drives Version directly (same path the
+// binary entrypoint takes via Dispatch) and also checks the exported
+// WriteVersion writer so `--version` / `-v` are covered.
+func TestCLIVersionPrintsNonEmptyString(t *testing.T) {
+	fs := newFakeServer(t)
+	rig := newRig(t, fs)
+
+	ctx, cancel := mustCtx()
+	defer cancel()
+	if err := Version(ctx, rig.env, nil); err != nil {
+		t.Fatalf("Version: %v", err)
+	}
+	out := strings.TrimSpace(rig.stdout.String())
+	if out == "" {
+		t.Fatal("version stdout is empty")
+	}
+	if !strings.HasPrefix(out, "chatd ") {
+		t.Errorf("version stdout = %q, want prefix %q", out, "chatd ")
+	}
+	if rig.stderr.String() != "" {
+		t.Errorf("stderr = %q, want empty", rig.stderr.String())
+	}
+}
+
+func TestWriteVersionEmitsSingleLine(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteVersion(&buf); err != nil {
+		t.Fatalf("WriteVersion: %v", err)
+	}
+	got := buf.String()
+	if got == "" {
+		t.Fatal("WriteVersion wrote nothing")
+	}
+	if !strings.HasSuffix(got, "\n") {
+		t.Errorf("output missing trailing newline: %q", got)
+	}
+	trimmed := strings.TrimRight(got, "\n")
+	if strings.Contains(trimmed, "\n") {
+		t.Errorf("output spans multiple lines: %q", got)
+	}
+	if !strings.Contains(trimmed, "chatd ") {
+		t.Errorf("output missing %q prefix: %q", "chatd ", trimmed)
+	}
+	// The version line surfaces the active Go runtime so users can
+	// pair binary + toolchain when filing bugs.
+	if !strings.Contains(trimmed, runtime.Version()) {
+		t.Errorf("output missing Go version %q: %q", runtime.Version(), trimmed)
+	}
+	if !strings.Contains(trimmed, runtime.GOOS+"/"+runtime.GOARCH) {
+		t.Errorf("output missing GOOS/GOARCH %q: %q", runtime.GOOS+"/"+runtime.GOARCH, trimmed)
+	}
+}
+
+func TestFormatVersionFallsBackToDevWhenNoBuildInfo(t *testing.T) {
+	got := formatVersion(func() (*debug.BuildInfo, bool) { return nil, false })
+	if !strings.Contains(got, " "+DevVersion+" ") {
+		t.Errorf("formatVersion = %q, want it to contain %q", got, " "+DevVersion+" ")
+	}
+}
+
+func TestFormatVersionUsesTaggedModuleVersion(t *testing.T) {
+	info := &debug.BuildInfo{}
+	info.Main.Version = "v1.2.3"
+	info.Settings = []debug.BuildSetting{
+		{Key: "vcs.revision", Value: "abcdef0123456789"},
+		{Key: "vcs.modified", Value: "false"},
+	}
+	got := formatVersion(func() (*debug.BuildInfo, bool) { return info, true })
+	if !strings.Contains(got, "v1.2.3") {
+		t.Errorf("formatVersion = %q, want it to contain %q", got, "v1.2.3")
+	}
+	if !strings.Contains(got, "(abcdef0)") {
+		t.Errorf("formatVersion = %q, want short revision %q", got, "(abcdef0)")
+	}
+	if strings.Contains(got, "dirty") {
+		t.Errorf("formatVersion = %q, should not say dirty when vcs.modified=false", got)
+	}
+}
+
+func TestFormatVersionMarksDirtyTree(t *testing.T) {
+	info := &debug.BuildInfo{}
+	info.Main.Version = "(devel)"
+	info.Settings = []debug.BuildSetting{
+		{Key: "vcs.revision", Value: "deadbeefcafebabe"},
+		{Key: "vcs.modified", Value: "true"},
+	}
+	got := formatVersion(func() (*debug.BuildInfo, bool) { return info, true })
+	if !strings.Contains(got, " "+DevVersion+" ") {
+		t.Errorf("formatVersion = %q, want %q (devel main version falls back to DevVersion)", got, DevVersion)
+	}
+	if !strings.Contains(got, "(deadbee dirty)") {
+		t.Errorf("formatVersion = %q, want %q", got, "(deadbee dirty)")
 	}
 }
 

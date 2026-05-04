@@ -14,6 +14,7 @@
 //	chatd [--server URL] send <channel> <message|->
 //	chatd [--server URL] watch <channel>
 //	chatd help | --help | -h
+//	chatd version | --version | -v
 package main
 
 import (
@@ -45,6 +46,12 @@ func run(ctx context.Context, args []string) error {
 	if len(rest) == 0 || isTopLevelHelp(rest[0]) {
 		return cmd.WriteHelp(os.Stdout)
 	}
+	// `--version` / `-v` mirror the help short-circuit: they print and
+	// exit 0 without contacting any server, so we handle them here
+	// rather than as a regular subcommand that would build an Env.
+	if isTopLevelVersion(rest[0]) {
+		return cmd.WriteVersion(os.Stdout)
+	}
 
 	env := cmd.DefaultEnv()
 	env.Server = cmd.ResolveServer(server)
@@ -57,6 +64,10 @@ func run(ctx context.Context, args []string) error {
 
 func isTopLevelHelp(tok string) bool {
 	return tok == "help" || tok == "--help" || tok == "-h"
+}
+
+func isTopLevelVersion(tok string) bool {
+	return tok == "--version" || tok == "-v"
 }
 
 // stripServerFlag pulls --server / --server=URL out of args before
@@ -105,6 +116,8 @@ func Dispatch(ctx context.Context, env *cmd.Env, args []string) error {
 		return cmd.Send(ctx, env, rest)
 	case "watch":
 		return cmd.Watch(ctx, env, rest)
+	case "version":
+		return cmd.Version(ctx, env, rest)
 	default:
 		return fmt.Errorf("unknown subcommand %q", sub)
 	}

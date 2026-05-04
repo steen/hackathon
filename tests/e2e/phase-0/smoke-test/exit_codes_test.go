@@ -20,8 +20,10 @@ import (
 // The success leg is covered transitively by TestAC1 (exit 0 on a clean tree).
 // This test exercises the failure leg: a forced port conflict makes the server
 // fail to bind, downstream `chatd` calls return non-zero, `set -e` propagates,
-// and cleanup() dumps server.log to stderr. Asserts non-zero exit AND a
-// recognizable `[smoke]` error marker (or the cleanup log header) on stderr.
+// and cleanup() dumps server.log to stderr. Asserts non-zero exit AND two
+// failure-only markers — the cleanup-branch `--- server.log ---` header on
+// stderr, plus the `[smoke] register ` line that pins the failure mode to the
+// chatd register HTTP call.
 func TestAC2_SmokeScriptExitsZeroOnSuccessNonZeroWithClearErrorOnFailure(t *testing.T) {
 	root := repoRoot(t)
 
@@ -75,15 +77,33 @@ func TestAC2_SmokeScriptExitsZeroOnSuccessNonZeroWithClearErrorOnFailure(t *test
 		t.Fatalf("scripts/smoke.sh ExitCode == 0 despite Run() returning error: %v", err)
 	}
 
-	// "Clear error message" check: cleanup() dumps `--- server.log ---` to
-	// stderr on any non-zero exit, and the script's own failure paths print
-	// `[smoke] ` lines. Either is sufficient evidence of a recognizable
-	// error message reaching the operator.
+	// "Clear error message" check: assert two failure-only signals so a
+	// regression in either the cleanup dump or the failure-mode trigger
+	// point is caught. The previous looser check accepted any `[smoke] `
+	// line, which also matches success-path logs like
+	// `[smoke] building server + chatd...`.
+	//
+	// 1. `--- server.log ---` on stderr is emitted only inside cleanup()'s
+	//    `if [[ $rc -ne 0 ]]` branch, so its presence proves the script
+	//    took the failure-leg cleanup path.
+	// 2. `[smoke] register ` on combined stdout+stderr identifies the
+	//    specific failure mode this test forces: with our pre-bound TCP
+	//    listener the script's TCP-readiness probe still connects, the
+	//    server's bind silently fails, and the first failing command is
+	//    `chatd register` (HTTP to a non-HTTP listener). The script logs
+	//    `[smoke] register ${SMOKE_USER}` immediately before that call, so
+	//    its presence locates the failure at the expected point. If the
+	//    script started failing earlier (e.g. build break or port-open
+	//    timeout), this assertion would catch that drift.
 	stderrStr := stderr.String()
 	stdoutStr := stdout.String()
 	combined := stderrStr + stdoutStr
-	if !strings.Contains(stderrStr, "--- server.log ---") && !strings.Contains(combined, "[smoke] ") {
-		t.Fatalf("scripts/smoke.sh exited non-zero (%d) but stderr lacks a recognizable error marker\n--- stdout ---\n%s\n--- stderr ---\n%s",
+	if !strings.Contains(stderrStr, "--- server.log ---") {
+		t.Fatalf("scripts/smoke.sh exited non-zero (%d) but stderr lacks the cleanup-only `--- server.log ---` header\n--- stdout ---\n%s\n--- stderr ---\n%s",
+			exitErr.ExitCode(), stdoutStr, stderrStr)
+	}
+	if !strings.Contains(combined, "[smoke] register ") {
+		t.Fatalf("scripts/smoke.sh exited non-zero (%d) but did not log `[smoke] register `; failure mode shifted away from chatd register HTTP failure\n--- stdout ---\n%s\n--- stderr ---\n%s",
 			exitErr.ExitCode(), stdoutStr, stderrStr)
 	}
 }
