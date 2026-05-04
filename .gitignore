@@ -25,3 +25,4 @@ bin/
 # Claude Code agent runtime state (skills under .claude/skills/ remain tracked)
 .claude/worktrees/
 .claude/test-agent/
+.claude/scheduled_tasks.lock

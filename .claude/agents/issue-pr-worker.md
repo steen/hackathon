@@ -27,19 +27,23 @@ If anything is unclear, ask one specific question.
 ### 0. Worktree preflight — first tool call, before anything else
 
 ```bash
-pwd
-rtk git rev-parse --show-toplevel
+WORKTREE="$(pwd)"
+TOPLEVEL="$(rtk git rev-parse --show-toplevel)"
+PARENT="$(rtk git rev-parse --git-common-dir | xargs dirname)"
+echo "WORKTREE=$WORKTREE"
+echo "TOPLEVEL=$TOPLEVEL"
+echo "PARENT=$PARENT"
 ```
 
-Both must equal `/Users/jumoel/projects/steen/Hackathon/.claude/worktrees/agent-<your-id>`. If either prints the parent path, STOP and report — the harness has been observed to leak Edit/Write into the parent.
+`$WORKTREE` and `$TOPLEVEL` must be equal AND must contain `/.claude/worktrees/agent-`. `$PARENT` resolves to the parent repo's working tree (a different path) — capture it for the status-check guard below. If `$WORKTREE != $TOPLEVEL` or the path doesn't include `/.claude/worktrees/agent-`, STOP and report — the harness has been observed to leak Edit/Write into the parent.
 
-For every Edit/Write, use the absolute worktree-rooted path (`Write(file_path="/Users/jumoel/projects/steen/Hackathon/.claude/worktrees/agent-<id>/...")`). Never relative paths.
+For every Edit/Write, use the absolute worktree-rooted path (i.e. starting with `$WORKTREE`, e.g. `Write(file_path="$WORKTREE/...")`). Never relative paths.
 
 Before every commit, both must be true:
-- `rtk git -C <worktree> status --short` lists every change you intend.
-- `rtk git -C /Users/jumoel/projects/steen/Hackathon status --short` is empty of your changes.
+- `rtk git -C "$WORKTREE" status --short` lists every change you intend.
+- `rtk git -C "$PARENT" status --short` is empty of your changes.
 
-If the parent shows leakage: copy your changes into the worktree, `git -C /parent checkout --` tracked files, `rm` untracked-from-you, re-run the local CI mirror, then push.
+If the parent shows leakage: copy your changes into the worktree, `git -C "$PARENT" checkout --` tracked files, `rm` untracked-from-you, re-run the local CI mirror, then push.
 
 ### 1. Read the rules
 

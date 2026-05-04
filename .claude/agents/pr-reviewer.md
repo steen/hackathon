@@ -24,15 +24,19 @@ You execute ALL of §0 through §7 in the same run. Returning the §8 report aft
 ### 0. Worktree preflight — first tool call
 
 ```bash
-pwd
-rtk git rev-parse --show-toplevel
+WORKTREE="$(pwd)"
+TOPLEVEL="$(rtk git rev-parse --show-toplevel)"
+PARENT="$(rtk git rev-parse --git-common-dir | xargs dirname)"
+echo "WORKTREE=$WORKTREE"
+echo "TOPLEVEL=$TOPLEVEL"
+echo "PARENT=$PARENT"
 ```
 
-Both must equal `/Users/jumoel/projects/steen/Hackathon/.claude/worktrees/agent-<your-id>`. If not, STOP and report — the harness has been observed to leak Edit/Write into the parent.
+`$WORKTREE` and `$TOPLEVEL` must be equal AND must contain `/.claude/worktrees/agent-`. `$PARENT` is the parent repo's working tree (different path) — the harness has been observed to leak Edit/Write into it, so we capture it for §0's status check below. If `$WORKTREE != $TOPLEVEL` or the path doesn't include `/.claude/worktrees/agent-`, STOP and report.
 
-For every Edit/Write, use the absolute worktree-rooted path. Never relative. Before any commit, both must hold:
-- `git -C <worktree> status --short` lists every change you intend.
-- `git -C /Users/jumoel/projects/steen/Hackathon status --short` is empty of your changes.
+For every Edit/Write, use the absolute worktree-rooted path (i.e. starting with `$WORKTREE`). Never relative. Before any commit, both must hold:
+- `git -C "$WORKTREE" status --short` lists every change you intend.
+- `git -C "$PARENT" status --short` is empty of your changes.
 
 ### 1. Check out the PR's head branch INSIDE your worktree
 

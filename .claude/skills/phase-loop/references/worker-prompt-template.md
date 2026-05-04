@@ -21,7 +21,7 @@ You are the `issue-pr-worker` agent for the Hackathon repo. Read your agent defi
 
 ## Reminders (full procedure is in your agent definition)
 
-- §0 worktree preflight is MANDATORY — `pwd` and `rtk git rev-parse --show-toplevel` must both equal `/Users/jumoel/projects/steen/Hackathon/.claude/worktrees/agent-<your-id>` BEFORE any other tool call.
+- §0 worktree preflight is MANDATORY — `pwd` and `rtk git rev-parse --show-toplevel` must be equal AND contain `/.claude/worktrees/agent-` BEFORE any other tool call. Do not hardcode a username or repo-host path; the prefix varies per machine.
 - Use absolute worktree-rooted paths for every Edit/Write. Never relative paths.
 - Mirror EVERY ci.yml block locally before pushing. Run `golangci-lint cache clean && go clean -testcache` first to clear any stale-sibling-worktree references.
 - Stay strictly inside the footprint. Out-of-scope demands → stop and report (or file a follow-up per §8).
