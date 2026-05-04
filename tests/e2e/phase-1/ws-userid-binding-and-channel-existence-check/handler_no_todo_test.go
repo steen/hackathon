@@ -1,4 +1,4 @@
-package wsuseridbinding_test
+package ws_userid_binding_and_channel_existence_check_e2e_test
 
 import (
 	"os"
@@ -17,7 +17,7 @@ import (
 // file still mentions discarding userID. Line numbers may have shifted since
 // the spec was written; the durable check is the substring match.
 func TestAC4_TODOAtHandlerLine148IsRemoved(t *testing.T) {
-	root := repoRoot(t)
+	root := repoRootForAC4(t)
 	handlerPath := filepath.Join(root, "apps", "server", "internal", "wsapi", "handler.go")
 
 	content, err := os.ReadFile(handlerPath)
@@ -43,10 +43,10 @@ func TestAC4_TODOAtHandlerLine148IsRemoved(t *testing.T) {
 	}
 }
 
-// repoRoot walks up from this file
+// repoRootForAC4 walks up from this file
 // (<root>/tests/e2e/phase-1/ws-userid-binding-and-channel-existence-check/handler_no_todo_test.go)
 // to the repo root (5 Dir() calls). Sanity-checked by stat-ing go.mod.
-func repoRoot(t *testing.T) string {
+func repoRootForAC4(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
