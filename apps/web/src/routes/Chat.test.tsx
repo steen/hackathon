@@ -771,3 +771,25 @@ describe("test_web_message_timestamp_renders_humanized_form_not_raw_iso", () => 
     expect(timeEl?.textContent ?? "").toMatch(/^\d{2}:\d{2}$/);
   });
 });
+
+describe("test_web_chat_focus_management_mount_no_channels_focuses_heading", () => {
+  it("focuses the channel-name heading on mount when no channels exist (composer disabled)", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([]);
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: /select a channel/i });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(heading);
+    });
+    expect(heading.getAttribute("tabindex")).toBe("-1");
+  });
+});
