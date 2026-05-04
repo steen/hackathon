@@ -24,6 +24,7 @@ function setHash(path: string): void {
 export function App(): React.JSX.Element {
   const { token, user, loading } = useAuth();
   const [route, setRoute] = useState<Route>(() => readRoute());
+  const signedIn = token !== null && user !== null;
 
   useEffect(() => {
     function onChange(): void {
@@ -34,6 +35,33 @@ export function App(): React.JSX.Element {
       window.removeEventListener("hashchange", onChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (!signedIn) return;
+    const id = window.requestAnimationFrame(() => {
+      const composer = document.querySelector<HTMLInputElement>(
+        'input[aria-label="message"]:not([disabled])',
+      );
+      if (composer !== null) {
+        composer.focus();
+        return;
+      }
+      const heading = document.querySelector<HTMLElement>(".messages__header h2");
+      if (heading !== null) {
+        if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+        heading.focus();
+        return;
+      }
+      const list = document.querySelector<HTMLElement>('[data-testid="message-list"]');
+      if (list !== null) {
+        if (!list.hasAttribute("tabindex")) list.setAttribute("tabindex", "-1");
+        list.focus();
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, [signedIn]);
 
   if (loading) {
     return <div className="loading">Loading...</div>;
