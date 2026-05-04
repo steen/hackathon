@@ -1,0 +1,1 @@
+- chatd CLI: add discoverable top-level help. `chatd --help`, `chatd -h`, `chatd help`, and `chatd` with no args now print the same usage block — every subcommand with a one-line description, the `--server` flag, the `CHAT_SERVER` / `CHAT_PASSWORD` / `CHAT_INVITE_CODE` env vars, and the config-file path. Per-subcommand `-h` (e.g. `chatd send -h`) is unchanged. (#136)

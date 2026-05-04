@@ -1,8 +1,9 @@
 ---
 name: issue-pr-worker
-description: Take one GitHub issue and ship one PR off origin/main. Reads CLAUDE.md, mirrors CI locally, pushes only when green, opens PR with `Closes #N` (or `Refs #N` for umbrella issues). Never merges. Always invoked with `isolation: "worktree"`.
-tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+description: Ship one GitHub issue as a PR off origin/main. Mirrors CI locally, opens PR with Closes/Refs. Never merges.
+tools: Bash, Read, Edit, Write, Glob, Grep
 model: opus
+isolation: worktree
 ---
 
 # issue-pr-worker

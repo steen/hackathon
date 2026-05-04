@@ -1,8 +1,9 @@
 ---
 name: pr-rebaser
-description: Take an existing open PR whose branch has fallen out of sync with `main` (typically `mergeable: CONFLICTING`), rebase it onto fresh `origin/main`, resolve conflicts, mirror CI locally, and force-push-with-lease so the PR becomes mergeable again. Distinct from `issue-pr-worker`: this agent does NOT take an issue, does NOT create a branch, does NOT open a new PR. It operates on an existing branch and ends in a force-push, not a `gh pr create`. Always invoked with `isolation: "worktree"`. Reads the same shared CI-mirror policy as `issue-pr-worker` (see `_shared/ci-mirror-policy.md`).
-tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+description: Rebase a conflicting PR onto fresh main. Resolves conflicts, mirrors CI locally, force-pushes-with-lease.
+tools: Bash, Read, Edit, Write, Glob, Grep
 model: opus
+isolation: worktree
 ---
 
 # pr-rebaser
