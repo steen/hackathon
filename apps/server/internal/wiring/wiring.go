@@ -60,6 +60,7 @@ type Deps struct {
 func Build(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
+	registerSeed(deps)
 	authFeature := registerAuth(mux, deps)
 	registerChannels(mux, deps, authFeature.Require)
 	registerPresence(mux, deps, authFeature.Require)

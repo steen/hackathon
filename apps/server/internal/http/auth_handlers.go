@@ -21,11 +21,12 @@ import (
 // auth_events kinds — kept here as constants so test code can assert
 // against the same strings the handlers write.
 const (
-	AuthEventRegister     = "register"
-	AuthEventLoginSuccess = "login_success"
-	AuthEventLoginFailure = "login_failure"
-	AuthEventLogout       = "logout"
-	AuthEventTicketIssued = "ws_ticket_issued"
+	AuthEventRegister       = "register"
+	AuthEventRegisterFailed = "register_failed"
+	AuthEventLoginSuccess   = "login_success"
+	AuthEventLoginFailure   = "login_failure"
+	AuthEventLogout         = "logout"
+	AuthEventTicketIssued   = "ws_ticket_issued"
 )
 
 // usernameRe is the validation regex for new usernames. PRD §9 does
@@ -99,20 +100,24 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	if h.deps.InviteCode == "" {
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "registration is disabled")
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(h.deps.InviteCode)) != 1 {
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "invalid invite code")
 		return
 	}
 	username := strings.TrimSpace(req.Username)
 	if !usernameRe.MatchString(username) {
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
 			"username must be 3-32 chars: letters, digits, dash, underscore")
 		return
 	}
 	if err := auth.EnforcePolicy(req.Password); err != nil {
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
 		switch {
 		case errors.Is(err, auth.ErrPasswordTooShort):
 			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
@@ -127,11 +132,13 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}
 	hash, err := auth.Hash(req.Password)
 	if err != nil {
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not hash password")
 		return
 	}
 	id := ids.NewULID()
 	if err := h.store.CreateUser(r.Context(), id, username, hash, h.deps.Now()); err != nil {
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
 		if errors.Is(err, ErrUsernameTaken) {
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "username already taken")
 			return
