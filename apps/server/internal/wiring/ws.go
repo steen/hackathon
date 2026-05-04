@@ -9,10 +9,12 @@ import (
 
 // registerWS wires the WebSocket upgrade handler at /ws and the
 // /debug/subs gauge. tickets is the store registerAuth filled; nil
-// in the no-DB boot path means /ws will reject every upgrade with
-// the wsapi handler's own "ticket store unavailable" branch (if any)
-// — but the route is still registered so /debug/subs stays useful
-// in smoke contexts that don't need auth.
+// in the no-DB boot path means /ws skips ticket enforcement (see
+// wsapi.Handler's docstring: "When ts is nil, ticket enforcement is
+// skipped. This branch exists for the phase-0 smoke wiring and for
+// tests that exercise the hub fan-out without standing up the auth
+// stack."). /debug/subs is registered unconditionally so smoke
+// scripts can read it even without auth.
 func registerWS(mux *http.ServeMux, deps Deps, tickets *auth.TicketStore) {
 	wsCfg := wsapi.Config{OriginPatterns: deps.AllowedOrigins}
 	if deps.Repo != nil {
