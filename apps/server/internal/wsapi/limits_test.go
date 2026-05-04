@@ -3,6 +3,7 @@ package wsapi_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -85,6 +86,13 @@ func TestWSRejectsMessageBodyOver4KiB(t *testing.T) {
 	if got != websocket.StatusMessageTooBig {
 		t.Fatalf("close code: got %d want %d (StatusMessageTooBig); err=%v",
 			got, websocket.StatusMessageTooBig, err)
+	}
+	var ce websocket.CloseError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *websocket.CloseError, got %T: %v", err, err)
+	}
+	if ce.Reason != wsapi.MessageBodyLimitCloseReason {
+		t.Fatalf("close reason: got %q want %q", ce.Reason, wsapi.MessageBodyLimitCloseReason)
 	}
 }
 
