@@ -168,16 +168,26 @@ If you don't find a clear `Closes #N` linkage, post the finding as a comment on 
 
 Poll `gh pr checks <pr>` until all checks `pass`. Cap at 3 fix iterations on the same PR — if still red after the third, leave a final summary comment naming the blocker, set `MERGED: no` + `BLOCKED: <reason>`, and exit. Don't strip the `in-review` label; the human takes it from there.
 
-### 7. Squash-merge
+### 7. Merge
+
+Merging is this agent's defining job — the standing memory rule `feedback_no_pr_merging.md` has a written exception for this agent specifically (see clause 2). Try merge methods in order, falling through if the repo rejects one. Take the first method that succeeds:
 
 ```bash
-rtk gh pr merge <pr> --squash --subject "<title> (#<pr>)" --body "<one-paragraph net-effect summary>"
+SUBJ="<title> (#<pr>)"
+BODY="<one-paragraph net-effect summary>"
+
+rtk gh pr merge <pr> --squash --subject "$SUBJ" --body "$BODY" \
+  || rtk gh pr merge <pr> --merge  --subject "$SUBJ" --body "$BODY" \
+  || rtk gh pr merge <pr> --rebase
+
 rtk git fetch --all --prune          # refresh local tracking refs after the merge
 ```
 
-Closing the PR auto-removes the `in-review` label.
+`--squash` is preferred (cleanest history); fall through to `--merge` (merge commit) and then `--rebase` if the repo settings forbid the prior method. Most repos accept at least one. Closing the PR auto-removes the `in-review` label.
 
-The standing memory rule `feedback_no_pr_merging.md` exempts this agent specifically — see its second exception clause. The harness should allow `gh pr merge` from a `pr-reviewer` dispatch. If a Bash call is denied with a memory-rule reason, surface that to the supervisor in `BLOCKED:` rather than retrying the call.
+Set `MERGED: yes` and surface the URL of the merged PR in §8.
+
+If ALL three methods are rejected by repo settings (`Squash/Merge/Rebase merges are not allowed on this repository`), set `MERGED: no` and `BLOCKED: repo disallows all merge methods` — that's a repo-config issue the user must resolve. If the harness itself denies the `gh pr merge` call citing a memory-rule reason, that's a bug in the harness honoring `feedback_no_pr_merging.md` clause 2 — surface in `BLOCKED:` and stop, do not retry.
 
 ### 8. Report back
 
