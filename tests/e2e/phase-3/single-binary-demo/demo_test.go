@@ -150,27 +150,19 @@ func requirePNPMWorkspace(t *testing.T, root string) {
 // redirected to a per-test temp path so the suite never overwrites the
 // repo's bin/chat-server.
 //
-// The script overlays apps/web/dist/* onto apps/server/internal/web/dist/.
-// Most of those copied files are .gitignored, but the dist/index.html
-// placeholder is *tracked* (it's the file //go:embed pulls in for plain
-// `go build ./apps/server`). The script's `cp -R` overwrites it with
-// the real Vite build's index.html, dirtying the working tree from a
-// developer's perspective. We snapshot the placeholder before the build
-// and restore it on test cleanup so running this suite does not leave
-// `git status` showing a modified placeholder.
+// The script overlays apps/web/dist/* onto apps/server/internal/web/dist/
+// and snapshots/restores the tracked dist/index.html placeholder around
+// `go build`, so the working tree is clean on exit. As a regression
+// guard against #489, this helper records the placeholder bytes before
+// the script runs and fails if they differ afterwards.
 func buildSingleBinary(t *testing.T, root string) string {
 	t.Helper()
 
 	placeholder := filepath.Join(root, "apps", "server", "internal", "web", "dist", "index.html")
-	saved, readErr := os.ReadFile(placeholder) //nolint:gosec // reading our own repo path
+	before, readErr := os.ReadFile(placeholder) //nolint:gosec // reading our own repo path
 	if readErr != nil {
-		t.Fatalf("snapshot placeholder %s: %v", placeholder, readErr)
+		t.Fatalf("read placeholder %s before build: %v", placeholder, readErr)
 	}
-	t.Cleanup(func() {
-		if err := os.WriteFile(placeholder, saved, 0o644); err != nil { //nolint:gosec // restoring tracked file
-			t.Logf("restore placeholder %s: %v", placeholder, err)
-		}
-	})
 
 	binDir := t.TempDir()
 	binPath := filepath.Join(binDir, "chatd-bundled")
@@ -187,6 +179,15 @@ func buildSingleBinary(t *testing.T, root string) string {
 	if _, err := os.Stat(binPath); err != nil {
 		t.Fatalf("expected binary at %s after build: %v", binPath, err)
 	}
+
+	after, readErr := os.ReadFile(placeholder) //nolint:gosec // reading our own repo path
+	if readErr != nil {
+		t.Fatalf("read placeholder %s after build: %v", placeholder, readErr)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatalf("scripts/build-single-binary.sh left tracked placeholder %s modified (regression of #489)", placeholder)
+	}
+
 	return binPath
 }
 
