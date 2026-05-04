@@ -109,13 +109,18 @@ export function Chat(): React.JSX.Element {
   // event. The presence list itself reorders rather than appends rows, so
   // SR users don't get an aria-live additions announcement from the list —
   // we mirror the event into a sibling status region instead. When the
-  // username is unknown (live join for an id not in the seeded directory)
-  // the phrase elides the id rather than reading out a UUID.
+  // username is unknown (live event for an id not in the seeded directory)
+  // the phrase elides the id rather than reading out a UUID. The fallback
+  // differs by kind: "a new user" reads naturally for joins but is
+  // grammatically odd for leaves (the leaver isn't new from the listener's
+  // frame), so unknown leaves drop "new" — see issue #495.
   const presenceAnnouncement = useMemo<string>(() => {
     const ev = presenceState.lastEvent;
     if (ev === null) return "";
-    const who = ev.username.length > 0 ? ev.username : "a new user";
-    return ev.kind === "join" ? `${who} joined` : `${who} left`;
+    if (ev.username.length > 0) {
+      return ev.kind === "join" ? `${ev.username} joined` : `${ev.username} left`;
+    }
+    return ev.kind === "join" ? "a new user joined" : "a user left";
   }, [presenceState.lastEvent]);
 
   // Auth user before presence: own messages render correctly even before
