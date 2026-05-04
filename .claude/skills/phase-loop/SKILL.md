@@ -50,7 +50,7 @@ Capture each open PR's file footprint (= conflict surface for this tick). Each a
 rtk gh issue list --state open --label epic --json number,title --limit 20
 ```
 
-Take the lowest-numbered open epic (or `phase-override`). Read its body — specifically the `## Sub-issues` section, which lists sub-issues in **priority order** (the durable repo convention). The order in that list is what step 5 dispatches against, NOT numerical issue order.
+Take the lowest-numbered open epic (or `phase-override`). Sub-issue priority is read from the GitHub native sub-issue link in §5; do not parse the epic body's textual `## Sub-issues` section.
 
 ### 4. Filter sub-issues for eligibility
 
@@ -68,13 +68,16 @@ If empty, **idle** — emit `references/idle-banner.md` and skip to step 12.
 
 Take the first eligible item from the priority order as the primary; add more eligible items in priority order whose footprints are disjoint from the primary AND from each other AND from every open PR. Cap at 3 subagents per tick.
 
-**Priority order — try these sources in order, use the first one that's available:**
+**Priority order — single source of truth: the GitHub native sub-issue list, in the order the API returns it.** This matches the order shown on the epic's web view. The user curates priority by reordering sub-issues in the GitHub UI; the API reflects that ordering.
 
-1. **Textual `## Sub-issues` list in the epic body.** The durable repo convention. Items appear in intentional priority; their order wins.
-2. **Native GitHub sub-issue link order.** If the epic body lacks `## Sub-issues`, query `rtk gh api repos/steen/Hackathon/issues/<epic>/sub_issues --jq '.[] | .number'` — that returns sub-issues in the order they were linked, which is approximately the order someone curated them.
-3. **Analytical order.** If neither above gives ordering (or the lists are empty), read each open sub-issue's body and infer order from content: explicit gating phrases (`must run first`, `blocks the rest`, `depends on #N`, `after #N lands`), upstream dependencies named in the issue, and severity/scope. Construct a topological ordering with gates first, then dependencies, then independent items by smallest scope. Surface the inferred ordering in chat so the user can override.
+```bash
+rtk gh api --paginate "repos/steen/Hackathon/issues/<epic>/sub_issues?per_page=100" \
+  --jq '.[] | .number'
+```
 
-NEVER fall back to numerical issue-number order. Numbers are creation timestamps, not priority.
+`--paginate` is required — the default page size is 30 and an epic can hold up to 100 sub-issues (GitHub's hard cap per parent).
+
+Do NOT parse the epic body's textual `## Sub-issues` section; do NOT fall back to issue-number order; do NOT infer order analytically from issue bodies. The native sub-issue link order, as the UI shows it, is authoritative.
 
 If a sub-issue is explicitly flagged as gating ("must run first", "blocks the rest", or similar in the body / epic deliverables), dispatch it ALONE — don't add parallel work that the audit/gate may invalidate.
 
