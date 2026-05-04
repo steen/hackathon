@@ -51,12 +51,14 @@ func TestStripServerFlagAbsent(t *testing.T) {
 }
 
 func TestIsTopLevelHelp(t *testing.T) {
-	for _, tok := range []string{"help", "--help", "-h"} {
+	for _, tok := range []string{"--help", "-h"} {
 		if !isTopLevelHelp(tok) {
 			t.Errorf("isTopLevelHelp(%q) = false, want true", tok)
 		}
 	}
-	for _, tok := range []string{"", "send", "--server", "register", "-help"} {
+	// `help` (the subcommand) is dispatched, not short-circuited, so it
+	// reaches Dispatch's "help" case alongside the other subcommands.
+	for _, tok := range []string{"", "help", "send", "--server", "register", "-help"} {
 		if isTopLevelHelp(tok) {
 			t.Errorf("isTopLevelHelp(%q) = true, want false", tok)
 		}

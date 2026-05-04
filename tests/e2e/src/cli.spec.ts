@@ -50,10 +50,12 @@ describe("CLI e2e (real chatd against real server)", () => {
       expect(login.exitCode, `login stderr: ${login.stderr}`).toBe(0);
       expect(login.stdout).toContain(`Logged in as ${username}`);
 
-      // list channels (initially empty for a fresh DB)
+      // list channels (fresh DB has the phase-3-seeded #general row)
       const chBefore = await cli.run(["channels"]);
       expect(chBefore.exitCode).toBe(0);
-      expect(chBefore.stdout.trim()).toBe("");
+      const beforeLines = chBefore.stdout.trim().split("\n").filter(Boolean);
+      expect(beforeLines.length).toBe(1);
+      expect(beforeLines[0]).toMatch(/\tgeneral$/);
 
       // create channel via REST (CLI surface has no create-channel; same as smoke.sh)
       const tok = (await loginUser(fx.baseUrl, username, TEST_PASSWORD)).token;

@@ -7,12 +7,25 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 )
+
+// wsDialURL builds the test WS URL via url.Values so reserved
+// characters in ticket/channel encode correctly. An empty channel
+// omits ?channel=, which the handler treats as the #general sentinel.
+func wsDialURL(base, ticket, channel string) string {
+	q := url.Values{}
+	q.Set("ticket", ticket)
+	if channel != "" {
+		q.Set("channel", channel)
+	}
+	return base + "?" + q.Encode()
+}
 
 // TestAC4_WSHardening_UnknownChannel_RejectedAtUpgrade covers the
 // upgrade-arm of AC-4 verbatim:
@@ -101,8 +114,7 @@ func TestAC4_WSHardening_UnknownChannel_RejectedAtUpgrade(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			url := srv.wsURL + "?ticket=" + ticket + "&channel=" + tc.channel
-			c, resp, err := websocket.Dial(ctx, url, nil)
+			c, resp, err := websocket.Dial(ctx, wsDialURL(srv.wsURL, ticket, tc.channel), nil)
 			if c != nil {
 				defer c.CloseNow()
 			}
@@ -152,7 +164,7 @@ func TestAC4_WSHardening_UnknownChannelDoesNotPoisonServer(t *testing.T) {
 	badTicket := mintTicket(t, srv)
 	ctxBad, cancelBad := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelBad()
-	cBad, respBad, err := websocket.Dial(ctxBad, srv.wsURL+"?ticket="+badTicket+"&channel=NOT-A-REAL-ULID", nil)
+	cBad, respBad, err := websocket.Dial(ctxBad, wsDialURL(srv.wsURL, badTicket, "NOT-A-REAL-ULID"), nil)
 	if cBad != nil {
 		_ = cBad.CloseNow()
 	}
@@ -170,7 +182,7 @@ func TestAC4_WSHardening_UnknownChannelDoesNotPoisonServer(t *testing.T) {
 	goodTicket := mintTicket(t, srv)
 	ctxGood, cancelGood := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelGood()
-	cGood, respGood, err := websocket.Dial(ctxGood, srv.wsURL+"?ticket="+goodTicket, nil)
+	cGood, respGood, err := websocket.Dial(ctxGood, wsDialURL(srv.wsURL, goodTicket, ""), nil)
 	if err != nil {
 		body := ""
 		if respGood != nil {

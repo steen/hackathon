@@ -7,9 +7,9 @@ import (
 // AC-1: GET /api/channels returns the list of channels (US-3).
 //
 // Boots the server with a fresh sqlite db, registers + logs in, asserts
-// the list endpoint returns a JSON array (initially empty since the
-// schema does not seed a default channel), then creates one and
-// confirms a follow-up list contains it by name.
+// the list endpoint contains the seeded #general channel (phase-3 seed,
+// apps/server/internal/seed/seed.go) and nothing else, then creates a
+// channel with a random name and confirms a follow-up list contains it.
 func TestAC1_ListChannelsReturnsCreated(t *testing.T) {
 	srv := startServer(t)
 
@@ -17,10 +17,11 @@ func TestAC1_ListChannelsReturnsCreated(t *testing.T) {
 	password := randomPassword(t)
 	tok, _ := register(t, srv, username, password)
 
-	// Empty initially (no migration seeds channels).
+	// Phase 3 seeds a #general channel on first boot; the only entry
+	// in a fresh-db list should be that one.
 	initial := listChannels(t, srv, tok)
-	if len(initial) != 0 {
-		t.Fatalf("AC-1: initial channel list should be empty, got %d entries: %+v", len(initial), initial)
+	if len(initial) != 1 || initial[0].Name != "general" {
+		t.Fatalf("AC-1: fresh-db list should be exactly the seeded #general channel, got %+v", initial)
 	}
 
 	name := randomChannelName(t)
