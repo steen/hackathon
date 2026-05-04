@@ -539,6 +539,42 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
       expect(live.textContent).toBe("a new user joined");
     });
   });
+
+  it("announces 'a user left' when the leaving id is not in the seeded directory", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => !s.url.includes("channel="))).toBe(true);
+    });
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U-stranger" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("a user left");
+    });
+  });
 });
 
 describe("test_web_presence_live_region_rebroadcasts_join_when_already_present", () => {
