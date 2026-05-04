@@ -49,3 +49,16 @@ func TestStripServerFlagAbsent(t *testing.T) {
 		t.Errorf("rest = %v, want [channels]", rest)
 	}
 }
+
+func TestIsTopLevelHelp(t *testing.T) {
+	for _, tok := range []string{"help", "--help", "-h"} {
+		if !isTopLevelHelp(tok) {
+			t.Errorf("isTopLevelHelp(%q) = false, want true", tok)
+		}
+	}
+	for _, tok := range []string{"", "send", "--server", "register", "-help"} {
+		if isTopLevelHelp(tok) {
+			t.Errorf("isTopLevelHelp(%q) = true, want false", tok)
+		}
+	}
+}
