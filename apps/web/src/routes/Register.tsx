@@ -1,7 +1,7 @@
 import type * as React from "react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
-import { formAuthMessage } from "../lib/userFacingError.js";
+import { registerAuthMessage } from "../lib/userFacingError.js";
 
 export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): React.JSX.Element {
   const { register } = useAuth();
@@ -27,7 +27,7 @@ export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): 
     try {
       await register(username, password, inviteCode);
     } catch (err) {
-      setError(formAuthMessage("Registration failed", err));
+      setError(registerAuthMessage("Registration failed", err));
     } finally {
       setBusy(false);
     }

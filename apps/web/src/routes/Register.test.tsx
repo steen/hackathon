@@ -89,7 +89,7 @@ describe("test_web_register_form_requires_invite_code", () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith("Registration failed", raw);
   });
 
-  it("renders invalid-credentials copy on 401 without leaking the raw err.message", async () => {
+  it("renders invite-rejected copy on 401 without leaking the raw err.message", async () => {
     const raw = new ApiError(401, "unauthorized", "invite-rejected-internal-detail");
     registerMock.mockRejectedValue(raw);
     render(
@@ -103,7 +103,8 @@ describe("test_web_register_form_requires_invite_code", () => {
     await u.type(screen.getByLabelText(/invite code/i), "test-invite-code-placeholder");
     await u.click(screen.getByRole("button", { name: /create account/i }));
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(/that username and password don't match/i);
+    expect(alert).toHaveTextContent(/that invite code wasn't accepted/i);
+    expect(alert).not.toHaveTextContent(/that username and password don't match/i);
     expect(alert).not.toHaveTextContent(/invite-rejected-internal-detail/i);
   });
 
