@@ -235,3 +235,28 @@ button.linklike {
   text-align: center;
   color: var(--muted);
 }
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Accent-filled controls need a contrasting ring against the blue. The
+   double-ring (white inset gap + dark outer) keeps the focus indicator
+   visible against both the accent fill and the surrounding white surface. */
+.auth-page button[type="submit"]:focus-visible,
+.sidebar li button[aria-current="true"]:focus-visible,
+.composer button:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 0;
+  box-shadow: 0 0 0 2px #fff inset;
+}
