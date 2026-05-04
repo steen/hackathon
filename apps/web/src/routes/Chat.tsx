@@ -142,7 +142,16 @@ export function Chat(): React.JSX.Element {
           </h2>
           <ConnectionBadge state={messagesState.connection} />
         </header>
-        <div className="messages__list" ref={listRef} data-testid="message-list">
+        <div
+          className="messages__list"
+          ref={listRef}
+          data-testid="message-list"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-atomic="false"
+          aria-label="messages"
+        >
           {messagesState.error !== null ? (
             <p role="alert" className="error">
               {messagesState.error}
