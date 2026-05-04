@@ -193,6 +193,50 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 			t.Errorf("App.tsx: expected <Chat /> to be rendered for the authenticated route")
 		}
 	})
+
+	// Guard: the assertInputWithNameAndType helper must require BOTH
+	// name= and type= on the same <input> tag. A regression that
+	// accidentally accepts one-of-two would let a Login.tsx that drops
+	// type="password" still pass AC-2.
+	t.Run("input_with_name_and_type_helper_requires_both_attributes", func(t *testing.T) {
+		cases := []struct {
+			label string
+			body  string
+			want  bool
+		}{
+			{
+				label: "both name and type present, name first",
+				body:  `<input name="password" type="password" />`,
+				want:  true,
+			},
+			{
+				label: "both name and type present, type first",
+				body:  `<input type="password" name="password" />`,
+				want:  true,
+			},
+			{
+				label: "name missing",
+				body:  `<input type="password" />`,
+				want:  false,
+			},
+			{
+				label: "type missing",
+				body:  `<input name="password" />`,
+				want:  false,
+			},
+			{
+				label: "name and type on different <input> tags",
+				body:  `<input name="password" /><input type="password" />`,
+				want:  false,
+			},
+		}
+		for _, tc := range cases {
+			got := hasInputWithNameAndType(tc.body, "password", "password")
+			if got != tc.want {
+				t.Errorf("%s: hasInputWithNameAndType = %v, want %v", tc.label, got, tc.want)
+			}
+		}
+	})
 }
 
 // mustReadFile reads path or fails the test. Used to keep the per-screen
@@ -221,19 +265,33 @@ func assertInputWithName(t *testing.T, body, name, label string) {
 	}
 }
 
+// inputTagPattern captures the interior of a single <input ...> opening
+// tag (everything between `<input` and the closing `>` or `/>`). The body
+// of any input element never contains another `<` (inputs are
+// self-closing in JSX), so `[^<]*?` is sufficient to bound a tag and
+// avoid running across siblings.
+var inputTagPattern = regexp.MustCompile(`(?s)<input\b([^<]*?)/?>`)
+
+// hasInputWithNameAndType reports whether body contains an <input> tag
+// whose interior names both name="<wantName>" and type="<wantType>",
+// in either attribute order.
+func hasInputWithNameAndType(body, wantName, wantType string) bool {
+	nameAttr := `name="` + wantName + `"`
+	typeAttr := `type="` + wantType + `"`
+	for _, m := range inputTagPattern.FindAllStringSubmatch(body, -1) {
+		interior := m[1]
+		if strings.Contains(interior, nameAttr) && strings.Contains(interior, typeAttr) {
+			return true
+		}
+	}
+	return false
+}
+
 // assertInputWithNameAndType asserts the body contains an <input> with
 // both the given name and type attributes (in either order).
 func assertInputWithNameAndType(t *testing.T, body, name, typ, label string) {
 	t.Helper()
-	bothOrders := regexp.MustCompile(
-		`(?s)<input\b[^<]*?\bname="` + regexp.QuoteMeta(name) +
-			`"[^<]*?\btype="` + regexp.QuoteMeta(typ) + `"[^<]*?/?>`,
-	)
-	reverse := regexp.MustCompile(
-		`(?s)<input\b[^<]*?\btype="` + regexp.QuoteMeta(typ) +
-			`"[^<]*?\bname="` + regexp.QuoteMeta(name) + `"[^<]*?/?>`,
-	)
-	if !bothOrders.MatchString(body) && !reverse.MatchString(body) {
+	if !hasInputWithNameAndType(body, name, typ) {
 		t.Errorf("%s: expected an <input name=%q type=%q> element", label, name, typ)
 	}
 }
