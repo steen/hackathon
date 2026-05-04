@@ -1,5 +1,5 @@
 import type * as React from "react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
 
 export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): React.JSX.Element {
@@ -9,6 +9,11 @@ export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): 
   const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const usernameRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    usernameRef.current?.focus();
+  }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
@@ -38,6 +43,7 @@ export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): 
         <label>
           <span>Username</span>
           <input
+            ref={usernameRef}
             name="username"
             value={username}
             onChange={(e) => {

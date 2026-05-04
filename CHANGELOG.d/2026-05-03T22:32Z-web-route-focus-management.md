@@ -1,0 +1,1 @@
+- web: keyboard / SR users now land on a focusable anchor on every route change — username input on `<Login />` / `<Register />` mount (incl. logout and the Login ↔ Register switcher), and the composer or channel-name heading on `<Chat />` mount after sign-in. (#141)
