@@ -111,7 +111,9 @@ func TestPostMessageRejectsUnknownChannel(t *testing.T) {
 	}
 }
 
-// US-5 — empty/oversized bodies rejected.
+// US-5 — empty/oversized bodies rejected. Oversize must surface the
+// dedicated `message_too_large` code so clients can distinguish a body-
+// cap reject from a generic bad_request (issue #419, see #137/#147).
 func TestPostMessageRejectsBadBodies(t *testing.T) {
 	cf := newChannelsFixture(t)
 	defer cf.close()
@@ -119,12 +121,13 @@ func TestPostMessageRejectsBadBodies(t *testing.T) {
 	chID := createChannelOK(t, cf, tok, "general")
 
 	cases := []struct {
-		name string
-		body string
+		name     string
+		body     string
+		wantCode string
 	}{
-		{"empty", ""},
-		{"whitespace", "   "},
-		{"oversized", strings.Repeat("x", MaxMessageBodyBytes+1)},
+		{"empty", "", CodeBadRequest},
+		{"whitespace", "   ", CodeBadRequest},
+		{"oversized", strings.Repeat("x", MaxMessageBodyBytes+1), "message_too_large"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -132,6 +135,16 @@ func TestPostMessageRejectsBadBodies(t *testing.T) {
 				map[string]string{"body": c.body}, tok)
 			if rr.Code != stdhttp.StatusBadRequest {
 				t.Fatalf("got %d want 400", rr.Code)
+			}
+			var env Envelope
+			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+				t.Fatalf("decode envelope: %v body=%s", err, rr.Body.String())
+			}
+			if env.OK || env.Error == nil {
+				t.Fatalf("envelope: %+v", env)
+			}
+			if env.Error.Code != c.wantCode {
+				t.Fatalf("code: got %q want %q", env.Error.Code, c.wantCode)
 			}
 		})
 	}

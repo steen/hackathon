@@ -132,7 +132,7 @@ func (h *MessagesHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		return
 	}
 	if len(body) > MaxMessageBodyBytes {
-		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "message body exceeds 4 KiB")
+		WriteMessageTooLarge(w)
 		return
 	}
 	id := ids.NewULID()

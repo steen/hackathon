@@ -56,19 +56,8 @@ func TestAC1_Register_PersistsTokenViaFlags(t *testing.T) {
 }
 
 // TestAC1_Register_PromptsForPasswordAndInviteCode drives register
-// through the prompt path with stdin pre-stuffed.
-//
-// Known to FAIL at this SHA: apps/cli/cmd/prompt.go::readLine creates
-// a new bufio.Reader on every call, so the second prompt sees an
-// empty stream when stdin is a script-piped pre-stuffed buffer (works
-// interactively, breaks for automation pipelines). The failure mode
-// is `Password: Invite code: chatd: invite code is required` on
-// stderr — the second readSecret returns "" because the first one
-// drained the underlying reader into its bufio buffer.
-//
-// Surfaced for the human reviewer; do NOT silence by editing the prod
-// code from this PR. See the findings doc's "Test run failures"
-// section for the suggested fix.
+// through the prompt path with stdin pre-stuffed for password and
+// invite code.
 func TestAC1_Register_PromptsForPasswordAndInviteCode(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
