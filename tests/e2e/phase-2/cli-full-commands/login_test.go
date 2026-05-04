@@ -65,14 +65,7 @@ func TestAC2_Login_PersistsTokenViaFlagsUnderXDG(t *testing.T) {
 }
 
 // TestAC2_Login_PromptsForUsernameAndPassword drives login through the
-// prompt path with stdin pre-stuffed.
-//
-// Known to FAIL at this SHA: same bug as AC-1's prompt test —
-// apps/cli/cmd/prompt.go::readLine wraps Stdin in a fresh
-// bufio.Reader on every call, so multi-line scripted stdin gets
-// drained by the first prompt. The failure mode is
-// `Username: Password: chatd: password is required`. Surfaced for the
-// reviewer; the fix lives in a separate PR.
+// prompt path with stdin pre-stuffed for username and password.
 func TestAC2_Login_PromptsForUsernameAndPassword(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()

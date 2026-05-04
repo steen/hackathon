@@ -101,22 +101,9 @@ func TestAC4_History_RespectsBeforeFlagWhenBeforeArg(t *testing.T) {
 	}
 }
 
-// TestAC4_History_AcceptsFlagsAfterPositional probes whether the impl
-// supports the syntax in the AC text:
-//
-//	chatd history <channel> [--limit N] [--before ID]
-//
-// Known to FAIL at this SHA: apps/cli/cmd/history.go uses stdlib
-// `flag.Parse`, which stops at the first non-flag token. Passing the
-// channel positionally before --limit/--before causes the impl to
-// reject the command with the usage error
-// `chatd: usage: chatd history <channel> [--limit N] [--before ID]`.
-//
-// The bug is a spec/impl mismatch. Either the impl needs to switch
-// to a parser that allows interleaved flags+args (e.g. cobra/pflag),
-// OR the spec's syntax needs to put flags before the channel.
-// Surfaced for human review; do not silence by editing prod code
-// from this PR.
+// TestAC4_History_AcceptsFlagsAfterPositional asserts the impl
+// supports the AC's `chatd history <channel> [--limit N] [--before ID]`
+// syntax — flags interleaved after the positional channel arg.
 func TestAC4_History_AcceptsFlagsAfterPositional(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
