@@ -130,18 +130,41 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
+// startServerOpts lets a test override the default `go build` line.
+// AC-4's panic half (internal_detail_redaction_test.go) sets
+// BuildTags = "panicprobe" so the binary registers /debug/panic from
+// apps/server/internal/wiring/panicprobe.go (the dead-code-by-default
+// route gated behind `//go:build panicprobe`).
+type startServerOpts struct {
+	// TODO(#306): BuildTags is the call-site link to the panicprobe
+	// wiring tracked at #306. A `git grep -n '#306'` lands here.
+	BuildTags string
+}
+
 // startServer builds apps/server, picks a free port, starts the binary
 // with random secrets and a tempdir DB, captures stderr into srv.logs,
 // and registers a Cleanup that stops it. Returns once the port is
-// listening.
-func startServer(t *testing.T) *runningServer {
+// listening. Variadic opts keeps the existing zero-arg call sites
+// untouched while allowing AC-4's panic sub-test to opt into the
+// panicprobe build tag.
+func startServer(t *testing.T, opts ...startServerOpts) *runningServer {
 	t.Helper()
+
+	var opt startServerOpts
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 
 	root := repoRoot(t)
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "chat-server")
 
-	build := exec.Command("go", "build", "-o", binPath, "./apps/server")
+	buildArgs := []string{"build"}
+	if opt.BuildTags != "" {
+		buildArgs = append(buildArgs, "-tags="+opt.BuildTags)
+	}
+	buildArgs = append(buildArgs, "-o", binPath, "./apps/server")
+	build := exec.Command("go", buildArgs...)
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build ./apps/server failed: %v\n%s", err, out)
