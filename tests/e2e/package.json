@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "e2e:cli": "vitest run --project=cli",
+    "e2e:cli": "vitest run --project=cli-package",
     "e2e:ts-api-client": "vitest run --project=ts-api-client-package",
     "test": "vitest run"
   },
