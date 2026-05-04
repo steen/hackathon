@@ -89,6 +89,17 @@ func TestAC1_WebAppViteReactTypeScriptBuild(t *testing.T) {
 			}
 		}
 
+		// node_modules must already be installed for `pnpm --filter web
+		// build` to type-check (tsc -p tsconfig.build.json needs the
+		// `vite/client` types). The `go` CI job does not run pnpm
+		// install; it pairs with the `pnpm` and `e2e` jobs which do.
+		// Mirrors the AC-5 sibling at presence_ac5_test.go so both
+		// sub-tests skip identically when the upstream install hasn't
+		// happened.
+		if _, err := os.Stat(filepath.Join(webDir, "node_modules")); err != nil {
+			t.Skipf("apps/web/node_modules missing — run `pnpm install --frozen-lockfile` first: %v", err)
+		}
+
 		// Clean the prior dist so the assertion below proves *this*
 		// invocation produced the artifact.
 		distDir := filepath.Join(webDir, "dist")
