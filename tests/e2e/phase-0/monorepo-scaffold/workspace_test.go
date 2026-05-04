@@ -5,6 +5,7 @@ package monorepo_scaffold_e2e_test
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ func TestAC2_MonorepoScaffold_PnpmWorkspaceDeclaration(t *testing.T) {
 // non-blank line appears. Any non-list content under `packages:` (e.g.
 // a mapping) returns an error so the test surfaces unexpected shape
 // instead of silently passing.
-func parsePnpmWorkspacePackages(r interface{ Read(p []byte) (int, error) }) ([]string, error) {
+func parsePnpmWorkspacePackages(r io.Reader) ([]string, error) {
 	s := bufio.NewScanner(r)
 	var (
 		entries []string
