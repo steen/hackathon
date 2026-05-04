@@ -6,8 +6,8 @@ analyzed_commit: 00b10ce9349fb1372c624e01d8c77bf0738747de
 implementation_status: implemented
 total_acs: 5
 covered: 0
-partial: 0
-missing: 5
+partial: 1
+missing: 4
 deferred: 0
 ---
 
@@ -24,7 +24,7 @@ deferred: 0
 | AC-1 | The server tracks the set of currently connected (authenticated) users derived from active WS connections. | missing | — |
 | AC-2 | An event is broadcast when a user connects or disconnects (`presence` event with kind `join` / `leave`). | missing | — |
 | AC-3 | A REST endpoint `GET /api/presence` returns the current online user IDs/usernames. | missing | — |
-| AC-4 | The web app shows online users in the chat page; the CLI `chatd watch` optionally surfaces presence events. | missing | — |
+| AC-4 | The web app shows online users in the chat page; the CLI `chatd watch` optionally surfaces presence events. | partial | web half: `tests/e2e/playwright/presence.spec.ts` (added in PR #428); CLI half: missing |
 | AC-5 | Presence is consistent if the same user has multiple connections (counted as online while at least one connection is open). | missing | — |
 
 ## Findings
@@ -46,7 +46,7 @@ Per-AC sketches:
 
 - **AC-4 — `tests/e2e/phase-2/presence/clients_surface_test.go`.** This AC spans two clients (web + CLI). Two halves:
   1. **CLI surfacing:** boot server + build chatd. Register alice + bob. Alice runs `chatd --server <url> watch #general` with stdout captured. Bob dials a WS connection (any client). Assert alice's chatd stdout contains a presence event line (format depends on impl — read `apps/cli/cmd/watch.go` to see whether presence is rendered as `[+] bob joined` or as raw JSON; the AC says "optionally surfaces" so the test should accept either-or-suppressed by reading the impl first; if the impl suppresses presence by default, this sub-test asserts a `--show-presence` flag (or similar) gates it).
-  2. **Web surfacing:** covered by the `web-app` feature's AC-5 test (`tests/e2e/phase-2/web-app/presence.spec.ts`). This findings doc shouldn't duplicate it; cross-reference instead.
+  2. **Web surfacing:** covered by `tests/e2e/playwright/presence.spec.ts` (added in PR #428). It drives two real browser contexts (alice + bob) and asserts alice's chat page renders both users in `[data-testid="presence-list"]`. This findings doc cross-references it rather than duplicating the assertions.
 
   If the chatd impl doesn't expose presence today (the spec uses "optionally"), mark the CLI sub-test as the only required half of AC-4 and assert the impl-defined behavior — silence is acceptable per "optionally", in which case the test asserts that no extraneous garbage appears on stdout when bob joins.
 
@@ -66,4 +66,4 @@ Per-AC sketches:
 2. **Then:** AC-1 (tracking) — extends the helper with two users.
 3. **Then:** AC-2 (events) — needs a frame-collector helper but otherwise straightforward.
 4. **Then:** AC-5 (multi-connection) — most assertions, biggest test.
-5. **Last:** AC-4 (clients surface) — depends on chatd build; the web half lives under the `web-app` feature's E2E suite and should not be duplicated here.
+5. **Last:** AC-4 (clients surface) — only the CLI half remains; the web half is already covered by `tests/e2e/playwright/presence.spec.ts` (PR #428) and should not be duplicated here. This Go E2E sketch depends on the chatd build.
