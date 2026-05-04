@@ -48,6 +48,13 @@ export function Chat(): React.JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
+  // Mirror of `activeChannel` for the mount-time focus rAF callback, which
+  // captures its scope at mount (when activeChannel is still null) but fires
+  // after the channels-list effect has set the first channel.
+  const activeChannelRef = useRef<string | null>(activeChannel);
+  useEffect(() => {
+    activeChannelRef.current = activeChannel;
+  }, [activeChannel]);
 
   useEffect(() => {
     if (activeChannel === null && channelsState.channels.length > 0) {
@@ -60,13 +67,18 @@ export function Chat(): React.JSX.Element {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messagesState.messages]);
 
-  // Mount-time focus delivery: composer when enabled, else the channel heading,
-  // else the message list. Replaces App.tsx's imperative `document.querySelector`
-  // chain (issue #189). Sign-out unmounts <Chat />, so a later sign-in re-runs.
+  // Mount-time focus delivery: composer when a channel is active, else the
+  // channel heading, else the message list. Replaces App.tsx's imperative
+  // `document.querySelector` chain (issue #189). Sign-out unmounts <Chat />, so
+  // a later sign-in re-runs. The composer branch reads `activeChannelRef`
+  // (the source of truth driving `disabled` on the textarea) rather than the
+  // DOM `disabled` attribute — the ref reflects the latest state when the rAF
+  // callback fires after the initial channels-list resolve, where the captured
+  // closure value would still be the mount-time `null`.
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
       const composer = composerRef.current;
-      if (composer !== null && !composer.disabled) {
+      if (composer !== null && activeChannelRef.current !== null) {
         composer.focus();
         return;
       }
