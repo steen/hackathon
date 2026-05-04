@@ -37,6 +37,7 @@ func TestPresenceAC1_ServerTracksConnectedAuthenticatedUsers(t *testing.T) {
 	aliceConn := dialAuthenticatedWS(t, srv, aliceTok)
 	defer aliceConn.CloseNow()
 	bobConn := dialAuthenticatedWS(t, srv, bobTok)
+	defer bobConn.CloseNow()
 
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 2
