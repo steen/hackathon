@@ -13,10 +13,15 @@ import { defineWorkspace } from "vitest/config";
 // Adding a new suite: append one entry below pointing at
 // phase-N/<feature>/vitest.config.ts with a unique name, then add an
 // `e2e:<feature>` script that runs `vitest run --project=<name>`.
+//
+// Naming convention: project `name` matches the suite's directory leaf
+// (e.g. `ts-api-client-package` for phase-2/ts-api-client-package). The
+// root-level `cli` suite uses `cli-package` to keep the suffix pattern
+// consistent across entries.
 export default defineWorkspace([
   {
     extends: "./vitest.config.ts",
-    test: { name: "cli" },
+    test: { name: "cli-package" },
   },
   {
     extends: "./phase-2/ts-api-client-package/vitest.config.ts",
