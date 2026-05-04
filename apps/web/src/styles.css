@@ -43,6 +43,21 @@ button.linklike {
   color: var(--error);
 }
 
+/* Off-screen but discoverable to assistive tech. Used for live regions
+   (e.g. presence join/leave announcements) that should not occupy
+   visible layout. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .auth-page {
   max-width: 360px;
   margin: 4rem auto;

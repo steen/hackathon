@@ -7,10 +7,24 @@ export interface PresenceUser {
   username: string;
 }
 
+export interface PresenceEvent {
+  kind: "join" | "leave";
+  id: string;
+  // Empty string means the username was not in the seeded directory at the
+  // time the event arrived. The Chat live region renders a generic phrase
+  // in that case rather than reading out the raw UUID.
+  username: string;
+  // Monotonic per-mount counter so repeat join/leave for the same id still
+  // re-fires the live-region announcement (React skips updates when the
+  // value is referentially equal).
+  seq: number;
+}
+
 export interface UsePresence {
   users: PresenceUser[];
   loading: boolean;
   error: string | null;
+  lastEvent: PresenceEvent | null;
 }
 
 type PresenceState = UsePresence;
@@ -50,16 +64,25 @@ export function usePresence(enabled: boolean): UsePresence {
     users: [],
     loading: false,
     error: null,
+    lastEvent: null,
   });
 
   useEffect(() => {
     if (!enabled) {
-      setState({ users: [], loading: false, error: null });
+      setState({ users: [], loading: false, error: null, lastEvent: null });
       return;
     }
 
     const tok: CancelToken = { cancelled: false };
     let ws: WebSocketClient | null = null;
+    // Directory of usernames the client has ever seen this session, keyed
+    // by id. Seeded by /api/presence and accumulated on subsequent reseeds
+    // (currently the hook only seeds once per mount, but a future periodic
+    // reseed would feed this same map). Lets a join announcement render
+    // the username for a user the SR-listener has heard of before, even if
+    // they had previously left.
+    const knownUsernames = new Map<string, string>();
+    let seq = 0;
 
     setState((s) => ({ ...s, loading: true, error: null }));
 
@@ -71,7 +94,15 @@ export function usePresence(enabled: boolean): UsePresence {
       try {
         const seed = await getClient().http.request<PresenceListResponse>("GET", "/api/presence");
         if (tok.cancelled) return;
-        setState({ users: sortUsers(seed.users), loading: false, error: null });
+        for (const u of seed.users) {
+          if (u.username.length > 0) knownUsernames.set(u.id, u.username);
+        }
+        setState((s) => ({
+          ...s,
+          users: sortUsers(seed.users),
+          loading: false,
+          error: null,
+        }));
       } catch (err) {
         if (tok.cancelled) return;
         const msg = err instanceof Error ? err.message : "failed to load presence";
@@ -98,16 +129,42 @@ export function usePresence(enabled: boolean): UsePresence {
         if (typeof data.user_id !== "string" || data.user_id.length === 0) return;
         setState((prev) => {
           if (data.kind === "join") {
-            if (prev.users.some((u) => u.id === data.user_id)) return prev;
+            const username = knownUsernames.get(data.user_id) ?? "";
+            seq += 1;
+            const event: PresenceEvent = {
+              kind: "join",
+              id: data.user_id,
+              username,
+              seq,
+            };
+            if (prev.users.some((u) => u.id === data.user_id)) {
+              return { ...prev, lastEvent: event };
+            }
             return {
               ...prev,
-              users: sortUsers([...prev.users, { id: data.user_id, username: "" }]),
+              users: sortUsers([...prev.users, { id: data.user_id, username }]),
+              lastEvent: event,
             };
           }
           if (data.kind === "leave") {
+            // For a leave, prefer the username from the live list (which
+            // may have arrived without username on a same-session join);
+            // fall back to the seeded directory.
+            const fromList = prev.users.find((u) => u.id === data.user_id)?.username ?? "";
+            const username =
+              fromList.length > 0 ? fromList : (knownUsernames.get(data.user_id) ?? "");
+            seq += 1;
+            const event: PresenceEvent = {
+              kind: "leave",
+              id: data.user_id,
+              username,
+              seq,
+            };
             const next = prev.users.filter((u) => u.id !== data.user_id);
-            if (next.length === prev.users.length) return prev;
-            return { ...prev, users: next };
+            if (next.length === prev.users.length) {
+              return { ...prev, lastEvent: event };
+            }
+            return { ...prev, users: next, lastEvent: event };
           }
           return prev;
         });

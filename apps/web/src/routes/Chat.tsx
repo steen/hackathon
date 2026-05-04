@@ -85,6 +85,19 @@ export function Chat(): React.JSX.Element {
     };
   }, []);
 
+  // Build the polite-region announcement text from the latest presence
+  // event. The presence list itself reorders rather than appends rows, so
+  // SR users don't get an aria-live additions announcement from the list —
+  // we mirror the event into a sibling status region instead. When the
+  // username is unknown (live join for an id not in the seeded directory)
+  // the phrase elides the id rather than reading out a UUID.
+  const presenceAnnouncement = useMemo<string>(() => {
+    const ev = presenceState.lastEvent;
+    if (ev === null) return "";
+    const who = ev.username.length > 0 ? ev.username : "a new user";
+    return ev.kind === "join" ? `${who} joined` : `${who} left`;
+  }, [presenceState.lastEvent]);
+
   const draftBytes = useMemo(() => byteLength(draft), [draft]);
   const overCap = draftBytes > MAX_BODY_BYTES;
   const showCounter = draftBytes >= Math.floor(MAX_BODY_BYTES * WARN_RATIO);
@@ -162,6 +175,21 @@ export function Chat(): React.JSX.Element {
             </li>
           ))}
         </ul>
+        {/* aria-live="polite" alone is the load-bearing announcement
+            mechanism; an explicit role="status" is omitted so the
+            element doesn't collide with `getByRole("status")` queries
+            already used by the connection badge (the e2e
+            `page.getByRole("status")` locator expects exactly one
+            match). aria-atomic="true" so the SR re-reads the whole
+            phrase on each event, not just the diff. */}
+        <div
+          className="visually-hidden"
+          aria-live="polite"
+          aria-atomic="true"
+          data-testid="presence-live-region"
+        >
+          {presenceAnnouncement}
+        </div>
       </aside>
       <main className="messages">
         <header className="messages__header">
