@@ -77,7 +77,7 @@ Exit. Subagent completion notifications arrive as `task-notification` system rem
 
 ### 7. On completion
 
-The agent's contract is "review posted, blockers fixed, non-blockers filed as sub-issues, CI green, squash-merged" — `MERGED: yes` is the expected outcome.
+The agent's contract is "review posted, blockers fixed, non-blockers filed as sub-issues, CI green, merged" — `MERGED: yes` is the expected outcome.
 
 For each notification:
 
