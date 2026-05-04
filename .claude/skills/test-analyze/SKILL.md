@@ -169,7 +169,7 @@ The orchestrator uses these lines to pick which single feature `/test-implement`
 
 ## Things you must NOT do
 
-- Do not modify any file outside `$ROOT/specs/test-analysis/`. Code stays untouched here.
+- Do not modify any file outside `$ROOT/specs/test-analysis/` AND `$ROOT/.git/` AND the GitHub side via `gh` (issue creates / sub-issue links). Code stays untouched here.
 - Do not invent ACs that aren't in the spec, and do not renumber existing AC IDs that tests already reference.
 - Do not skip features whose spec has no `## Acceptance criteria` section — write a findings doc that says so explicitly (`total_acs: 0`, recommendation: "spec lacks AC section, please add").
 - Do not write findings for files outside `specs/plans/phase-*/feature-*.md` (e.g. don't analyze the phase overview docs).

@@ -10,6 +10,43 @@ This changelog is intentionally **high-level**: meaningful product, architectura
 - Phase 2 — TUI and Web UI.
 - Phase 3 — polish, requirement-coverage report, demo build.
 
+## [0.1.0] - 2026-05-03
+
+First tagged release. Rolls up Phases 0–3: a single Go binary serving HTTP + WebSocket + an embedded React web app, plus the `chatd` CLI, with persistent SQLite-backed accounts, channels, and messages. Covers user stories US-1 through US-12 from `specs/PRD.md` §5.
+
+This entry is assembled from per-PR fragments in `CHANGELOG.d/` and the timestamped sections below; both formats coexist in this file (Keep-a-Changelog for tagged releases, timestamped sections for in-flight PRs).
+
+### Added
+- **Accounts and sessions (US-1, US-2, US-11, US-12).** Invite-code-gated registration, login with bcrypt + constant-time failure path, `/api/me`, server-side logout that bumps a per-user `token_version` so previously-issued JWTs stop verifying without a deny-list. `POST /api/auth/ws-ticket` mints 30-second single-use tickets the WS upgrader redeems before accepting the handshake.
+- **Channels and messages (US-3, US-4, US-5, US-6).** `GET/POST /api/channels` with `^[a-z0-9][a-z0-9-]{0,39}$` name validation; `GET/POST /api/channels/{id}/messages` with ULID-cursor pagination (`?before=&limit=`, default 50, max 200). `POST` persists then broadcasts so a WS subscriber can never see a message a follow-up history fetch would miss. WS `/ws?channel=<id>&ticket=<hex>` subscribes the connection to the named channel.
+- **Presence (US-7).** `GET /api/presence` returns the currently-online user list; per-connection `presence` WS frames (`{kind:"join"|"leave", user_id}`) deliver deltas. Multiple sessions for the same user collapse to one entry.
+- **CLI — `chatd` (US-8).** `chatd register`, `chatd login`, `chatd channels`, `chatd send`, `chatd watch`, `chatd history` against the same HTTP + WS endpoints the web app uses. Built on the Go stdlib `flag` package; supports flags after positional args (`chatd history <channel> --limit N`). Scripted invocations work with stdin redirection (e.g. `chatd register alice <<< $'pw\ninvite\n'`).
+- **Web app (US-9).** Vite + React + TypeScript SPA served from the same binary. Login, channel list, message view with paginated history, optimistic send (pending render swapped for the persisted row when the WS frame arrives; failed sends get a Retry button), live presence sidebar, WS-drop reconnect with message catch-up via `GET /api/channels/{id}/messages?limit=50` on every reopen.
+- **Single-binary deploy (US-10).** One Go binary, env-var configured (`CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_DB_PATH`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOWED_ORIGINS`). `pnpm dev` boots the full stack from a clean clone for the demo path.
+- **End-to-end test suite.** `tests/e2e` boots the real server binary on a random port with an ephemeral SQLite + secrets, then drives the real `chatd` CLI and the real web app (Playwright + chromium against the Vite dev server) through register → login → channel create → post → echo, watch + reconnect on server restart, logout invalidation, presence join/leave, two-context cross-receive, WS drop+restore, and CLI ↔ web cross-client interop. Wired into CI as a separate `e2e` job.
+
+### Changed
+- **PRD aligned to the shipped Phase-2 stack (#128).** `specs/PRD.md` updated to describe what actually landed: web app on React Context + plain CSS (Zustand and Tailwind dropped); CLI on stdlib `flag` (cobra dropped); WebSocket protocol defines no application-level inbound frames — clients send via REST (`POST /api/channels/{id}/messages`) and subscribe via the upgrade URL (`/ws?channel=<id>&ticket=<hex>`); presence delivered as global `{kind:"join"|"leave", user_id}` deltas with a one-shot snapshot via `GET /api/presence`. A new "Design deviations from earlier PRD revisions" subsection records the four divergences with PR refs so the spec can drift forward without losing the audit trail.
+- **Auth route prefix (BREAKING wire change, #75).** `/api/register`, `/api/login`, `/api/me`, `/api/logout`, `/api/ws-ticket` → `/api/auth/<verb>`. CLI clients and any reverse-proxy rules that pointed at the old paths must update.
+- **Vite dev proxy.** `apps/web` proxies `/api` and `/ws` to `127.0.0.1:8080` in dev so the SPA stays same-origin without a CORS middleware on the Go side.
+
+### Security
+- **Startup config gates (SEC-1, SEC-2, US-11).** Server refuses to boot when `CHAT_JWT_SECRET` is missing, shorter than 32 bytes, non-ASCII, a single repeated character, low-entropy (fewer than 5 distinct bytes), or matches a dev-default denylist. Refuses to bind a non-loopback address unless `CHAT_ALLOW_PUBLIC_BIND=1`. Refuses to start without an invite code.
+- **Constant-time login (SEC-3, SEC-4).** Unknown-username path runs bcrypt against a precomputed dummy hash so timing matches a real wrong-password attempt; both arms return the byte-identical error envelope.
+- **Per-IP and per-username rate limits (SEC-5).** Token-bucket login (10 / 5 min) and register (5 / 15 min) limiters keyed by IP, fronted by a bounded LRU; per-username login-failure tracker with linear backoff capped at MaxDelay (no lockout-DoS). Each rejection writes an `auth_events` row.
+- **WebSocket caps (SEC-6, SEC-8).** `SetReadLimit(64 KiB)` on every connection so the library closes oversize frames with `1009`; 4 KiB cap on decoded message bodies; per-connection token bucket (10 msg/s, burst 30) closes flooding clients with `1008`.
+- **REST body cap (SEC-7).** 16 KiB global cap on every REST request; 413 envelope on overflow. `http.Server.MaxHeaderBytes` capped at 16 KiB (default is 1 MiB) to bound the slow-header DoS surface paired with `ReadHeaderTimeout`.
+- **WS ticket flow (SEC-12).** `/api/auth/ws-ticket` issues a 30-second single-use token bound to the caller; the WS upgrader redeems it before the WebSocket handshake (RFC 6455 close codes only exist post-upgrade, so failures must return HTTP 401 here). `Redeem` deletes before returning so a second call cannot succeed even under contention. Channel-existence check now runs before redemption so a typo or probe against an unknown channel returns 404 without burning the ticket.
+- **Audit log (SEC-13).** `auth_events` row written for every register / login / logout / rate-limit rejection; access log records `request_id`, `remote_ip`, and the resolved `user_id` for authenticated requests (the auth middleware publishes the id back through a request-scoped sink so the outer access-log scope can see it).
+- **Security headers (SEC-10).** `Content-Security-Policy`, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` set on every response (200, 404, 500) via middleware. CSP literal pinned byte-for-byte to PRD §9.
+- **Sensitive-param redaction (SEC-11).** Access-log middleware strips `token` and `ticket` query parameters via `net/url` parsing (handles repeated keys and percent-encoding).
+- **DB file mode (SEC-14).** SQLite file pre-created at `0600` and chmod'd back to `0600` if the umask widened it.
+- **WS upgrade origin enforcement.** `coder/websocket.Accept`'s same-origin default plus a `CHAT_ALLOWED_ORIGINS` allowlist for reverse-proxy deploys; mismatched origins yield HTTP 403. Cross-origin and same-origin pairs both covered by tests.
+- **Loopback-gated debug endpoint.** `GET /debug/subs` refuses non-loopback peers with HTTP 404 (same shape as a missing route, so the endpoint is invisible to a port scan); covers the `CHAT_ALLOW_PUBLIC_BIND=1` operator path.
+- **Channel-id case folding.** WS `?channel=<id>` upper-folds non-sentinel ids through the same normalizer as `/api/channels/{id}/messages`, so a lower-case ULID resolves the same channel on both surfaces.
+- **Trusted-proxy gap, surfaced.** The deferred `CHAT_TRUSTED_PROXY` parser is not yet wired; `clientIP` falls back to `RemoteAddr`. Server logs a startup `WARN` when `CHAT_ALLOW_PUBLIC_BIND=1` is set so an operator behind a reverse proxy notices that per-IP rate-limit buckets currently collapse onto the proxy IP.
+- **Messages cursor index.** Forward migration `0002_messages_cursor_index.sql` creates `idx_messages_channel_id ON messages(channel_id, id)` so paginated history (`WHERE channel_id = ? AND id < ?`) no longer relies on the implicit primary-key index for its query plan.
+
 ## 2026-05-03 18:29Z — Audit: access log records authenticated user_id (#86)
 
 ### Fixed
