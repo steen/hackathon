@@ -24,22 +24,22 @@ import (
 //     substring `request_id=<id>`).
 //
 // The deterministic half — POSTing a malformed JSON body to a
-// production handler — exercises the WriteError path in
-// apps/server/internal/http/auth_handlers.go:97-100 (Register) and
-// :176-179 (Login). Those handlers swallow the underlying
-// json.Decoder error and emit `{code: "bad_request", message: "invalid
-// JSON body"}`, while the AccessLog middleware
-// (apps/server/internal/http/middleware.go:116-124) writes one log
+// production handler — exercises the WriteError path inside
+// (*AuthHandlers).Register and (*AuthHandlers).Login in
+// apps/server/internal/http/auth_handlers.go. Those handlers swallow
+// the underlying json.Decoder error and emit `{code: "bad_request",
+// message: "invalid JSON body"}`, while the AccessLog middleware
+// (apps/server/internal/http/middleware.go AccessLog) writes one log
 // line per request including `request_id=<uuid>` and `status=400`.
 // That pair satisfies the AC: the client body shows no internal
 // detail; the server log carries a request-id-correlated record of
 // the failed request.
 //
-// The panic half (stack-trace + panic value emitted by Recover at
-// middleware.go:184-186) requires a build-tag-gated /debug/panic
-// route that does not exist on `main` today; that route is tracked
-// at #306. The panic_logs_stack_with_request_id sub-test below is
-// `t.Skip`'d until that probe lands and documents the full
+// The panic half (stack-trace + panic value emitted by the Recover
+// middleware in middleware.go) requires a build-tag-gated
+// /debug/panic route that does not exist on `main` today; that route
+// is tracked at #306. The panic_logs_stack_with_request_id sub-test
+// below is `t.Skip`'d until that probe lands and documents the full
 // assertion sketch the future round-trip should restore.
 func TestAC4_InternalDetailNotInClientLoggedWithRequestID(t *testing.T) {
 	srv := startServer(t)
@@ -159,8 +159,9 @@ func TestAC4_InternalDetailNotInClientLoggedWithRequestID(t *testing.T) {
 		// wired stack, assert (a) the response body is the generic
 		// internal envelope without the panic value or stack, and
 		// (b) the server log contains a `panic request_id=<id>` line
-		// (from middleware.go:184-186) that includes a stack-trace
-		// marker and the same request id the client received.
+		// (emitted by the Recover middleware in middleware.go) that
+		// includes a stack-trace marker and the same request id the
+		// client received.
 		//
 		// This requires a build-tag-gated /debug/panic route on the
 		// production binary. None exists at this commit (verified
@@ -196,7 +197,8 @@ func TestAC4_InternalDetailNotInClientLoggedWithRequestID(t *testing.T) {
 
 		// Server log must carry the panic line with the request id
 		// AND a stack-trace marker (`goroutine ` is emitted by
-		// runtime/debug.Stack — see middleware.go:184).
+		// runtime/debug.Stack — see the Recover middleware in
+		// middleware.go).
 		panicLine := awaitLogLine(t, srv,
 			[]string{"panic ", "request_id=" + reqIDPanic},
 			5*time.Second)
