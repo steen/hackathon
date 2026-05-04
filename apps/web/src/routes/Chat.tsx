@@ -1,5 +1,13 @@
 import type * as React from "react";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
@@ -113,12 +121,17 @@ export function Chat(): React.JSX.Element {
   // Auth user before presence: own messages render correctly even before
   // the /api/presence seed lands. Falls back to the raw id so an unknown
   // sender (history from a user who has since left) doesn't crash — #148.
-  const resolveSender = (id: string): string => {
-    if (user !== null && user.id === id) return user.username;
-    const known = presenceState.usernames.get(id);
-    if (known !== undefined && known.length > 0) return known;
-    return id;
-  };
+  // Memoized so a future per-message memoized child can rely on a stable
+  // reference identity across renders (#535).
+  const resolveSender = useCallback(
+    (id: string): string => {
+      if (user !== null && user.id === id) return user.username;
+      const known = presenceState.usernames.get(id);
+      if (known !== undefined && known.length > 0) return known;
+      return id;
+    },
+    [user, presenceState.usernames],
+  );
 
   const activeChannelName = useMemo<string | null>(() => {
     if (activeChannel === null) return null;
