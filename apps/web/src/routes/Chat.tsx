@@ -98,6 +98,16 @@ export function Chat(): React.JSX.Element {
     return ev.kind === "join" ? `${who} joined` : `${who} left`;
   }, [presenceState.lastEvent]);
 
+  // Auth user before presence: own messages render correctly even before
+  // the /api/presence seed lands. Falls back to the raw id so an unknown
+  // sender (history from a user who has since left) doesn't crash — #148.
+  const resolveSender = (id: string): string => {
+    if (user !== null && user.id === id) return user.username;
+    const known = presenceState.usernames.get(id);
+    if (known !== undefined && known.length > 0) return known;
+    return id;
+  };
+
   const draftBytes = useMemo(() => byteLength(draft), [draft]);
   const overCap = draftBytes > MAX_BODY_BYTES;
   const showCounter = draftBytes >= Math.floor(MAX_BODY_BYTES * WARN_RATIO);
@@ -229,7 +239,7 @@ export function Chat(): React.JSX.Element {
                 data-status={m.status ?? "sent"}
               >
                 <div className="msg__meta">
-                  <span className="msg__sender">{m.sender_user_id}</span>
+                  <span className="msg__sender">{resolveSender(m.sender_user_id)}</span>
                   {m.status === "pending" ? (
                     <span className="msg__badge msg__badge--pending" role="status">
                       Sending…
