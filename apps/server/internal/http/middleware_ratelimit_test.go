@@ -152,12 +152,16 @@ func TestRateLimitedResponseUsesEnvelope(t *testing.T) {
 }
 
 func TestSuccessfulLoginResetsUsernameBackoff(t *testing.T) {
+	// A virtual clock keeps the gate window observable regardless of
+	// real-time scheduler jitter — the previous wall-clock version flaked
+	// on loaded CI runners when bcrypt verify time between two posts
+	// exceeded the 50ms gate, expiring it before the final assertion.
+	now := time.Unix(0, 0)
 	uc := ratelimit.LoginUserConfig()
-	// Squeeze the gate so a single failure produces an observable
-	// retry-after; this lets us verify Reset() actually clears it.
 	uc.GraceFailures = 0
 	uc.Step = 50 * time.Millisecond
 	uc.MaxDelay = 100 * time.Millisecond
+	uc.Now = func() time.Time { return now }
 	f := newRateLimitFixture(t, ratelimit.LoginIPConfig(), ratelimit.RegisterIPConfig(), &uc)
 	defer f.close()
 
@@ -175,8 +179,8 @@ func TestSuccessfulLoginResetsUsernameBackoff(t *testing.T) {
 	}, "1.1.1.1"); rr.Code != stdhttp.StatusUnauthorized {
 		t.Fatalf("bad login status: %d", rr.Code)
 	}
-	// Wait past the gate, then succeed → should reset the counter.
-	time.Sleep(120 * time.Millisecond)
+	// Step past the gate, then succeed → should reset the counter.
+	now = now.Add(120 * time.Millisecond)
 	if rr := f.post(t, "/api/auth/login", map[string]string{
 		"username": "alice", "password": "correct-horse-battery",
 	}, "1.1.1.1"); rr.Code != stdhttp.StatusOK {
