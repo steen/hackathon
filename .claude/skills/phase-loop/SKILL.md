@@ -123,7 +123,7 @@ The agent's §9 report can arrive truncated ("Waiting for the monitor."). For ev
 
 ### 11. Cleanup
 
-**Pushed agents**: `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` (`-f -f` overrides locked + dirty). Skip if subagent is still running. Drop the `in-progress` label on the sub-issue once the PR is open (the work is now tracked by the PR's lifecycle, not the sub-issue lock): `rtk gh issue edit <N> --remove-label in-progress`. The label may also persist after merge as benign drift on closed issues — that's harmless since `--state open` queries skip them.
+**Pushed agents**: `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` (`-f -f` overrides locked + dirty). Skip if subagent is still running. Do NOT remove the `in-progress` label on a successful dispatch — a separate agent owns that lifecycle once the PR is open, and stripping the label here races against it. The label persists until the sub-issue closes (auto-removed on close) or until that other agent decides to drop it.
 
 **Failed agents** have uncommitted WIP that `worktree remove` destroys. First:
 
@@ -151,7 +151,7 @@ Without `auto`, exit cleanly.
 - Never spawn two subagents with overlapping footprints.
 - Never pick the same sub-issue twice across simultaneous ticks.
 - Never fall through to the next epic until the current has zero eligible sub-issues AND zero in-flight PRs.
-- Never strip the `in-progress` label except (a) when claim+dispatch fails (step 7), (b) when reclaiming a stalled worker after WIP recovery (step 11), or (c) when a sub-issue is closed (the label is benign drift on closed issues but can be tidied).
+- Never strip the `in-progress` label on a successful dispatch — a separate agent owns the post-PR label lifecycle. The only exceptions are (a) when claim+dispatch itself fails before the worker starts (step 7), and (b) when reclaiming a stalled worker after WIP recovery (step 11). On a sub-issue close, the label is auto-removed by GitHub; do not pre-empt it.
 
 ## References
 
