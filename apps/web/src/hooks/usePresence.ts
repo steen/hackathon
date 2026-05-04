@@ -145,6 +145,12 @@ export function usePresence(enabled: boolean): UsePresence {
           // username) pairs are unchanged so consumers that depend on
           // `usernames` identity (e.g. resolveSender's useCallback) skip
           // re-creation. #566.
+          //
+          // `s.usernames` here is the React state value, which lives above
+          // this effect and survives effect cleanup. A disabled→enabled→
+          // disabled→enabled cycle that re-seeds an identical directory
+          // therefore preserves the reference — a property of state
+          // placement, not a deliberate cache. #570.
           const next = new Map(knownUsernames);
           const usernames = sameUsernames(s.usernames, next) ? s.usernames : next;
           return {
