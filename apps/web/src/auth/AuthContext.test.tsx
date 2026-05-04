@@ -157,6 +157,23 @@ describe("test_web_auth_me_rehydrate_failure_surfaces_error", () => {
     expect(banner).toHaveTextContent(/something went wrong/i);
     expect(banner).not.toHaveTextContent(/a-bare-string-rejection-with-details/i);
   });
+
+  it("maps an AbortError to the canceled copy", async () => {
+    storedToken = "test-jwt-token-placeholder";
+    const raw = Object.assign(new Error("aborted-internal-detail"), { name: "AbortError" });
+    meMock.mockRejectedValue(raw);
+
+    render(
+      <AuthProvider>
+        <ErrorBanner />
+        <Probe />
+      </AuthProvider>,
+    );
+
+    const banner = await screen.findByTestId("auth-error-banner");
+    expect(banner).toHaveTextContent(/request was canceled/i);
+    expect(banner).not.toHaveTextContent(/aborted-internal-detail/i);
+  });
 });
 
 describe("test_web_auth_logout_server_failure_surfaces_error", () => {
@@ -201,9 +218,9 @@ describe("test_web_auth_logout_server_failure_surfaces_error", () => {
 });
 
 describe("test_web_auth_error_banner_dismiss_clears_error", () => {
-  it("hides the banner when the user clicks Dismiss", async () => {
+  it("hides the curated network banner when the user clicks Dismiss", async () => {
     storedToken = "test-jwt-token-placeholder";
-    meMock.mockRejectedValue(new Error("boom"));
+    meMock.mockRejectedValue(new TypeError("Failed to fetch"));
 
     render(
       <AuthProvider>
@@ -213,7 +230,7 @@ describe("test_web_auth_error_banner_dismiss_clears_error", () => {
     );
 
     const banner = await screen.findByTestId("auth-error-banner");
-    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(/could not reach the server/i);
 
     const u = userEvent.setup();
     await u.click(screen.getByRole("button", { name: /dismiss error/i }));

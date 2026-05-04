@@ -42,6 +42,9 @@ function classifyError(err: unknown): string {
     if (err.status === 401 || err.status === 403) return REASON_SESSION_INVALID;
     if (err.status === 408) return REASON_TIMEOUT;
     if (err.status >= 500) return REASON_SERVER_UNAVAILABLE;
+    // Other 4xx (400/404/409/422/429) collapse to REASON_GENERIC by design: this
+    // helper runs in session-restore and logout paths where the user can't act on
+    // a specific 4xx. Form-submission callers should map those statuses themselves.
     return REASON_GENERIC;
   }
   if (err instanceof Error) {
