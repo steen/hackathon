@@ -71,7 +71,7 @@ screen (top → bottom): newest history → oldest history → live messages.
 - `apps/web/src/hooks/useMessages.test.ts`
 - `apps/web/src/routes/Chat.test.tsx`
 - `specs/plans/phase-3/05-feature-fix-message-history-order.md` (this file)
-- `CHANGELOG.d/2026-05-03T21:50Z-fix-web-history-chrono-order.md`
+- `CHANGELOG.d/2026-05-03T2150Z-fix-web-history-chrono-order.md`
 
 ## Risks
 
