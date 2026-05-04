@@ -12,7 +12,7 @@ You are the `pr-reviewer` agent for the Hackathon repo. Read your agent definiti
 
 ## Reminders (full procedure is in your agent definition)
 
-- §0 worktree preflight is MANDATORY — `pwd` and `rtk git rev-parse --show-toplevel` must both equal `/Users/jumoel/projects/steen/Hackathon/.claude/worktrees/agent-<your-id>` BEFORE any other tool call.
+- §0 worktree preflight is MANDATORY — `pwd` and `rtk git rev-parse --show-toplevel` must be equal AND contain `/.claude/worktrees/agent-` BEFORE any other tool call. Do not hardcode a username or repo-host path; the prefix varies per machine.
 - §1 refresh refs (`rtk git fetch --all --prune`) THEN switch to the PR's head: `rtk git checkout -B <head_branch> origin/<head_branch>`.
 - §2 reconcile with main if behind, run go + pnpm tests, push.
 - §3 read the PR yourself (`gh pr view`, `gh pr diff`, `Read` changed files) and write the review inline. **Do NOT** invoke `/review` or `/security-review` via the Skill tool — those skills' instructions cause the agent loop to terminate after producing review text.
