@@ -541,6 +541,90 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
   });
 });
 
+describe("test_web_presence_live_region_rebroadcasts_join_when_already_present", () => {
+  it("re-fires the live-region announcement on a repeat join for a user already in the list (seq-bumped state forces re-eval)", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({
+          users: [
+            { id: "U1", username: "alice" },
+            { id: "U2", username: "bob" },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
+    });
+
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    expect(presenceSock).toBeDefined();
+
+    // First join for U1, who is already seeded into the list. Without the
+    // `seq` field on PresenceEvent the lastEvent object would be referentially
+    // equal to its predecessor (kind+id+username unchanged) and the
+    // useMemo announcement would not re-evaluate.
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("alice joined");
+    });
+
+    // Intervening event flips the announcement to a different string so the
+    // next U1 join is observable as a text *change*, not a no-op re-render.
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U2" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("bob left");
+    });
+    expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+
+    // Second join for U1 while still in the list. The `seq` bump produces a
+    // fresh lastEvent object, the useMemo re-fires, and the live region
+    // flips back to "alice joined" — the path the existing tests miss.
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("alice joined");
+    });
+  });
+});
+
 async function renderWithChannel(): Promise<HTMLTextAreaElement> {
   happyPath();
   render(
