@@ -17,8 +17,7 @@ func TestAC7_Whoami_PrintsUsernameWhenLoggedIn(t *testing.T) {
 
 	// Log in via chatd (flag path — see harness_test.go) so the
 	// config file is created exactly the way a flag-driven user
-	// would create it. Avoids cross-contamination with the AC-2
-	// prompt-path bug.
+	// would create it.
 	chatdLoginViaFlags(t, srv, xdg, username, password)
 
 	res := chatdRun(t, xdg, "", nil, "--server", srv.url, "whoami")

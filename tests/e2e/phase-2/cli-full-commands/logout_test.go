@@ -25,8 +25,7 @@ func TestAC8_Logout_ClearsConfigAndInvalidatesServerSide(t *testing.T) {
 	_, _ = registerViaREST(t, srv, username, password)
 
 	// Login via chatd (flag path) so the config file matches a real
-	// flag-driven flow. The prompt-path bug surfaces in AC-2's own
-	// test, not here.
+	// flag-driven flow.
 	chatdLoginViaFlags(t, srv, xdg, username, password)
 	pre, err := readConfigFile(t, xdg)
 	if err != nil {
