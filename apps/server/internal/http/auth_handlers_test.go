@@ -28,6 +28,13 @@ type fixture struct {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
+	return newFixtureWithInvite(t, "INVITE-OK")
+}
+
+// newFixtureWithInvite builds a fixture with a caller-supplied server
+// invite code. Pass "" to exercise the registration-disabled branch.
+func newFixtureWithInvite(t *testing.T, inviteCode string) *fixture {
+	t.Helper()
 	dir := t.TempDir()
 	sqlDB, err := appdb.Open(dir + "/test.db")
 	if err != nil {
@@ -41,7 +48,7 @@ func newFixture(t *testing.T) *fixture {
 		DB:         sqlDB,
 		Tickets:    tickets,
 		SigningKey: []byte("test-signing-key-must-be-long-enough"),
-		InviteCode: "INVITE-OK",
+		InviteCode: inviteCode,
 		Now:        time.Now,
 	})
 	return &fixture{
@@ -452,26 +459,101 @@ func TestAuthEventsRecordsWSTicketIssued(t *testing.T) {
 	}
 }
 
-// SEC-13 — register_failed is recorded when the invite code is wrong
-// (no user is created, so user_id stays NULL).
+// SEC-13 — register_failed is recorded for every rejection branch in
+// Register, with user_id NULL (no user exists at the point of the log
+// call). Issue #462 broadens the original bad-invite-only assertion to
+// each of the five branches so a regression that drops one of the
+// h.logEvent calls in auth_handlers.go is caught by the unit suite.
+// The hash-failure branch is excluded — it has no test seam without
+// refactoring auth.Hash, which #462 puts out of scope.
 func TestAuthEventsRecordsRegisterFailed(t *testing.T) {
-	f := newFixture(t)
-	defer f.close()
-	rr := f.post(t, "/api/auth/register", map[string]string{
-		"username":    "alice",
-		"password":    "correct-horse-battery",
-		"invite_code": "WRONG",
-	}, "")
-	if rr.Code != stdhttp.StatusForbidden {
-		t.Fatalf("register: %d", rr.Code)
+	cases := []struct {
+		name       string
+		setup      func(t *testing.T, f *fixture)
+		inviteCode string // server-side; empty means registration disabled
+		body       map[string]string
+		wantStatus int
+	}{
+		{
+			name:       "disabled server invite",
+			inviteCode: "",
+			body: map[string]string{
+				"username":    "alice",
+				"password":    "correct-horse-battery",
+				"invite_code": "anything",
+			},
+			wantStatus: stdhttp.StatusForbidden,
+		},
+		{
+			name:       "bad invite code",
+			inviteCode: "INVITE-OK",
+			body: map[string]string{
+				"username":    "alice",
+				"password":    "correct-horse-battery",
+				"invite_code": "WRONG",
+			},
+			wantStatus: stdhttp.StatusForbidden,
+		},
+		{
+			name:       "username regex miss",
+			inviteCode: "INVITE-OK",
+			body: map[string]string{
+				"username":    "ab", // < 3 chars
+				"password":    "correct-horse-battery",
+				"invite_code": "INVITE-OK",
+			},
+			wantStatus: stdhttp.StatusBadRequest,
+		},
+		{
+			name:       "password policy violation",
+			inviteCode: "INVITE-OK",
+			body: map[string]string{
+				"username":    "alice",
+				"password":    "short", // < PasswordMinLen
+				"invite_code": "INVITE-OK",
+			},
+			wantStatus: stdhttp.StatusBadRequest,
+		},
+		{
+			name: "username taken",
+			setup: func(t *testing.T, f *fixture) {
+				registerOK(t, f, "alice", "correct-horse-battery")
+			},
+			inviteCode: "INVITE-OK",
+			body: map[string]string{
+				"username":    "alice",
+				"password":    "another-correct-horse",
+				"invite_code": "INVITE-OK",
+			},
+			wantStatus: stdhttp.StatusConflict,
+		},
 	}
-	var n int
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM auth_events WHERE kind = ? AND user_id IS NULL`,
-		AuthEventRegisterFailed).Scan(&n); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("register_failed rows: got %d want 1", n)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixtureWithInvite(t, c.inviteCode)
+			defer f.close()
+			if c.setup != nil {
+				c.setup(t, f)
+			}
+			// Reset auth_events so the seeded successful register from
+			// the username-taken setup doesn't leak into the assertion.
+			if _, err := f.db.Exec(`DELETE FROM auth_events`); err != nil {
+				t.Fatalf("reset auth_events: %v", err)
+			}
+			rr := f.post(t, "/api/auth/register", c.body, "")
+			if rr.Code != c.wantStatus {
+				t.Fatalf("register: got %d want %d body=%s", rr.Code, c.wantStatus, rr.Body.String())
+			}
+			var n int
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM auth_events WHERE kind = ? AND user_id IS NULL`,
+				AuthEventRegisterFailed).Scan(&n); err != nil {
+				t.Fatalf("query: %v", err)
+			}
+			if n != 1 {
+				t.Fatalf("register_failed rows: got %d want 1", n)
+			}
+		})
 	}
 }
 
