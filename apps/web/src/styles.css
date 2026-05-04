@@ -254,13 +254,11 @@ button.linklike {
   color: var(--muted);
 }
 
-/* Sticky so the alert stays visible while the user scrolls long routes
-   (e.g. the chat list under .messages__list). z-index sits above the
-   sidebar/header surfaces, which use the default stacking context. */
+/* Sits in normal flow above the routed body. ErrorBanner renders as a
+   sibling of the route content (see App.tsx), so it scrolls with the
+   document rather than pinning — the inner `.messages__list` scroller
+   is not an ancestor and could not host sticky behavior anyway. */
 .error-banner {
-  position: sticky;
-  top: 0;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
