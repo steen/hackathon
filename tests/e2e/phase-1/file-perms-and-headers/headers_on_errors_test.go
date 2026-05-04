@@ -15,7 +15,10 @@
 //   - 200 — GET /debug/subs?channel=%23general (loopback-only debug route).
 //   - 400 — POST /api/auth/login with a non-JSON body (decodeJSON fails).
 //   - 401 — GET /api/auth/me with no Authorization (auth middleware).
-//   - 404 — GET /nope (default ServeMux fallback).
+//   - 404 — GET /api/nope (wiring's /api/ shadow guard in
+//     apps/server/internal/wiring/web.go reserves the /api/ subtree
+//     so unmatched routes still 404 after Phase 3's embedded SPA
+//     started catching unknown paths with index.html).
 //   - 405 — GET /api/auth/login (login is POST-only; handler writes 405).
 //   - 413 — POST /api/auth/register with a 16385-byte body (BodyCap fires
 //     before the handler runs, proving SecurityHeaders wraps BodyCap).
@@ -81,9 +84,15 @@ func TestAC3_SecurityHeadersPresentOnBothSuccessAndErrorResponses(t *testing.T) 
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name:       "error_404_unknown_route",
+			// Phase 3's embedded-web SPA fallback serves index.html
+			// for unknown non-API paths (was a 404 before that
+			// feature landed), so the 404 case here uses an /api/
+			// path — the wiring's static handler reserves the
+			// /api/ subtree so unmatched routes there still 404
+			// (apps/server/internal/wiring/web.go).
+			name:       "error_404_unknown_api_route",
 			method:     http.MethodGet,
-			path:       "/nope",
+			path:       "/api/nope",
 			wantStatus: http.StatusNotFound,
 		},
 		{
