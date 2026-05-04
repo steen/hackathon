@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { User } from "@hackathon/api-client";
+import { ApiError, type User } from "@hackathon/api-client";
 import { getClient, readToken, writeToken } from "../api.js";
 
 interface AuthState {
@@ -28,8 +28,35 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error && err.message.length > 0 ? err.message : fallback;
+// Curated banner copy. The raw error never reaches the UI — only one of these
+// strings does — so an internal-detail message can't leak into the banner.
+const REASON_NETWORK = "Could not reach the server. Check your connection and try again.";
+const REASON_SERVER_UNAVAILABLE = "The server is having trouble right now. Please try again.";
+const REASON_SESSION_INVALID = "Your session is no longer valid. Please sign in again.";
+const REASON_TIMEOUT = "The request timed out. Please try again.";
+const REASON_CANCELED = "The request was canceled.";
+const REASON_GENERIC = "Something went wrong.";
+
+function classifyError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) return REASON_SESSION_INVALID;
+    if (err.status === 408) return REASON_TIMEOUT;
+    if (err.status >= 500) return REASON_SERVER_UNAVAILABLE;
+    return REASON_GENERIC;
+  }
+  if (err instanceof Error) {
+    if (err.name === "AbortError") return REASON_CANCELED;
+    if (err.name === "TimeoutError") return REASON_TIMEOUT;
+    // `fetch` rejects with a TypeError for DNS/refused/offline.
+    if (err instanceof TypeError) return REASON_NETWORK;
+  }
+  return REASON_GENERIC;
+}
+
+function bannerMessage(prefix: string, err: unknown): string {
+  // Keep the raw error available in devtools for diagnosis without surfacing it.
+  console.error(prefix, err);
+  return `${prefix}: ${classifyError(err)}`;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }): React.JSX.Element {
@@ -61,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
             token: null,
             user: null,
             loading: false,
-            error: `Session could not be restored: ${errorMessage(err, "request failed")}`,
+            error: bannerMessage("Session could not be restored", err),
           });
         }
       }
@@ -85,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     try {
       await getClient().logout();
     } catch (err) {
-      serverError = `Signed out locally, but the server did not acknowledge: ${errorMessage(err, "request failed")}`;
+      serverError = bannerMessage("Signed out locally, but the server did not acknowledge", err);
     }
     writeToken(null);
     setState({ token: null, user: null, loading: false, error: serverError });

@@ -415,6 +415,152 @@ describe("test_web_presence_list_renders_seed_join_leave_and_dedupes", () => {
   });
 });
 
+async function renderWithChannel(): Promise<HTMLTextAreaElement> {
+  happyPath();
+  render(
+    <AuthProvider>
+      <Chat />
+    </AuthProvider>,
+  );
+  const ta = await screen.findByLabelText<HTMLTextAreaElement>("message");
+  await waitFor(() => {
+    expect(ta).not.toBeDisabled();
+  });
+  return ta;
+}
+
+describe("test_web_composer_is_textarea_with_aria_label_message", () => {
+  it("renders a <textarea> for the composer (multiline-capable)", async () => {
+    const ta = await renderWithChannel();
+    expect(ta.tagName).toBe("TEXTAREA");
+  });
+});
+
+describe("test_web_composer_enter_submits_draft", () => {
+  it("Enter without Shift submits the draft and clears the textarea", async () => {
+    const ta = await renderWithChannel();
+    postMessageMock.mockResolvedValue({
+      id: "M-new",
+      channel_id: "C1",
+      sender_user_id: "U1",
+      body: "hello",
+      created_at: "2026-01-01T00:00:10Z",
+    });
+
+    fireEvent.change(ta, { target: { value: "hello" } });
+    expect(ta.value).toBe("hello");
+
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith("C1", "hello");
+    });
+    expect(ta.value).toBe("");
+  });
+});
+
+describe("test_web_composer_shift_enter_inserts_newline_does_not_submit", () => {
+  it("Shift+Enter does not call postMessage and does not clear the draft", async () => {
+    const ta = await renderWithChannel();
+    fireEvent.change(ta, { target: { value: "line one" } });
+
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
+      await Promise.resolve();
+    });
+
+    expect(postMessageMock).not.toHaveBeenCalled();
+    expect(ta.value).toBe("line one");
+  });
+});
+
+describe("test_web_composer_enter_during_ime_composition_does_not_submit", () => {
+  it("Enter that fires during composition (IME candidate commit) is ignored", async () => {
+    const ta = await renderWithChannel();
+    fireEvent.change(ta, { target: { value: "draft" } });
+
+    await act(async () => {
+      fireEvent.compositionStart(ta);
+      fireEvent.keyDown(ta, { key: "Enter", isComposing: true });
+      await Promise.resolve();
+    });
+
+    expect(postMessageMock).not.toHaveBeenCalled();
+    expect(ta.value).toBe("draft");
+  });
+});
+
+describe("test_web_composer_byte_counter_appears_at_warn_threshold", () => {
+  it("counter is hidden well below cap, appears at >=80% of 4 KiB", async () => {
+    const ta = await renderWithChannel();
+    expect(screen.queryByTestId("composer-counter")).toBeNull();
+
+    fireEvent.change(ta, { target: { value: "x".repeat(100) } });
+    expect(screen.queryByTestId("composer-counter")).toBeNull();
+
+    // 80% of 4096 = 3276.8 — 3277 chars (1 byte each in ASCII) should
+    // cross the warn threshold.
+    fireEvent.change(ta, { target: { value: "x".repeat(3277) } });
+    const counter = await screen.findByTestId("composer-counter");
+    expect(counter).toHaveClass("composer__counter--warn");
+    expect(counter.textContent).toContain("3277");
+    expect(counter.textContent).toContain("4096");
+  });
+});
+
+describe("test_web_composer_over_cap_disables_send_and_shows_error_state", () => {
+  it("over 4 KiB disables Send, shows error counter, blocks Enter submit", async () => {
+    const ta = await renderWithChannel();
+    fireEvent.change(ta, { target: { value: "x".repeat(4097) } });
+
+    const counter = await screen.findByTestId("composer-counter");
+    expect(counter).toHaveClass("composer__counter--error");
+    expect(counter.textContent).toContain("too long to send");
+
+    const sendBtn = screen.getByRole("button", { name: "Send" });
+    expect(sendBtn).toBeDisabled();
+    expect(ta).toHaveAttribute("aria-invalid", "true");
+
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("test_web_composer_byte_counter_uses_utf8_byte_length_not_char_count", () => {
+  it("multibyte chars count by encoded bytes (4 bytes per emoji)", async () => {
+    const ta = await renderWithChannel();
+    // 1000 four-byte rocket emojis = 4000 bytes (>3276 warn threshold,
+    // <4096 cap). Rocket is U+1F680, encoded as 4 UTF-8 bytes.
+    fireEvent.change(ta, { target: { value: "\u{1F680}".repeat(1000) } });
+    const counter = await screen.findByTestId("composer-counter");
+    expect(counter.textContent).toContain("4000");
+    expect(counter).toHaveClass("composer__counter--warn");
+  });
+});
+
+describe("test_web_composer_failed_message_badge_renders_on_post_failure", () => {
+  it("post failure surfaces the failed badge with retry control", async () => {
+    const ta = await renderWithChannel();
+    postMessageMock.mockRejectedValue(new Error("boom"));
+
+    fireEvent.change(ta, { target: { value: "doomed" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    const badge = await screen.findByTestId("msg-failed-badge");
+    expect(badge.textContent).toBe("Failed to send");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+});
+
 describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () => {
   it("posts a message and asserts the pending row carries the badge, italic body, and no inline style", async () => {
     // vitest+vite does not inject imported CSS into the jsdom document

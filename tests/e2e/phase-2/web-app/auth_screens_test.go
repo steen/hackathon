@@ -141,16 +141,18 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 			t.Errorf("Chat.tsx: expected `messagesState.messages.map(...)` rendering the message stream")
 		}
 
-		// The composer <input> spans multiple lines with inline arrow
+		// The composer element spans multiple lines with inline arrow
 		// callbacks (which themselves contain `=>`), so the regex can't
 		// stop at the first `>`. Match the opening tag's interior with a
 		// lazy `[^<]*?` instead and let the trailing `/>` (or `>`) close
-		// it. (?s) lets `.` cross newlines.
-		if !regexp.MustCompile(`(?s)<input\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `<input aria-label=\"message\">` composer")
+		// it. (?s) lets `.` cross newlines. AC-2 names "input"; the
+		// composer is now a <textarea> (issue #137 — multiline + Enter to
+		// send), so the alternation tolerates both element names.
+		if !regexp.MustCompile(`(?s)<(?:input|textarea)\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(body) {
+			t.Errorf("Chat.tsx: expected a `<input>` or `<textarea>` composer with `aria-label=\"message\"`")
 		}
 		if !regexp.MustCompile(`(?s)<form\b[^<]*?className="composer"`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `<form className=\"composer\">` wrapping the input")
+			t.Errorf("Chat.tsx: expected a `<form className=\"composer\">` wrapping the composer")
 		}
 	})
 

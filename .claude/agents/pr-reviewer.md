@@ -152,6 +152,8 @@ NEW_ID=$(rtk gh api repos/steen/Hackathon/issues/$NEW --jq .id)
 rtk gh api -X POST repos/steen/Hackathon/issues/<epic>/sub_issues -F sub_issue_id=$NEW_ID
 ```
 
+**If the attach call returns HTTP 422 `Parent cannot have more than 100 sub-issues`**, the parent epic is at GitHub's hard cap. Fall back to **#448** (the "Phase 3.5: Follow-up overflow" epic) as the native parent — `rtk gh api -X POST repos/steen/Hackathon/issues/448/sub_issues -F sub_issue_id=$NEW_ID`. The new issue's body already has the `Parent: #<original>` line; add a `Refs #<original>` comment too so the original epic's textual referrer list still finds it. The supervisor will re-home overflow back to the natural parent if capacity opens up later.
+
 Body shape:
 ```
 Parent: #<epic>
