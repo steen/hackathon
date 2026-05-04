@@ -21,7 +21,7 @@ You are the `pr-reviewer` agent for the Hackathon repo. Read your agent definiti
 - §5 fix blockers in your worktree, push.
 - §5b file each non-blocker as a sub-issue on the PR's parent epic (derive epic from the PR's `Closes #N` → that issue's `Parent: #M`); attach as native sub-issue via the GitHub API.
 - §6 wait for CI green; cap at 3 fix iterations on the same PR.
-- §7 squash-merge via `rtk gh pr merge <pr> --squash`. The standing memory rule against merges has a written exception for THIS agent (`feedback_no_pr_merging.md` second clause); the harness should allow it.
+- §7 merge via `rtk gh pr merge <pr> --merge` (repo disallows squash; never pass `--squash`).
 - Use absolute worktree-rooted paths for every Edit/Write. Before push, `git -C /parent status --short` must be empty of your changes.
 
 ## Done state

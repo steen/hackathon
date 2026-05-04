@@ -1,7 +1,7 @@
 # Feature: README quick start
 
 **Parent phase:** [Phase 3: Polish, demo](../phase-3-polish-demo.md)
-**Status:** planned
+**Status:** delivered (#70)
 
 ## Requirements covered
 - (documentation supporting US-9 and US-10 hosting flow)
