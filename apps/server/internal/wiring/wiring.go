@@ -66,6 +66,7 @@ func Build(deps Deps) http.Handler {
 	registerPresence(mux, deps, authFeature.Require)
 	registerWS(mux, deps, authFeature.Tickets)
 	registerPanicProbe(mux)
+	registerWeb(mux)
 
 	// Middleware order (outer → inner):
 	//   SecurityHeaders      → SEC-10 baseline headers on every response

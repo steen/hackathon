@@ -96,26 +96,30 @@ var (
 	serverBuildPath string
 	serverBuildErr  error
 	binBuildBaseDir string
-	binBuildBaseSet sync.Once
 )
 
-func binBuildBase(t *testing.T) string {
-	t.Helper()
-	binBuildBaseSet.Do(func() {
-		dir, err := os.MkdirTemp("", "phase-3-seed-general-bin-*")
-		if err != nil {
-			t.Fatalf("mkdir bin base: %v", err)
-		}
-		binBuildBaseDir = dir
-	})
-	return binBuildBaseDir
+// TestMain owns the per-package temp directory that caches the compiled
+// chat-server binary across this package's tests, so it is removed when
+// the package's tests finish. Without it, every `go test` run on this
+// package would leave a `phase-3-seed-general-bin-*` directory behind
+// under $TMPDIR (see issue #463).
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "phase-3-seed-general-bin-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mkdir bin base: %v\n", err)
+		os.Exit(1)
+	}
+	binBuildBaseDir = dir
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 func serverBinary(t *testing.T) string {
 	t.Helper()
 	serverBuildOnce.Do(func() {
 		root := repoRoot(t)
-		out := filepath.Join(binBuildBase(t), "chat-server")
+		out := filepath.Join(binBuildBaseDir, "chat-server")
 		build := exec.Command("go", "build", "-o", out, "./apps/server")
 		build.Dir = root
 		if combined, err := build.CombinedOutput(); err != nil {

@@ -29,9 +29,9 @@ const GeneralChannelName = "general"
 // failure.
 //
 // Concurrency: two processes racing the same fresh DB would both pass the
-// existence check and one would lose the UNIQUE constraint on insert. That
-// loser is treated as a successful no-op (the row exists by the time we
-// re-check) — the post-condition the caller cares about still holds.
+// existence check and one would lose the UNIQUE constraint on insert. The
+// constraint failure itself proves the row exists, so the loser returns nil
+// without re-querying — the post-condition the caller cares about still holds.
 func EnsureGeneralChannel(ctx context.Context, r *repo.Repo) error {
 	if r == nil {
 		return errors.New("seed: nil *repo.Repo")

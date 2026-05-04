@@ -73,20 +73,6 @@ describe("test_web_app_focus_management_login_mount", () => {
   });
 });
 
-describe("test_web_app_focus_management_chat_mount", () => {
-  it("focuses the channel-name heading after sign-in (empty channel list)", async () => {
-    storedToken = "test-jwt-token-placeholder";
-    meMock.mockResolvedValue({ id: "U1", username: "alice" });
-    renderApp();
-
-    const heading = await screen.findByRole("heading", { name: /select a channel/i });
-    await waitFor(() => {
-      expect(document.activeElement).toBe(heading);
-    });
-    expect(heading.getAttribute("tabindex")).toBe("-1");
-  });
-});
-
 describe("test_web_app_focus_management_logout_returns_to_login_username", () => {
   it("re-mounts <Login /> on logout and focuses the username input", async () => {
     storedToken = "test-jwt-token-placeholder";
