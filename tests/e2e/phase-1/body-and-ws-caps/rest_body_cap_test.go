@@ -154,7 +154,7 @@ func postBytes(ctx context.Context, t *testing.T, url string, body []byte) *http
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.ContentLength = int64(len(body))
-	c := &http.Client{Timeout: 5 * time.Second}
+	c := &http.Client{}
 	resp, err := c.Do(req)
 	if err != nil {
 		t.Fatalf("post: %v", err)

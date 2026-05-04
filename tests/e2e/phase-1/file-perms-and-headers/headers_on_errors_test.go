@@ -20,12 +20,13 @@
 //   - 413 — POST /api/auth/register with a 16385-byte body (BodyCap fires
 //     before the handler runs, proving SecurityHeaders wraps BodyCap).
 //
-// 500 is intentionally omitted: there is no panic-probe build tag wired
-// into apps/server today, so a 500 cannot be triggered from outside the
-// binary without modifying production code. The findings sketch in
-// specs/test-analysis/phase-1/file-perms-and-headers.md called this out
-// as conditional on the panic probe; we flag the gap in the report
-// rather than skipping a test that cannot be run.
+// 500 lives in headers_on_panic_500_test.go: it builds the server with
+// `-tags=panicprobe` to register /debug/panic from
+// apps/server/internal/wiring/panicprobe.go, then asserts the four
+// SEC-10 headers ride the Recover-written 500. Splitting the build-
+// tagged path out keeps the default-tags 200/4xx matrix here free of
+// panic-recovery noise (and avoids rebuilding the binary twice in this
+// test for a single sub-case).
 package file_perms_and_headers_e2e_test
 
 import (
