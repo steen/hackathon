@@ -90,9 +90,12 @@ func isReservedAPIPath(p string) bool {
 func writeSPAIndex(w http.ResponseWriter, body []byte) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	// no-cache so a stale browser cache doesn't trap users on an old
-	// SPA after a deploy. The hashed asset bundles under /assets/ are
-	// served by FileServer with its own immutable Last-Modified
-	// headers, so this only loosens caching for index.html.
+	// SPA after a deploy. Hashed asset bundles under /assets/ are
+	// served by http.FileServer, which sets Last-Modified from the
+	// embed.FS modtime and emits no Cache-Control header at all —
+	// caching there relies on Vite's content-hashed filenames changing
+	// the URL between deploys, not on a framework-set immutable hint.
+	// This header only loosens caching for index.html.
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
