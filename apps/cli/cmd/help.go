@@ -38,10 +38,11 @@ Commands:
   whoami                         Print the username of the stored token.
   logout                         Revoke the stored token server-side and
                                  clear local config.
-  channels                       List every channel as <id>\t<name>.
+  channels                       List every channel, tab-separated as
+                                 <id> <name>.
   history <channel> [--limit N] [--before ID]
-                                 Print messages newest-first as
-                                 <rfc3339>\t<sender>\t<body>.
+                                 Print messages newest-first, tab-separated
+                                 as <rfc3339> <sender> <body>.
   send <channel> <message|->     Post a message; "-" reads body from stdin.
   watch <channel> [--once]       Stream new messages until ctx cancels;
                                  reconnects with backoff unless --once.

@@ -5,8 +5,8 @@
   --border: #e5e7eb;
   --accent: #2563eb;
   --error: #b91c1c;
-  --ok: #15803d;
-  --warn: #b45309;
+  --ok: #166534;
+  --warn: #92400e;
 }
 
 * {
@@ -207,11 +207,14 @@ button.linklike {
 }
 
 .conn {
+  display: inline-block;
+  min-width: 7rem;
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: var(--border);
   color: var(--fg);
+  text-align: center;
 }
 
 .conn--open {
