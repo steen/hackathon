@@ -37,6 +37,13 @@ const (
 // independently so wsapi has no HTTP-side dependency.
 const MessageBodyLimit = 4 * 1024
 
+// MessageBodyLimitCloseReason is the WebSocket close-reason text emitted
+// when an inbound frame exceeds MessageBodyLimit. Exported so the e2e
+// frame-size test can disambiguate the body-cap close path from the
+// 64 KiB read-limit close path (both share close code 1009) without a
+// brittle substring match against the wording.
+const MessageBodyLimitCloseReason = "message body exceeds 4 KiB limit"
+
 // Config carries the per-handler dependencies that vary between
 // production wiring and tests. OriginPatterns is forwarded to
 // coder/websocket.AcceptOptions; same-origin (Host == Origin) is
@@ -238,7 +245,7 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 			return
 		}
 		if len(data) > MessageBodyLimit {
-			_ = conn.Close(websocket.StatusMessageTooBig, "message body exceeds 4 KiB limit")
+			_ = conn.Close(websocket.StatusMessageTooBig, MessageBodyLimitCloseReason)
 			return
 		}
 		if !bucket.allow() {

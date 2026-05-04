@@ -42,7 +42,7 @@ rtk gh pr list --state open --json number,title,headRefName,labels,mergeable,isD
 rtk git worktree list
 ```
 
-Drop the supervisor's own user from review candidates if their author login is the same as `gh api user --jq .login` — agents shouldn't review their own work; let a human or a different agent do it. (Skip this filter if the team is single-user.)
+Self-review is allowed. The pr-reviewer subagent is a *different agent* from whatever opened the PR (issue-pr-worker, supervisor itself, or human), even when both ran under the same GitHub login. Don't filter by author. The structural protection that matters is "never have two reviewers on the same PR" — enforced by the `in-review` label, not by author identity.
 
 ### 3. Filter eligible PRs
 
@@ -109,7 +109,7 @@ Without `auto`, exit cleanly.
 
 ## Hard prohibitions
 
-- Never review your own PRs (filter by author in step 2).
+- Self-review (same author as supervisor) IS allowed — pr-reviewer is a separate agent, and same-machine PRs would otherwise stall waiting for an external reviewer that may never arrive. The double-review guard is the `in-review` label, not the author check.
 - Never `event: "APPROVE"` / `"REQUEST_CHANGES"` on a posted review (the agent enforces this; the supervisor doesn't post reviews directly).
 - Never dispatch two subagents against the same PR.
 - Never strip the `in-review` label except (a) when claim+dispatch fails (step 5), or (b) when reclaiming a stalled worker after WIP recovery (step 8). Otherwise let the merge auto-remove it.
