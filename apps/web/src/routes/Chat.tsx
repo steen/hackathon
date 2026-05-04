@@ -108,6 +108,11 @@ export function Chat(): React.JSX.Element {
     return id;
   };
 
+  const activeChannelName = useMemo<string | null>(() => {
+    if (activeChannel === null) return null;
+    return channelsState.channels.find((c) => c.id === activeChannel)?.name ?? null;
+  }, [activeChannel, channelsState.channels]);
+
   const draftBytes = useMemo(() => byteLength(draft), [draft]);
   const overCap = draftBytes > MAX_BODY_BYTES;
   const showCounter = draftBytes >= Math.floor(MAX_BODY_BYTES * WARN_RATIO);
@@ -143,7 +148,7 @@ export function Chat(): React.JSX.Element {
 
   return (
     <div className="chat-layout">
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label="Chat sidebar">
         <header>
           <strong>{user?.username ?? "..."}</strong>
           <button
@@ -162,7 +167,7 @@ export function Chat(): React.JSX.Element {
             {channelsState.error}
           </p>
         ) : null}
-        <ul>
+        <ul aria-label="Channels">
           {channelsState.channels.map((c) => (
             <li key={c.id}>
               <button
@@ -178,7 +183,7 @@ export function Chat(): React.JSX.Element {
           ))}
         </ul>
         <h2>Online</h2>
-        <ul className="presence" aria-label="online users" data-testid="presence-list">
+        <ul className="presence" aria-label="Online users" data-testid="presence-list">
           {presenceState.users.map((u) => (
             <li key={u.id} data-testid={`presence-user-${u.id}`}>
               {u.username.length > 0 ? u.username : u.id}
@@ -201,10 +206,10 @@ export function Chat(): React.JSX.Element {
           {presenceAnnouncement}
         </div>
       </aside>
-      <main className="messages">
+      <main className="messages" aria-label={activeChannelName ?? "Messages"}>
         <header className="messages__header">
           <h2 ref={headingRef} tabIndex={-1}>
-            {channelsState.channels.find((c) => c.id === activeChannel)?.name ?? "Select a channel"}
+            {activeChannelName ?? "Select a channel"}
           </h2>
           <ConnectionBadge state={messagesState.connection} />
         </header>

@@ -962,3 +962,46 @@ describe("test_web_chat_focus_management_mount_no_channels_focuses_heading", () 
     expect(heading.getAttribute("tabindex")).toBe("-1");
   });
 });
+
+describe("test_web_chat_landmarks_have_accessible_names", () => {
+  it("aside, main, and sidebar lists each expose an accessible name", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+
+    // <aside> resolves to role="complementary" with the explicit aria-label.
+    expect(screen.getByRole("complementary", { name: "Chat sidebar" })).toBeInTheDocument();
+
+    // <main> takes the active channel name as its label so SR landmark
+    // navigation announces "general, main" rather than an unnamed region.
+    expect(screen.getByRole("main", { name: "general" })).toBeInTheDocument();
+
+    // Each sidebar <ul> is named so SR landmark / list navigation has a
+    // label distinct from the heading text alone.
+    expect(screen.getByRole("list", { name: "Channels" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Online users" })).toBeInTheDocument();
+  });
+
+  it("main landmark falls back to 'Messages' when no channel is active", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([]);
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByRole("main", { name: "Messages" })).toBeInTheDocument();
+  });
+});
