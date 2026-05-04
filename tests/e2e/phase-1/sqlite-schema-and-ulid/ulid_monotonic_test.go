@@ -31,17 +31,24 @@ import (
 //
 // Concurrent regime: 10 goroutines each POST 50 messages. Every id must
 // be a 26-char Crockford-base32 ULID, all 500 must be unique, and the
-// timestamp prefix must decode to within 5 seconds of the test's wall
-// clock. Strict cross-goroutine ordering is *not* asserted (goroutine
-// scheduling makes that brittle), but cross-goroutine uniqueness is —
-// LockedMonotonicReader's job is to keep entropy mutation race-free.
+// timestamp prefix must decode to within a window bracketing each batch's
+// actual mint window plus 5s of clock-skew slack. Strict cross-goroutine
+// ordering is *not* asserted (goroutine scheduling makes that brittle),
+// but cross-goroutine uniqueness is — LockedMonotonicReader's job is to
+// keep entropy mutation race-free.
+//
+// Wallclock budget: each batch records its own [before, after] window
+// directly around the POSTs, so an arbitrarily slow CI runner cannot blow
+// the budget — only true clock-skew between the test process's wallclock
+// and the server's wallclock can. Earlier versions of this test snapped
+// `wantTime` once at the top and asserted a fixed 5s budget against every
+// id, which flaked under CI runner stalls (issue #498).
 func TestAC5_NewULIDMonotonicAcrossRapidCalls(t *testing.T) {
 	if testing.Short() {
 		t.Skip("AC-5 sends 600 messages end-to-end; skipped under -short")
 	}
 
 	srv := startServer(t)
-	wantTime := time.Now()
 
 	const username = "ulid-ac5"
 	password := randomSecret(t, 12)
@@ -49,11 +56,13 @@ func TestAC5_NewULIDMonotonicAcrossRapidCalls(t *testing.T) {
 	chID := createChannelAC5(t, srv, token, "ac5-monotonic")
 
 	const serialCount = 100
+	serialBefore := time.Now()
 	serialIDs := make([]string, 0, serialCount)
 	for i := 0; i < serialCount; i++ {
 		serialIDs = append(serialIDs,
 			postMessageAC5(t, srv, token, chID, fmt.Sprintf("serial-%03d", i)))
 	}
+	serialAfter := time.Now()
 
 	if !sort.StringsAreSorted(serialIDs) {
 		for i := 1; i < len(serialIDs); i++ {
@@ -69,13 +78,14 @@ func TestAC5_NewULIDMonotonicAcrossRapidCalls(t *testing.T) {
 		}
 	}
 	for i, id := range serialIDs {
-		assertULIDAC5(t, fmt.Sprintf("serial[%d]", i), id, wantTime)
+		assertULIDAC5(t, fmt.Sprintf("serial[%d]", i), id, serialBefore, serialAfter)
 	}
 
 	const goroutines = 10
 	const perGoroutine = 50
 	concurrentIDs := make([][]string, goroutines)
 	var wg sync.WaitGroup
+	concurrentBefore := time.Now()
 	for g := 0; g < goroutines; g++ {
 		g := g
 		concurrentIDs[g] = make([]string, 0, perGoroutine)
@@ -89,6 +99,7 @@ func TestAC5_NewULIDMonotonicAcrossRapidCalls(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	concurrentAfter := time.Now()
 
 	seen := make(map[string]struct{}, goroutines*perGoroutine+serialCount)
 	for _, id := range serialIDs {
@@ -101,7 +112,8 @@ func TestAC5_NewULIDMonotonicAcrossRapidCalls(t *testing.T) {
 					g, i, id)
 			}
 			seen[id] = struct{}{}
-			assertULIDAC5(t, fmt.Sprintf("concurrent[g=%d,i=%d]", g, i), id, wantTime)
+			assertULIDAC5(t, fmt.Sprintf("concurrent[g=%d,i=%d]", g, i), id,
+				concurrentBefore, concurrentAfter)
 		}
 	}
 }
@@ -126,7 +138,13 @@ var crockfordIndexAC5 = func() [256]int {
 	return idx
 }()
 
-func assertULIDAC5(t *testing.T, label, id string, around time.Time) {
+// assertULIDAC5 checks shape (length, alphabet) and that the embedded
+// timestamp falls within [before-slack, after+slack]. The slack only has
+// to absorb clock skew between the test process and the server process
+// (same machine, so well under a second in practice); it does not have
+// to absorb test runtime. Issue #498: the previous "ts within 5s of a
+// single snapshot" form flaked under CI stalls.
+func assertULIDAC5(t *testing.T, label, id string, before, after time.Time) {
 	t.Helper()
 	if len(id) != 26 {
 		t.Errorf("%s = %q has length %d, want 26 (ULID)", label, id, len(id))
@@ -138,11 +156,19 @@ func assertULIDAC5(t *testing.T, label, id string, around time.Time) {
 		return
 	}
 	ts := decodeULIDTimestampAC5(id)
-	delta := ts.Sub(around)
-	if delta < -5*time.Second || delta > 5*time.Second {
-		t.Errorf("%s = %q timestamp %s is more than 5s from %s (delta=%s)",
+	const slack = 5 * time.Second
+	lower := before.Add(-slack)
+	upper := after.Add(slack)
+	// ULID timestamps are millisecond-truncated; compare on the same scale
+	// so a sub-millisecond before/after capture cannot trip a strict <.
+	tsMS := ts.UnixMilli()
+	lowerMS := lower.UnixMilli()
+	upperMS := upper.UnixMilli()
+	if tsMS < lowerMS || tsMS > upperMS {
+		t.Errorf("%s = %q timestamp %s outside window [%s, %s] (slack=%s)",
 			label, id, ts.Format(time.RFC3339Nano),
-			around.Format(time.RFC3339Nano), delta)
+			lower.Format(time.RFC3339Nano), upper.Format(time.RFC3339Nano),
+			slack)
 	}
 }
 
