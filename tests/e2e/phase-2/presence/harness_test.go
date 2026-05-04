@@ -20,6 +20,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,12 @@ import (
 
 	"github.com/coder/websocket"
 )
+
+// defaultChannel is the bootstrap channel every freshly-started server
+// seeds (per Phase 0/3 plans). Tests against the default WS subscription
+// route through it; centralizing the literal here keeps a future rename
+// to a single edit.
+const defaultChannel = "#general"
 
 type runningServer struct {
 	httpURL    string
@@ -287,11 +294,11 @@ func dialAuthenticatedWS(t *testing.T, srv *runningServer, bearer string) *webso
 	return c
 }
 
-// fetchSubscriberCount queries /debug/subs?channel=#general and parses
-// "<n>\n" into an int. The endpoint is unauthenticated.
+// fetchSubscriberCount queries /debug/subs?channel=<defaultChannel>
+// and parses "<n>\n" into an int. The endpoint is unauthenticated.
 func fetchSubscriberCount(t *testing.T, srv *runningServer) int {
 	t.Helper()
-	u := fmt.Sprintf("%s/debug/subs?channel=%%23general", srv.httpURL)
+	u := fmt.Sprintf("%s/debug/subs?channel=%s", srv.httpURL, url.QueryEscape(defaultChannel))
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		t.Fatalf("new GET /debug/subs: %v", err)
