@@ -81,6 +81,16 @@ export function usePresence(enabled: boolean): UsePresence {
     // reseed would feed this same map). Lets a join announcement render
     // the username for a user the SR-listener has heard of before, even if
     // they had previously left.
+    //
+    // Staleness window: the directory is populated exactly once per mount
+    // and never refreshed. A user who registers after this hook mounted
+    // will be unknown to the directory for the remaining lifetime of the
+    // mount — their join is announced as a generic "a new user joined"
+    // and their leave the same. Username changes (if/when supported) are
+    // also not picked up. The bound is therefore "until the tab reloads
+    // or the hook unmounts/remounts" rather than a fixed duration.
+    // Periodic reseed is deferred pending #490 (server-side username in
+    // WS frames), which would supersede the directory entirely; see #496.
     const knownUsernames = new Map<string, string>();
     let seq = 0;
 
