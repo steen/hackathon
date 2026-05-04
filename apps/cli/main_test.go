@@ -62,3 +62,18 @@ func TestIsTopLevelHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestIsTopLevelVersion(t *testing.T) {
+	for _, tok := range []string{"--version", "-v"} {
+		if !isTopLevelVersion(tok) {
+			t.Errorf("isTopLevelVersion(%q) = false, want true", tok)
+		}
+	}
+	// `version` (the subcommand) is dispatched, not short-circuited;
+	// `-V`, `--ver` and friends are not aliases.
+	for _, tok := range []string{"", "version", "-V", "--ver", "send", "help"} {
+		if isTopLevelVersion(tok) {
+			t.Errorf("isTopLevelVersion(%q) = true, want false", tok)
+		}
+	}
+}
