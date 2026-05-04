@@ -806,10 +806,11 @@ describe("humanizeTimestamp", () => {
 
   it("crosses midnight by local-day, not 24h window", () => {
     // 23:50 yesterday viewed at 00:10 today is < 24h apart, but a
-    // different local day → not "today".
+    // different local day → must take the "Wkd HH:MM" branch, not the
+    // today branch and not the older "Mon D HH:MM" branch.
     const now = new Date(2026, 4, 4, 0, 10, 0);
     const iso = localIso(2026, 5, 3, 23, 50);
-    expect(humanizeTimestamp(iso, now)).not.toMatch(/^\d{2}:\d{2}$/);
+    expect(humanizeTimestamp(iso, now)).toBe("Sun 23:50");
   });
 });
 
