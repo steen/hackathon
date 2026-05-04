@@ -3,7 +3,6 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "node -e \"console.log('scaffold-stub dev (no-op)')\"",
     "build": "node -e \"console.log('scaffold-stub build (no-op)')\"",
     "test": "node -e \"console.log('scaffold-stub test (no-op)')\""
   }

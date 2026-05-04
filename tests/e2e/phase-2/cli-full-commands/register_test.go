@@ -70,7 +70,6 @@ func TestAC1_Register_PersistsTokenViaFlags(t *testing.T) {
 // code from this PR. See the findings doc's "Test run failures"
 // section for the suggested fix.
 func TestAC1_Register_PromptsForPasswordAndInviteCode(t *testing.T) {
-	t.Skip("AC-1 prompt-path bug: apps/cli/cmd/prompt.go::readLine wraps env.Stdin in a fresh bufio.NewReader on every call; the first prompt drains the reader's 4 KiB buffer and the second prompt reads from an empty pipe. Production fix lives in a separate PR (cache the *bufio.Reader on Env). Findings: specs/test-analysis/phase-2/cli-full-commands.md.")
 	srv := startServer(t)
 	xdg := t.TempDir()
 
