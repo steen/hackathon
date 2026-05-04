@@ -1,0 +1,1 @@
+- chore(web): name chat landmarks (sidebar, main, channels list, presence list) so screen-reader landmark + list navigation reads context; `<main>` takes the active channel name with `"Messages"` fallback (#548).
