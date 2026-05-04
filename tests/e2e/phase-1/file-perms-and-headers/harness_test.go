@@ -98,6 +98,11 @@ type startServerOpts struct {
 	// default <tmpDir>/chatd.sqlite. The caller is responsible for
 	// pre-creating it (or any parent dir) if that's part of the test.
 	dbPath string
+
+	// buildTags, if non-empty, is passed to `go build` as `-tags=<csv>`.
+	// AC-3's 500 sub-case uses "panicprobe" so the binary registers
+	// /debug/panic from apps/server/internal/wiring/panicprobe.go.
+	buildTags string
 }
 
 // startServer builds apps/server, picks a free port, starts the binary
@@ -110,7 +115,12 @@ func startServer(t *testing.T, opts startServerOpts) *runningServer {
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "chat-server")
 
-	build := exec.Command("go", "build", "-o", binPath, "./apps/server")
+	buildArgs := []string{"build"}
+	if opts.buildTags != "" {
+		buildArgs = append(buildArgs, "-tags="+opts.buildTags)
+	}
+	buildArgs = append(buildArgs, "-o", binPath, "./apps/server")
+	build := exec.Command("go", buildArgs...)
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build ./apps/server failed: %v\n%s", err, out)

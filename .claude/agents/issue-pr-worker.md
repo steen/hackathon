@@ -139,6 +139,12 @@ How:
    rtk gh api -X POST repos/steen/Hackathon/issues/<epic>/sub_issues -F sub_issue_id=$NEW_ID
    ```
    The `-F` (capital F) is required — the API rejects string IDs. Verify the link with `rtk gh api repos/steen/Hackathon/issues/<epic>/sub_issues --jq '.[].number'`.
+
+   **If the attach call returns HTTP 422 `Parent cannot have more than 100 sub-issues`**, the parent epic is at GitHub's hard cap. Fall back to **#448** (the "Phase 3.5: Follow-up overflow" epic) as the native parent:
+   ```bash
+   rtk gh api -X POST repos/steen/Hackathon/issues/448/sub_issues -F sub_issue_id=$NEW_ID
+   ```
+   Add `Refs #<original-parent>` as a comment line in the new issue's body so the original epic's textual referrer list still finds it. The supervisor periodically re-homes overflow back to the natural parent if/when capacity opens up.
 4. Replace the matching `SKIPPED` line in your report with `SKIPPED → filed as #<n>: <reason>`.
 
 When in doubt, file. A redundant issue is cheap; a lost defect rots.

@@ -40,9 +40,12 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	// No subcommand -> print help and exit 0. A bare `help`, `--help`,
-	// or `-h` as the first positional token does the same. Per-subcommand
-	// `-h` is still owned by each flag.FlagSet (e.g. `chatd send -h`).
+	// No subcommand or `--help` / `-h` as the first positional token
+	// prints help and exits 0 without building an Env. A bare `help`
+	// token routes through Dispatch like any other subcommand so the
+	// two paths stay symmetric with `version` / `--version`.
+	// Per-subcommand `-h` is still owned by each flag.FlagSet
+	// (e.g. `chatd send -h`).
 	if len(rest) == 0 || isTopLevelHelp(rest[0]) {
 		return cmd.WriteHelp(os.Stdout)
 	}
@@ -63,7 +66,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func isTopLevelHelp(tok string) bool {
-	return tok == "help" || tok == "--help" || tok == "-h"
+	return tok == "--help" || tok == "-h"
 }
 
 func isTopLevelVersion(tok string) bool {
@@ -118,6 +121,8 @@ func Dispatch(ctx context.Context, env *cmd.Env, args []string) error {
 		return cmd.Watch(ctx, env, rest)
 	case "version":
 		return cmd.Version(ctx, env, rest)
+	case "help":
+		return cmd.Help(ctx, env, rest)
 	default:
 		return fmt.Errorf("unknown subcommand %q", sub)
 	}
