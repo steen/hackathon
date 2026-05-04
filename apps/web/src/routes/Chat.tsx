@@ -225,12 +225,15 @@ export function Chat(): React.JSX.Element {
           </h2>
           <ConnectionBadge state={messagesState.connection} />
         </header>
+        {/* role="log" implies aria-live="polite" per ARIA 1.2 — single
+            source of truth so a future flip to assertive only needs the
+            role change. aria-relevant/aria-atomic stay explicit because
+            they override the role's defaults. */}
         <div
           className="messages__list"
           ref={listRef}
           data-testid="message-list"
           role="log"
-          aria-live="polite"
           aria-relevant="additions"
           aria-atomic="false"
           aria-label="conversation"

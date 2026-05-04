@@ -151,7 +151,7 @@ describe("test_web_chat_page_renders_history_then_appends_live_messages", () => 
 });
 
 describe("test_web_messages_list_has_aria_live_log_region", () => {
-  it("messages list carries role=log + aria-live=polite so SR users hear new arrivals", async () => {
+  it("messages list carries role=log (implicit aria-live=polite) so SR users hear new arrivals", async () => {
     happyPath();
     render(
       <AuthProvider>
@@ -161,7 +161,10 @@ describe("test_web_messages_list_has_aria_live_log_region", () => {
 
     const list = await screen.findByTestId("message-list");
     expect(list).toHaveAttribute("role", "log");
-    expect(list).toHaveAttribute("aria-live", "polite");
+    // No explicit aria-live: role="log" implies aria-live="polite" per
+    // ARIA 1.2; one source of truth so the role and attribute can't
+    // drift if a future change flips the announcement behavior.
+    expect(list).not.toHaveAttribute("aria-live");
     expect(list).toHaveAttribute("aria-relevant", "additions");
     // aria-atomic="false" so SR announces only the newly added <article>,
     // not the full transcript every time a message arrives.
