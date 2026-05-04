@@ -1,20 +1,33 @@
-name: Remove in-review label on PR close
+name: Strip supervisor-lock labels on close
 
 on:
   pull_request_target:
     types: [closed]
+  issues:
+    types: [closed]
 
 permissions:
   pull-requests: write
+  issues: write
 
 jobs:
-  remove-label:
+  strip-labels:
     runs-on: ubuntu-latest
     steps:
-      - name: Remove in-review label
+      - name: Strip lock label from closed PR
+        if: github.event_name == 'pull_request_target'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |
           gh api -X DELETE "repos/$REPO/issues/$PR_NUMBER/labels/in-review" --silent 2>/dev/null || true
+
+      - name: Strip lock label from closed issue
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api -X DELETE "repos/$REPO/issues/$ISSUE_NUMBER/labels/in-progress" --silent 2>/dev/null || true
