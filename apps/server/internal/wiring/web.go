@@ -64,15 +64,13 @@ func registerWeb(mux *http.ServeMux) {
 			return
 		}
 
-		f, err := spaFS.Open(clean)
-		if err != nil {
+		if _, err := fs.Stat(spaFS, clean); err != nil {
 			// Path is not a built asset — SPA fallback so the
 			// client-side router can resolve deep links like
 			// /c/general or /login.
 			writeSPAIndex(w, indexBytes)
 			return
 		}
-		_ = f.Close()
 		fileServer.ServeHTTP(w, r)
 	}))
 }
