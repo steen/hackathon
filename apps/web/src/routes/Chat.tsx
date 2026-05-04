@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
+import { humanizeTimestamp } from "../utils/formatTimestamp.js";
 
 // Mirrors apps/server/internal/http/messages_handlers.go's MaxMessageBodyBytes
 // (4 KiB). The server measures bytes after TrimSpace; the client prevalidates
@@ -179,7 +180,7 @@ export function Chat(): React.JSX.Element {
                     </span>
                   ) : null}
                   {m.status === "pending" || m.created_at.length === 0 ? null : (
-                    <time dateTime={m.created_at}>{m.created_at}</time>
+                    <time dateTime={m.created_at}>{humanizeTimestamp(m.created_at)}</time>
                   )}
                   {m.status === "failed" ? (
                     <>
