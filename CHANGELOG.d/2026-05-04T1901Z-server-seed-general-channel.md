@@ -1,0 +1,1 @@
+- server: seed a `#general` channel on first boot so a fresh install has a default room for the phase-3 demo flow. Idempotent — subsequent boots are no-ops, and a concurrent race on a fresh DB resolves cleanly via `ErrChannelNameTaken`. (#444)
