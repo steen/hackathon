@@ -69,10 +69,14 @@ func TestAC4_WSHardening_UnknownChannel_RejectedAtUpgrade(t *testing.T) {
 		{
 			name: "structurally_valid_but_unknown_ulid_404",
 			// 26 chars, Crockford-base32 alphabet (0-9A-Z) — passes
-			// NormalizeChannelID, fails the DB lookup. The leading
-			// digits keep this distinct from any ULID the binary
-			// could realistically mint at test time.
-			channel:    "00000000000000000000NOEXIST",
+			// NormalizeChannelID's shape check (handler.go:142-145)
+			// and reaches cfg.ChannelLookup (handler.go:161-172),
+			// where it gets a DB miss and a 404. Specifically targets
+			// the post-Normalize DB-lookup branch — distinct from
+			// arm (1)'s shape-rejection 404. The leading digits keep
+			// this distinct from any ULID the binary could
+			// realistically mint at test time.
+			channel:    "00000000000000000000NOEXIS",
 			wantStatus: http.StatusNotFound,
 			wantErr:    true,
 		},
