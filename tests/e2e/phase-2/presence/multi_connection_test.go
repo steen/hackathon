@@ -94,9 +94,8 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if join.UserID != aliceID {
 		t.Errorf("alice multi-connect first event: user_id=%q, want %q (alice)", join.UserID, aliceID)
 	}
-	// Drain any spurious presence frame within a quiet window. None
-	// should arrive — the second and third connections must not
-	// re-broadcast a join.
+	// Assert no further presence frame arrives within a quiet window —
+	// the second and third connections must not re-broadcast a join.
 	if extra := awaitPresence(t, bobFrames, 500*time.Millisecond); extra != nil {
 		t.Errorf("alice multi-connect: extra presence frame arrived after first join (kind=%q user_id=%q); ref-counted presence must broadcast exactly once on 0→1", extra.Kind, extra.UserID)
 	}
@@ -126,6 +125,8 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if !containsID(fetchPresenceUsers(t, srv, bobTok), aliceID) {
 		t.Errorf("/api/presence dropped alice (id=%s) after closing 1 of 3 connections — AC-5 requires online while ≥1 connection open", aliceID)
 	}
+	// Assert no further presence frame arrives within a quiet window —
+	// a 3→2 ref-count drop must not broadcast.
 	if extra := awaitPresence(t, bobFrames, 500*time.Millisecond); extra != nil {
 		t.Errorf("after closing aliceConn1: stray presence frame (kind=%q user_id=%q); ref-counted presence must not broadcast on 3→2", extra.Kind, extra.UserID)
 	}
@@ -143,6 +144,8 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if !containsID(fetchPresenceUsers(t, srv, bobTok), aliceID) {
 		t.Errorf("/api/presence dropped alice (id=%s) after closing 2 of 3 connections — AC-5 requires online while ≥1 connection open", aliceID)
 	}
+	// Assert no further presence frame arrives within a quiet window —
+	// a 2→1 ref-count drop must not broadcast.
 	if extra := awaitPresence(t, bobFrames, 500*time.Millisecond); extra != nil {
 		t.Errorf("after closing aliceConn2: stray presence frame (kind=%q user_id=%q); ref-counted presence must not broadcast on 2→1", extra.Kind, extra.UserID)
 	}
@@ -168,6 +171,8 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if leave.UserID != aliceID {
 		t.Errorf("alice last-disconnect event: user_id=%q, want %q (alice)", leave.UserID, aliceID)
 	}
+	// Assert no further presence frame arrives within a quiet window —
+	// the 1→0 leave must broadcast exactly once.
 	if extra := awaitPresence(t, bobFrames, 500*time.Millisecond); extra != nil {
 		t.Errorf("after alice's last disconnect: stray presence frame (kind=%q user_id=%q); ref-counted presence must broadcast leave exactly once", extra.Kind, extra.UserID)
 	}
