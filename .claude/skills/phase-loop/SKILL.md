@@ -1,6 +1,6 @@
 ---
 name: phase-loop
-description: One tick of the Hackathon repo's phased delivery loop. Picks the lowest-numbered open epic, scans its sub-issues for parallel-eligibility against the open-PR conflict surface, and dispatches eligible work to `issue-pr-worker` subagents in isolated worktrees. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup). Idle ticks emit a banner and exit cleanly.
+description: One tick of the Hackathon repo's phased delivery loop. Picks the lowest-phase open epic (parsed from `Phase X[.Y]` in the title), scans its sub-issues for parallel-eligibility against the open-PR conflict surface, and dispatches eligible work to `issue-pr-worker` subagents in isolated worktrees. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup). Idle ticks emit a banner and exit cleanly.
 ---
 
 # phase-loop
@@ -50,7 +50,11 @@ Capture each open PR's file footprint (= conflict surface for this tick). Each a
 rtk gh issue list --state open --label epic --json number,title --limit 20
 ```
 
-Take the lowest-numbered open epic (or `phase-override`). Sub-issue priority is read from the GitHub native sub-issue link in §5; do not parse the epic body's textual `## Sub-issues` section.
+**Sort by parsed phase number from the title**, regex `Phase (\d+(?:\.\d+)?)` (anchored near the start). `Phase 2.5` < `Phase 3` < `Phase 10`. Epics with no parseable `Phase X[.Y]` prefix sort last, by issue number ascending. Ties on phase number → lowest issue number wins. Take the first epic in this order (or `phase-override`).
+
+Rationale: phase numbers reflect product ordering (2 → 2.5 → 3), but GitHub issue numbers are creation-order. A late-created `Phase 2.5` epic should still beat an earlier-created `Phase 3` epic when the loop picks work.
+
+Sub-issue priority within the chosen epic is read from the GitHub native sub-issue link in §5; do not parse the epic body's textual `## Sub-issues` section.
 
 ### 4. Filter sub-issues for eligibility
 
