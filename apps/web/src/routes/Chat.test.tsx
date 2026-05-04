@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { readFileSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
 import { humanizeTimestamp } from "../utils/formatTimestamp.js";
 
 class FakeSocket {
@@ -688,18 +686,6 @@ describe("test_web_composer_failed_message_badge_renders_on_post_failure", () =>
 
 describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () => {
   it("posts a message and asserts the pending row carries the badge, italic body, and no inline style", async () => {
-    // vitest+vite does not inject imported CSS into the jsdom document
-    // (the `import "../styles.css"` path returns an empty module here),
-    // so read the stylesheet from disk and attach it as a <style> tag.
-    // jsdom's CSSOM resolves descendant selectors in getComputedStyle
-    // once the rules are present.
-    const cssPath = resolvePath(process.cwd(), "src/styles.css");
-    const cssText = readFileSync(cssPath, "utf-8");
-    const styleEl = document.createElement("style");
-    styleEl.dataset.testInjected = "msg-pending";
-    styleEl.textContent = cssText;
-    document.head.appendChild(styleEl);
-
     happyPath();
     // Hold postMessage open so the optimistic entry stays in `pending` for
     // the duration of the assertions. Resolving after the test ends keeps
@@ -774,7 +760,6 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
     // promise. The pending entry stays pending — no WS echo is delivered
     // in this test — but the network call no longer dangles.
     for (const r of resolvers) r();
-    styleEl.remove();
   });
 });
 
