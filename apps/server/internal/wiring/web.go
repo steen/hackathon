@@ -75,14 +75,23 @@ func registerWeb(mux *http.ServeMux) {
 	}))
 }
 
+// reservedAPITopLevelPrefixes is the closed set of top-level URL
+// prefixes that must NOT fall through to the SPA handler — anything
+// under these belongs to a machine client (REST envelope, WS upgrade,
+// debug gauge) and a miss should be a JSON 404, not SPA HTML.
+//
+// Contract: when a feature registers a brand-new top-level prefix on
+// the wiring mux (e.g. /metrics, /healthz), append it here in the same
+// PR. TestReservedPrefixesCoverWiringMux walks every mux.Handle/HandleFunc
+// call site in this package and fails if a registered top-level prefix
+// is missing from this list.
+var reservedAPITopLevelPrefixes = []string{"/api", "/ws", "/debug"}
+
 func isReservedAPIPath(p string) bool {
-	switch {
-	case p == "/api" || strings.HasPrefix(p, "/api/"):
-		return true
-	case p == "/ws" || strings.HasPrefix(p, "/ws/"):
-		return true
-	case p == "/debug" || strings.HasPrefix(p, "/debug/"):
-		return true
+	for _, prefix := range reservedAPITopLevelPrefixes {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			return true
+		}
 	}
 	return false
 }
