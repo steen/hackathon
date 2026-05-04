@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"reflect"
 	"testing"
+
+	"hackathon/apps/cli/cmd"
 )
 
 func TestStripServerFlagSeparate(t *testing.T) {
@@ -62,6 +66,33 @@ func TestIsTopLevelHelp(t *testing.T) {
 		if isTopLevelHelp(tok) {
 			t.Errorf("isTopLevelHelp(%q) = true, want false", tok)
 		}
+	}
+}
+
+// The bare `help` subcommand routes through Dispatch and must produce
+// the same byte stream as a direct WriteHelp call. With cmd.Help gone,
+// this asserts the dispatcher's "help" case stays wired to WriteHelp.
+func TestDispatchHelpMatchesWriteHelp(t *testing.T) {
+	var direct bytes.Buffer
+	if err := cmd.WriteHelp(&direct); err != nil {
+		t.Fatalf("WriteHelp: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	env := &cmd.Env{
+		Stdin:  &bytes.Buffer{},
+		Stdout: stdout,
+		Stderr: stderr,
+	}
+	if err := Dispatch(context.Background(), env, []string{"help"}); err != nil {
+		t.Fatalf("Dispatch help: %v", err)
+	}
+	if got := stderr.String(); got != "" {
+		t.Errorf("stderr = %q, want empty", got)
+	}
+	if got, want := stdout.String(), direct.String(); got != want {
+		t.Errorf("Dispatch help output differs from WriteHelp\n--- direct ---\n%s\n--- dispatch ---\n%s", want, got)
 	}
 }
 

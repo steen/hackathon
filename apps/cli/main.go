@@ -122,7 +122,7 @@ func Dispatch(ctx context.Context, env *cmd.Env, args []string) error {
 	case "version":
 		return cmd.Version(ctx, env, rest)
 	case "help":
-		return cmd.Help(ctx, env, rest)
+		return cmd.WriteHelp(env.Stdout)
 	default:
 		return fmt.Errorf("unknown subcommand %q", sub)
 	}

@@ -1,22 +1,13 @@
 package cmd
 
 import (
-	"context"
 	"io"
 )
 
-// Help implements `chatd help`. It prints a usage block listing every
-// subcommand with a one-line description and the env vars consulted at
-// runtime. `chatd --help` / `chatd -h` / no-args bypass Dispatch and
-// call WriteHelp directly from the binary entrypoint, so all four
-// forms share the same byte stream.
-func Help(_ context.Context, env *Env, _ []string) error {
-	return WriteHelp(env.Stdout)
-}
-
-// WriteHelp emits the top-level usage block. Exported so the binary
-// entrypoint can call it for `--help` / `-h` / no-args without
-// constructing a full Env.
+// WriteHelp emits the top-level usage block. `chatd help`,
+// `chatd --help`, `chatd -h`, and `chatd` (no args) all route here so
+// every form shares one byte stream. Per-subcommand `-h` is owned by
+// each flag.FlagSet (e.g. `chatd send -h`).
 func WriteHelp(w io.Writer) error {
 	_, err := io.WriteString(w, helpText)
 	return err
