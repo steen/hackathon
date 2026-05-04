@@ -13,6 +13,7 @@ import (
 	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/ids"
+	"hackathon/apps/server/wsproto"
 )
 
 const (
@@ -37,12 +38,12 @@ const (
 // independently so wsapi has no HTTP-side dependency.
 const MessageBodyLimit = 4 * 1024
 
-// MessageBodyLimitCloseReason is the WebSocket close-reason text emitted
-// when an inbound frame exceeds MessageBodyLimit. Exported so the e2e
-// frame-size test can disambiguate the body-cap close path from the
-// 64 KiB read-limit close path (both share close code 1009) without a
-// brittle substring match against the wording.
-const MessageBodyLimitCloseReason = "message body exceeds 4 KiB limit"
+// MessageBodyLimitCloseReason re-exports wsproto.MessageBodyLimitCloseReason
+// so existing wsapi callers (handler logic, internal tests) keep their
+// import path unchanged. The canonical definition lives in wsproto so
+// the e2e tests under tests/e2e/ can reference one source of truth
+// without tripping Go's internal-package rule.
+const MessageBodyLimitCloseReason = wsproto.MessageBodyLimitCloseReason
 
 // Config carries the per-handler dependencies that vary between
 // production wiring and tests. OriginPatterns is forwarded to
