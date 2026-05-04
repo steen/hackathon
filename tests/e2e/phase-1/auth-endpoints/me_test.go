@@ -55,18 +55,22 @@ func TestAC3_Me_RequiresValidBearer(t *testing.T) {
 		t.Fatalf("/me with garbage bearer: status %d, want 401; body=%s", status, raw)
 	}
 
-	// Tampered signature: flip the last char of the signature segment.
-	parts := strings.Split(tok, ".")
-	if len(parts) != 3 {
-		t.Fatalf("test JWT not 3 segments: %q", tok)
+	// Tampered signature: splice another user's signature segment onto
+	// alice's header+payload. Computed over a different payload, the
+	// borrowed HMAC cannot validate the spliced token. Flipping a single
+	// base64url char (the previous approach) only changes the trailing
+	// 2 bits of the decoded signature and left ~20% of tokens unchanged
+	// after re-decoding — see #447.
+	_, otherTok := register(t, srv, "mallory", randomSecret(t, 12))
+	aliceParts := strings.Split(tok, ".")
+	otherParts := strings.Split(otherTok, ".")
+	if len(aliceParts) != 3 || len(otherParts) != 3 {
+		t.Fatalf("test JWTs not 3 segments: alice=%q other=%q", tok, otherTok)
 	}
-	sig := parts[2]
-	last := sig[len(sig)-1]
-	flipped := byte('A')
-	if last == 'A' {
-		flipped = 'B'
+	if aliceParts[2] == otherParts[2] {
+		t.Fatalf("two tokens share a signature segment, cannot tamper deterministically: %q", aliceParts[2])
 	}
-	tampered := parts[0] + "." + parts[1] + "." + sig[:len(sig)-1] + string(flipped)
+	tampered := aliceParts[0] + "." + aliceParts[1] + "." + otherParts[2]
 	status, _, raw = getJSON(t, srv, "/api/auth/me", tampered)
 	if status != http.StatusUnauthorized {
 		t.Fatalf("/me with tampered signature: status %d, want 401; body=%s", status, raw)
