@@ -26,7 +26,7 @@ vi.mock("./hooks/useChannels.js", () => ({
 }));
 
 vi.mock("./hooks/usePresence.js", () => ({
-  usePresence: () => ({ users: [] }),
+  usePresence: () => ({ users: [], loading: false, error: null, lastEvent: null }),
 }));
 
 vi.mock("./hooks/useMessages.js", () => ({

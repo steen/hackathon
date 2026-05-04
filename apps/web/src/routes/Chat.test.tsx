@@ -435,6 +435,107 @@ describe("test_web_presence_list_renders_seed_join_leave_and_dedupes", () => {
   });
 });
 
+describe("test_web_presence_live_region_announces_join_with_known_username", () => {
+  it("announces a join by username when the id is in the seeded directory", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({
+          users: [
+            { id: "U1", username: "alice" },
+            { id: "U2", username: "bob" },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live.textContent).toBe("");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
+    });
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    expect(presenceSock).toBeDefined();
+
+    // U2 leaves first so U2's later rejoin lands as a known username (the
+    // seeded directory entry persists across leaves).
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U2" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("bob left");
+    });
+
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U2" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("bob joined");
+    });
+  });
+});
+
+describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
+  it("announces 'a new user joined' when the id is not in the seeded directory", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => !s.url.includes("channel="))).toBe(true);
+    });
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U-stranger" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("a new user joined");
+    });
+  });
+});
+
 async function renderWithChannel(): Promise<HTMLTextAreaElement> {
   happyPath();
   render(
