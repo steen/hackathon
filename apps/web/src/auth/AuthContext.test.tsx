@@ -6,6 +6,8 @@ import { ApiError } from "@hackathon/api-client";
 
 const meMock = vi.fn();
 const logoutMock = vi.fn();
+const loginMock = vi.fn();
+const registerMock = vi.fn();
 const writeTokenMock = vi.fn();
 
 let storedToken: string | null = null;
@@ -14,8 +16,8 @@ vi.mock("../api.js", () => ({
   getClient: () => ({
     me: meMock,
     logout: logoutMock,
-    login: vi.fn(),
-    register: vi.fn(),
+    login: loginMock,
+    register: registerMock,
   }),
   readToken: (): string | null => storedToken,
   writeToken: (t: string | null): void => {
@@ -28,12 +30,28 @@ import { AuthProvider, useAuth } from "./AuthContext.js";
 import { ErrorBanner } from "../components/ErrorBanner.js";
 
 function Probe(): React.JSX.Element {
-  const { token, user, error, logout } = useAuth();
+  const { token, user, error, login, register, logout } = useAuth();
   return (
     <div>
       <span data-testid="token">{token ?? "none"}</span>
       <span data-testid="user">{user?.username ?? "none"}</span>
       <span data-testid="error">{error ?? "none"}</span>
+      <button
+        type="button"
+        onClick={() => {
+          void login("alice", "pw");
+        }}
+      >
+        sign-in
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          void register("alice", "pw", "invite-code-placeholder");
+        }}
+      >
+        sign-up
+      </button>
       <button
         type="button"
         onClick={() => {
@@ -56,6 +74,8 @@ afterEach(() => {
   cleanup();
   meMock.mockReset();
   logoutMock.mockReset();
+  loginMock.mockReset();
+  registerMock.mockReset();
   writeTokenMock.mockReset();
   storedToken = null;
   consoleErrorSpy.mockRestore();
@@ -221,5 +241,71 @@ describe("test_web_auth_successful_login_path_has_no_error", () => {
       expect(screen.getByTestId("user")).toHaveTextContent("alice");
     });
     expect(screen.queryByTestId("auth-error-banner")).not.toBeInTheDocument();
+  });
+});
+
+describe("test_web_auth_successful_login_clears_prior_error", () => {
+  it("removes a stale rehydrate error after login() resolves", async () => {
+    storedToken = "test-jwt-token-placeholder";
+    meMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    loginMock.mockResolvedValue({
+      token: "fresh-jwt-token-placeholder",
+      user: { id: "U1", username: "alice" },
+    });
+
+    render(
+      <AuthProvider>
+        <ErrorBanner />
+        <Probe />
+      </AuthProvider>,
+    );
+
+    const banner = await screen.findByTestId("auth-error-banner");
+    expect(banner).toHaveTextContent(/session could not be restored/i);
+
+    const u = userEvent.setup();
+    await u.click(screen.getByRole("button", { name: /sign-in/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("auth-error-banner")).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("error")).toHaveTextContent("none");
+    expect(screen.getByTestId("token")).toHaveTextContent("fresh-jwt-token-placeholder");
+    expect(screen.getByTestId("user")).toHaveTextContent("alice");
+    expect(loginMock).toHaveBeenCalledWith("alice", "pw");
+    expect(writeTokenMock).toHaveBeenLastCalledWith("fresh-jwt-token-placeholder");
+  });
+});
+
+describe("test_web_auth_successful_register_clears_prior_error", () => {
+  it("removes a stale rehydrate error after register() resolves", async () => {
+    storedToken = "test-jwt-token-placeholder";
+    meMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    registerMock.mockResolvedValue({
+      token: "fresh-jwt-token-placeholder",
+      user: { id: "U2", username: "bob" },
+    });
+
+    render(
+      <AuthProvider>
+        <ErrorBanner />
+        <Probe />
+      </AuthProvider>,
+    );
+
+    const banner = await screen.findByTestId("auth-error-banner");
+    expect(banner).toHaveTextContent(/session could not be restored/i);
+
+    const u = userEvent.setup();
+    await u.click(screen.getByRole("button", { name: /sign-up/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("auth-error-banner")).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("error")).toHaveTextContent("none");
+    expect(screen.getByTestId("token")).toHaveTextContent("fresh-jwt-token-placeholder");
+    expect(screen.getByTestId("user")).toHaveTextContent("bob");
+    expect(registerMock).toHaveBeenCalledWith("alice", "pw", "invite-code-placeholder");
+    expect(writeTokenMock).toHaveBeenLastCalledWith("fresh-jwt-token-placeholder");
   });
 });
