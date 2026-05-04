@@ -42,22 +42,19 @@ func TestAC2_PerUsernameLoginBackoff(t *testing.T) {
 
 	const (
 		alice      = "alice-ac2"
-		bob        = "bob-ac2"
 		correctPwd = "correct-horse-battery-staple"
 		wrongPwd   = "definitely-not-the-password"
 	)
 
-	// Registration is part of setup, not an assertion of AC-2. Use the
-	// real invite from the server harness so the user actually lands in
-	// the users table; AuthenticateLogin can then fail with the right
-	// "wrong password" arm rather than a "no such user" arm. Both arms
-	// trip RegisterFailure today (auth_handlers.go:191-194), but having
-	// real users keeps the success path in subtest B honest.
+	// Registration is part of setup, not an assertion of AC-2. Subtest B
+	// needs alice in the users table so the success arm (200 +
+	// Reset(alice)) actually fires; subtests A and C only need a
+	// username — AuthenticateLogin uses a constant-time path that
+	// returns the same generic error for "no such user" and "wrong
+	// password" (auth_handlers.go:158-164), and the handler increments
+	// the user limiter on either arm.
 	if status, env, raw := registerRaw(t, client, srv, alice, correctPwd, srv.inviteCode); status != http.StatusCreated || env.Error != nil {
 		t.Fatalf("setup: register %q failed: status=%d body=%s", alice, status, raw)
-	}
-	if status, env, raw := registerRaw(t, client, srv, bob, correctPwd, srv.inviteCode); status != http.StatusCreated || env.Error != nil {
-		t.Fatalf("setup: register %q failed: status=%d body=%s", bob, status, raw)
 	}
 
 	// --- Subtest A: repeated failures for one username eventually 429. -------
@@ -170,39 +167,51 @@ func TestAC2_PerUsernameLoginBackoff(t *testing.T) {
 			t.Skipf("cannot build 127.0.0.2 client: %v", err)
 		}
 
-		// Trip alice's backoff again from the new IP. Alice was reset
-		// in subtest B, so this is a fresh failure sequence.
+		// Use fresh usernames not touched by subtests A/B so the
+		// per-username failure counter starts at zero. AuthenticateLogin
+		// returns the same generic error for "no such user" and "wrong
+		// password" (constant-time path documented at
+		// auth_handlers.go:158-164), so the handler treats an unknown
+		// user as a normal login failure and increments the limiter
+		// just the same.
+		const (
+			gated   = "carol-ac2"
+			ungated = "dave-ac2"
+		)
+
+		// Trip carol's backoff. With a fresh counter, failures #1 and
+		// #2 fall in the grace window (delay=0) and failure #3 sets
+		// the first real (>=500ms) gate. Confirm the next attempt
+		// arrives inside that gate by looping up to 2 follow-ups.
 		for i := 1; i <= 3; i++ {
-			status, _, raw := loginRaw(t, ipClient, srv, alice, wrongPwd)
+			status, _, raw := loginRaw(t, ipClient, srv, gated, wrongPwd)
 			if status != http.StatusUnauthorized {
-				t.Fatalf("priming alice failure %d/3 from 127.0.0.2: status=%d, want 401; body=%s", i, status, raw)
+				t.Fatalf("priming %q failure %d/3 from 127.0.0.2: status=%d, want 401; body=%s", gated, i, status, raw)
 			}
 		}
-		// Confirm alice is gated from this IP.
-		var aliceGated bool
-		for i := 0; i < 4; i++ {
-			status, _, _ := loginRaw(t, ipClient, srv, alice, wrongPwd)
+		var carolGated bool
+		for i := 0; i < 2; i++ {
+			status, _, _ := loginRaw(t, ipClient, srv, gated, wrongPwd)
 			if status == http.StatusTooManyRequests {
-				aliceGated = true
+				carolGated = true
 				break
 			}
 		}
-		if !aliceGated {
-			t.Fatalf("could not trip alice's per-username gate from 127.0.0.2 within 4 follow-up attempts; subtest C cannot prove per-username keying without a confirmed gate")
+		if !carolGated {
+			t.Fatalf("could not trip %q's per-username gate from 127.0.0.2 within 2 follow-up attempts; subtest C cannot prove per-username keying without a confirmed gate", gated)
 		}
 
-		// Now the discriminator: bob has zero failures recorded, so
-		// his first wrong-pw attempt must return 401 even though
-		// alice is currently gated from the same source IP. If the
-		// limiter were keyed on IP alone (or shared across users),
-		// bob's first attempt would inherit alice's gate and return
-		// 429.
-		status, _, raw := loginRaw(t, ipClient, srv, bob, wrongPwd)
+		// Discriminator: dave has zero failures recorded, so his first
+		// wrong-pw attempt must return 401 even though carol is
+		// currently gated from the same source IP. If the limiter
+		// were keyed on IP alone (or shared across users), dave's
+		// first attempt would inherit carol's gate and return 429.
+		status, _, raw := loginRaw(t, ipClient, srv, ungated, wrongPwd)
 		if status == http.StatusTooManyRequests {
-			t.Fatalf("bob's first wrong-pw attempt returned 429 while alice was gated; per-username backoff must be keyed on username, not source IP (body=%s)", raw)
+			t.Fatalf("%q's first wrong-pw attempt returned 429 while %q was gated; per-username backoff must be keyed on username, not source IP (body=%s)", ungated, gated, raw)
 		}
 		if status != http.StatusUnauthorized {
-			t.Fatalf("bob's first wrong-pw attempt status=%d, want 401; body=%s", status, raw)
+			t.Fatalf("%q's first wrong-pw attempt status=%d, want 401; body=%s", ungated, status, raw)
 		}
 	})
 
