@@ -7,11 +7,14 @@ import { ApiError } from "@hackathon/api-client";
 //
 // Keep this set small and overlapping causes deliberately collapsed:
 //   - ApiError 401/403 in a session-restore / hooks context maps to
-//     SESSION_INVALID; the same status from a login/register form-submit
-//     context maps to INVALID_CREDENTIALS via formAuthMessage().
-//   - 400/422 from a form maps to VALIDATION via formAuthMessage(); from a
-//     hooks context they fall through to GENERIC because the hook can't say
-//     which field is wrong.
+//     SESSION_INVALID; the same status from a Login form-submit context maps
+//     to INVALID_CREDENTIALS via formAuthMessage(); the same status from a
+//     Register form-submit context maps to INVITE_REJECTED via
+//     registerAuthMessage() — Register has no password to mismatch, so the
+//     realistic 401 cause is an invite-code rejection.
+//   - 400/422 from a form maps to VALIDATION via formAuthMessage() /
+//     registerAuthMessage(); from a hooks context they fall through to
+//     GENERIC because the hook can't say which field is wrong.
 //
 // Add a new REASON_* only when a real call site has an outcome the existing
 // set genuinely can't describe — not as a stylistic preference.
@@ -25,6 +28,8 @@ export const REASON_CANCELED = "The request was canceled.";
 export const REASON_GENERIC = "Something went wrong.";
 export const REASON_INVALID_CREDENTIALS =
   "That username and password don't match. Please try again.";
+export const REASON_INVITE_REJECTED =
+  "That invite code wasn't accepted. Please check it and try again.";
 export const REASON_VALIDATION = "Please check the form and try again.";
 
 export function classifyError(err: unknown): string {
@@ -73,4 +78,21 @@ export function userFacingMessage(prefix: string, err: unknown): string {
 export function formAuthMessage(prefix: string, err: unknown): string {
   console.error(prefix, err);
   return classifyFormAuthError(err);
+}
+
+// Register-form variant: 401/403 means the invite code was rejected (Register
+// has no password to mismatch, so REASON_INVALID_CREDENTIALS is the wrong
+// copy). 400/422 still means "the server rejected the inputs." Other statuses
+// share the closed set with classifyError().
+export function classifyRegisterAuthError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 401 || err.status === 403) return REASON_INVITE_REJECTED;
+    if (err.status === 400 || err.status === 422) return REASON_VALIDATION;
+  }
+  return classifyError(err);
+}
+
+export function registerAuthMessage(prefix: string, err: unknown): string {
+  console.error(prefix, err);
+  return classifyRegisterAuthError(err);
 }
