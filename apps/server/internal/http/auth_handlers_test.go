@@ -452,6 +452,29 @@ func TestAuthEventsRecordsWSTicketIssued(t *testing.T) {
 	}
 }
 
+// SEC-13 — register_failed is recorded when the invite code is wrong
+// (no user is created, so user_id stays NULL).
+func TestAuthEventsRecordsRegisterFailed(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+	rr := f.post(t, "/api/auth/register", map[string]string{
+		"username":    "alice",
+		"password":    "correct-horse-battery",
+		"invite_code": "WRONG",
+	}, "")
+	if rr.Code != stdhttp.StatusForbidden {
+		t.Fatalf("register: %d", rr.Code)
+	}
+	var n int
+	if err := f.db.QueryRow(`SELECT COUNT(*) FROM auth_events WHERE kind = ? AND user_id IS NULL`,
+		AuthEventRegisterFailed).Scan(&n); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("register_failed rows: got %d want 1", n)
+	}
+}
+
 // SEC-13 — login_failure is recorded for wrong-password.
 func TestAuthEventsRecordsLoginFailure(t *testing.T) {
 	f := newFixture(t)
