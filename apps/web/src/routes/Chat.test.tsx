@@ -857,6 +857,90 @@ describe("test_web_message_timestamp_renders_humanized_form_not_raw_iso", () => 
   });
 });
 
+describe("test_web_message_sender_renders_username_when_known", () => {
+  it("a sender id present in the /api/presence seed renders as the username, not the UUID", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "hello from bob",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({
+          users: [
+            { id: "U1", username: "alice" },
+            { id: "U2", username: "bob" },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const list = await screen.findByTestId("message-list");
+    await waitFor(() => {
+      const sender = list.querySelector(".msg__sender");
+      expect(sender?.textContent).toBe("bob");
+    });
+    // Belt-and-suspenders: the UUID itself must not appear in the sender slot.
+    const sender = list.querySelector(".msg__sender");
+    expect(sender?.textContent).not.toBe("U2");
+  });
+});
+
+describe("test_web_message_sender_falls_back_to_uuid_when_unknown", () => {
+  it("a sender id absent from the directory renders as the raw id (no crash)", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U-stranger",
+        body: "hello from a stranger",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    // Empty seed — U-stranger never enters the directory.
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const list = await screen.findByTestId("message-list");
+    await waitFor(() => {
+      expect(screen.getByText("hello from a stranger")).toBeInTheDocument();
+    });
+    const sender = list.querySelector(".msg__sender");
+    expect(sender?.textContent).toBe("U-stranger");
+  });
+});
+
 describe("test_web_chat_focus_management_mount_no_channels_focuses_heading", () => {
   it("focuses the channel-name heading on mount when no channels exist (composer disabled)", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });

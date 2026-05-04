@@ -22,6 +22,11 @@ export interface PresenceEvent {
 
 export interface UsePresence {
   users: PresenceUser[];
+  // Sticky username directory keyed by user id. Accumulates every username
+  // the client has seen this session (seed + any future reseed) so message
+  // rows can resolve a sender id even after the user has left the channel.
+  // Never shrinks — leaving the room doesn't erase the entry.
+  usernames: Map<string, string>;
   loading: boolean;
   error: string | null;
   lastEvent: PresenceEvent | null;
@@ -62,6 +67,7 @@ function sortUsers(users: PresenceUser[]): PresenceUser[] {
 export function usePresence(enabled: boolean): UsePresence {
   const [state, setState] = useState<PresenceState>({
     users: [],
+    usernames: new Map<string, string>(),
     loading: false,
     error: null,
     lastEvent: null,
@@ -69,7 +75,13 @@ export function usePresence(enabled: boolean): UsePresence {
 
   useEffect(() => {
     if (!enabled) {
-      setState({ users: [], loading: false, error: null, lastEvent: null });
+      setState({
+        users: [],
+        usernames: new Map<string, string>(),
+        loading: false,
+        error: null,
+        lastEvent: null,
+      });
       return;
     }
 
@@ -110,6 +122,11 @@ export function usePresence(enabled: boolean): UsePresence {
         setState((s) => ({
           ...s,
           users: sortUsers(seed.users),
+          // Snapshot the directory into state so consumers (Chat message
+          // rows) re-render once the seed lands. Cloning here keeps the
+          // closure-local map mutable without forcing every read through
+          // a setState call.
+          usernames: new Map(knownUsernames),
           loading: false,
           error: null,
         }));
