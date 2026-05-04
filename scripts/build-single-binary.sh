@@ -45,7 +45,7 @@ echo "[build-single-binary] sync $WEB_DIST -> $EMBED_DIST"
 # Wipe any stale untracked files (e.g. an old asset hash) but keep the
 # tracked placeholder so the directory layout for `git status` matches
 # what the .gitignore exception expects.
-find "$EMBED_DIST" -mindepth 1 -not -name 'index.html' -delete 2>/dev/null || true
+find "$EMBED_DIST" -mindepth 1 -not -name 'index.html' -delete
 
 # Snapshot the tracked placeholder so we can restore it after `go build`
 # consumes the real Vite bundle via //go:embed. Without this, `cp -R`
