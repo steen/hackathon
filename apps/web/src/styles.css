@@ -199,6 +199,8 @@ button.linklike {
 
 .composer {
   display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.5rem;
   padding: 0.75rem 1rem;
   border-top: 1px solid var(--border);
@@ -213,12 +215,39 @@ button.linklike {
   font: inherit;
 }
 
+.composer textarea {
+  flex: 1;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  resize: vertical;
+}
+
 .composer button {
   padding: 0.5rem 1rem;
   background: var(--accent);
   border: 0;
   color: white;
   border-radius: 4px;
+}
+
+/* Counter occupies its own row below the textarea+button so it does not
+   shrink the Send button when it appears or changes width. */
+.composer__counter {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.composer__counter--warn {
+  color: var(--warn);
+}
+
+.composer__counter--error {
+  color: var(--error);
+  font-weight: 600;
 }
 
 .conn {

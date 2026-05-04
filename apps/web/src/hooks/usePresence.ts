@@ -22,6 +22,11 @@ export interface PresenceEvent {
 
 export interface UsePresence {
   users: PresenceUser[];
+  // Sticky username directory keyed by user id. Accumulates every username
+  // the client has seen this session (seed + any future reseed) so message
+  // rows can resolve a sender id even after the user has left the channel.
+  // Never shrinks — leaving the room doesn't erase the entry.
+  usernames: Map<string, string>;
   loading: boolean;
   error: string | null;
   lastEvent: PresenceEvent | null;
@@ -62,6 +67,7 @@ function sortUsers(users: PresenceUser[]): PresenceUser[] {
 export function usePresence(enabled: boolean): UsePresence {
   const [state, setState] = useState<PresenceState>({
     users: [],
+    usernames: new Map<string, string>(),
     loading: false,
     error: null,
     lastEvent: null,
@@ -69,7 +75,13 @@ export function usePresence(enabled: boolean): UsePresence {
 
   useEffect(() => {
     if (!enabled) {
-      setState({ users: [], loading: false, error: null, lastEvent: null });
+      setState({
+        users: [],
+        usernames: new Map<string, string>(),
+        loading: false,
+        error: null,
+        lastEvent: null,
+      });
       return;
     }
 
@@ -81,6 +93,16 @@ export function usePresence(enabled: boolean): UsePresence {
     // reseed would feed this same map). Lets a join announcement render
     // the username for a user the SR-listener has heard of before, even if
     // they had previously left.
+    //
+    // Staleness window: the directory is populated exactly once per mount
+    // and never refreshed. A user who registers after this hook mounted
+    // will be unknown to the directory for the remaining lifetime of the
+    // mount — their join is announced as a generic "a new user joined"
+    // and their leave the same. Username changes (if/when supported) are
+    // also not picked up. The bound is therefore "until the tab reloads
+    // or the hook unmounts/remounts" rather than a fixed duration.
+    // Periodic reseed is deferred pending #490 (server-side username in
+    // WS frames), which would supersede the directory entirely; see #496.
     const knownUsernames = new Map<string, string>();
     let seq = 0;
 
@@ -100,6 +122,11 @@ export function usePresence(enabled: boolean): UsePresence {
         setState((s) => ({
           ...s,
           users: sortUsers(seed.users),
+          // Snapshot the directory into state so consumers (Chat message
+          // rows) re-render once the seed lands. Cloning here keeps the
+          // closure-local map mutable without forcing every read through
+          // a setState call.
+          usernames: new Map(knownUsernames),
           loading: false,
           error: null,
         }));
