@@ -476,4 +476,19 @@ describe("useMessages", () => {
     expect(result.current.messages.map((m) => m.id)).toEqual(["M1"]);
     expect(result.current.error).toBeNull();
   });
+
+  it("surfaces a curated error when initial history fails without echoing the raw err.message", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const raw = new Error("history boom internal-stack-trace-42");
+    listMessagesMock.mockRejectedValueOnce(raw);
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.error).not.toBeNull();
+    });
+    expect(result.current.error).toBe("Failed to load message history: Something went wrong.");
+    expect(result.current.error).not.toContain("history boom");
+    expect(result.current.error).not.toContain("internal-stack-trace-42");
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to load message history", raw);
+    consoleErrorSpy.mockRestore();
+  });
 });
