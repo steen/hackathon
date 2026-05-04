@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
+import { humanizeTimestamp } from "../utils/formatTimestamp.js";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -675,5 +676,98 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
     // in this test — but the network call no longer dangles.
     for (const r of resolvers) r();
     styleEl.remove();
+  });
+});
+
+describe("humanizeTimestamp", () => {
+  // Build local-zone ISO so the helper's local-day comparison is
+  // deterministic regardless of where the test runs.
+  function localIso(y: number, mo: number, d: number, h: number, mi: number): string {
+    const pad = (n: number): string => (n < 10 ? `0${String(n)}` : String(n));
+    return `${String(y)}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:00`;
+  }
+
+  it("returns empty string for empty input", () => {
+    expect(humanizeTimestamp("")).toBe("");
+  });
+
+  it("returns the raw input when it is not a parseable date", () => {
+    expect(humanizeTimestamp("not-a-date")).toBe("not-a-date");
+  });
+
+  it("today renders as HH:MM (24h)", () => {
+    const now = new Date(2026, 4, 4, 10, 0, 0);
+    const iso = localIso(2026, 5, 4, 14, 32);
+    expect(humanizeTimestamp(iso, now)).toBe("14:32");
+  });
+
+  it("yesterday renders as 'Wkd HH:MM'", () => {
+    const now = new Date(2026, 4, 4, 10, 0, 0); // Mon May 4 2026
+    const iso = localIso(2026, 5, 3, 23, 50); // Sun May 3
+    // Date(2026,4,3) is a Sunday — Intl en-US short weekday is "Sun".
+    expect(humanizeTimestamp(iso, now)).toBe("Sun 23:50");
+  });
+
+  it("six days ago still renders as 'Wkd HH:MM'", () => {
+    const now = new Date(2026, 4, 8, 9, 0, 0); // Fri May 8
+    const iso = localIso(2026, 5, 2, 8, 5); // Sat May 2 → 6 days ago
+    expect(humanizeTimestamp(iso, now)).toBe("Sat 08:05");
+  });
+
+  it("seven+ days ago renders as 'Mon D HH:MM'", () => {
+    const now = new Date(2026, 4, 4, 10, 0, 0);
+    const iso = localIso(2026, 1, 1, 0, 0);
+    expect(humanizeTimestamp(iso, now)).toBe("Jan 1 00:00");
+  });
+
+  it("crosses midnight by local-day, not 24h window", () => {
+    // 23:50 yesterday viewed at 00:10 today is < 24h apart, but a
+    // different local day → not "today".
+    const now = new Date(2026, 4, 4, 0, 10, 0);
+    const iso = localIso(2026, 5, 3, 23, 50);
+    expect(humanizeTimestamp(iso, now)).not.toMatch(/^\d{2}:\d{2}$/);
+  });
+});
+
+describe("test_web_message_timestamp_renders_humanized_form_not_raw_iso", () => {
+  it("recent message label is the humanized form; <time dateTime> keeps the ISO", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const recentIso = new Date(Date.now() - 60_000).toISOString();
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "recent body",
+        created_at: recentIso,
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("recent body")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const timeEl = list.querySelector("time");
+    expect(timeEl).not.toBeNull();
+    expect(timeEl?.getAttribute("datetime")).toBe(recentIso);
+    // Visible label is no longer the raw ISO — it must not contain the
+    // 'T' separator nor the 'Z' suffix that mark RFC3339.
+    expect(timeEl?.textContent ?? "").not.toBe(recentIso);
+    expect(timeEl?.textContent ?? "").not.toContain("T");
+    expect(timeEl?.textContent ?? "").not.toMatch(/Z$/);
+    // For a one-minute-old message the format is HH:MM (today branch).
+    expect(timeEl?.textContent ?? "").toMatch(/^\d{2}:\d{2}$/);
   });
 });
