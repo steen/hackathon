@@ -6,8 +6,10 @@ import (
 
 // WriteHelp emits the top-level usage block. `chatd help`,
 // `chatd --help`, `chatd -h`, and `chatd` (no args) all route here so
-// every form shares one byte stream. Per-subcommand `-h` is owned by
-// each flag.FlagSet (e.g. `chatd send -h`).
+// every form writes the same helpText. The dispatched `chatd help`
+// case writes to env.Stdout; the other three short-circuit in
+// apps/cli/main.go and pass os.Stdout directly. Per-subcommand `-h`
+// is owned by each flag.FlagSet (e.g. `chatd send -h`).
 func WriteHelp(w io.Writer) error {
 	_, err := io.WriteString(w, helpText)
 	return err
