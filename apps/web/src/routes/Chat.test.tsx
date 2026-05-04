@@ -151,7 +151,7 @@ describe("test_web_chat_page_renders_history_then_appends_live_messages", () => 
 });
 
 describe("test_web_messages_list_has_aria_live_log_region", () => {
-  it("messages list carries role=log + aria-live=polite so SR users hear new arrivals", async () => {
+  it("messages list carries role=log (implicit aria-live=polite) so SR users hear new arrivals", async () => {
     happyPath();
     render(
       <AuthProvider>
@@ -161,7 +161,10 @@ describe("test_web_messages_list_has_aria_live_log_region", () => {
 
     const list = await screen.findByTestId("message-list");
     expect(list).toHaveAttribute("role", "log");
-    expect(list).toHaveAttribute("aria-live", "polite");
+    // No explicit aria-live: role="log" implies aria-live="polite" per
+    // ARIA 1.2; one source of truth so the role and attribute can't
+    // drift if a future change flips the announcement behavior.
+    expect(list).not.toHaveAttribute("aria-live");
     expect(list).toHaveAttribute("aria-relevant", "additions");
     // aria-atomic="false" so SR announces only the newly added <article>,
     // not the full transcript every time a message arrives.
@@ -960,6 +963,25 @@ describe("test_web_chat_focus_management_mount_no_channels_focuses_heading", () 
       expect(document.activeElement).toBe(heading);
     });
     expect(heading.getAttribute("tabindex")).toBe("-1");
+  });
+});
+
+describe("test_web_chat_focus_management_mount_with_channel_focuses_composer", () => {
+  it("focuses the composer once a channel becomes active (composer branch wins over heading)", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(composer).not.toBeDisabled();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
   });
 });
 
