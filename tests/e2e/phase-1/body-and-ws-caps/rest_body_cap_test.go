@@ -31,10 +31,14 @@ import (
 //     byte past RESTBodyLimit) → HTTP 413 with the canonical envelope
 //     {"ok":false,"error":{"code":"body_too_large", ...}}.
 //
-//   - at_limit: POST /api/auth/register with exactly 16384 bytes → not
-//     413. The route is reachable and the cap does not fire. The
-//     handler may return 400 (invalid JSON) or another non-413 status;
-//     the point is that 16 KiB exactly is allowed through.
+//   - at_limit: POST /api/auth/register with exactly 16384 bytes of
+//     parseable JSON → not 413, and the handler actually answers (2xx
+//     or non-413 4xx). The body is a valid register envelope padded
+//     via invite_code so json.Decode succeeds — a raw xxx... payload
+//     would 400 on JSON parse before the cap was meaningfully
+//     exercised against the handler's own decode. The fixture's
+//     random invite_code does not match CHAT_INVITE_CODE, so Register
+//     returns 403; the assertion accepts any 2xx-4xx other than 413.
 //
 //   - 413_carries_security_headers: the SecurityHeaders middleware is
 //     outermost (wiring.go: SecurityHeaders(... BodyCap(mux))), so
@@ -96,7 +100,13 @@ func TestAC4_RESTBodyOver16KiBReturns413(t *testing.T) {
 	})
 
 	t.Run("at_limit_16KiB_not_capped", func(t *testing.T) {
-		body := bytes.Repeat([]byte("x"), int(16*1024))
+		// A parseable JSON envelope of exactly 16384 bytes. Raw
+		// xxx... would 400 on JSON parse before exercising the cap
+		// against any handler-side decode; pad invite_code instead so
+		// json.Decode succeeds and the request reaches Register.
+		// Username and password fields are within their own caps
+		// (3-32 chars; ≤72 bytes), so invite_code carries the slack.
+		body := atLimitRegisterBody(t, 16*1024)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -108,6 +118,14 @@ func TestAC4_RESTBodyOver16KiBReturns413(t *testing.T) {
 
 		if resp.StatusCode == http.StatusRequestEntityTooLarge {
 			t.Fatalf("status = 413 at exactly 16 KiB; cap fired one byte too early — RESTBodyLimit must be inclusive of 16384")
+		}
+		// Stronger invariant than just "not 413": a parseable JSON
+		// body must reach the handler. The fixture supplies a random
+		// (wrong) invite_code so Register answers 403; 2xx would
+		// mean the random invite collided. 5xx (or anything outside
+		// 2xx-4xx) means the handler did not produce the response.
+		if resp.StatusCode < 200 || resp.StatusCode >= 500 {
+			t.Fatalf("status = %d at 16 KiB; want 2xx or non-413 4xx (parseable body must reach handler)", resp.StatusCode)
 		}
 	})
 
@@ -160,6 +178,41 @@ func postBytes(ctx context.Context, t *testing.T, url string, body []byte) *http
 		t.Fatalf("post: %v", err)
 	}
 	return resp
+}
+
+// atLimitRegisterBody returns a JSON-parseable register payload whose
+// serialized length is exactly size bytes. Username and password are
+// fixed within their handler-side caps (3-32 chars; ≤72 bytes); the
+// invite_code field absorbs the slack so the body decodes cleanly and
+// the request reaches Register instead of bouncing on JSON parse.
+//
+// Letter-only padding keeps the body identical to the previous
+// xxx-style fixture in spirit (single-byte ASCII, no escapes that
+// would invalidate the byte count).
+func atLimitRegisterBody(t *testing.T, size int) []byte {
+	t.Helper()
+	const (
+		username = "atlimit"
+		password = "abcdefghij"
+	)
+	prefix := fmt.Sprintf(`{"username":%q,"password":%q,"invite_code":"`, username, password)
+	const suffix = `"}`
+	overhead := len(prefix) + len(suffix)
+	if size < overhead {
+		t.Fatalf("atLimitRegisterBody: size=%d smaller than envelope overhead=%d", size, overhead)
+	}
+	pad := bytes.Repeat([]byte("a"), size-overhead)
+	body := make([]byte, 0, size)
+	body = append(body, prefix...)
+	body = append(body, pad...)
+	body = append(body, suffix...)
+	if len(body) != size {
+		t.Fatalf("atLimitRegisterBody: built %d bytes, want %d", len(body), size)
+	}
+	if !json.Valid(body) {
+		t.Fatalf("atLimitRegisterBody: produced invalid JSON")
+	}
+	return body
 }
 
 // startServerWithDB mirrors startServer (harness_test.go) but adds
