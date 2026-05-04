@@ -110,15 +110,29 @@ func repoRoot(t *testing.T) string {
 
 func startServer(t *testing.T) *runningServer {
 	t.Helper()
+	return startServerWithTags(t, "")
+}
+
+// startServerWithTags is identical to startServer except it forwards
+// `-tags=<tags>` to `go build`. Used by the AC-1 panic arm to compile
+// in apps/server/internal/wiring/panicprobe.go's /debug/panic route.
+// Empty tags means a default build, equivalent to startServer.
+func startServerWithTags(t *testing.T, tags string) *runningServer {
+	t.Helper()
 
 	root := repoRoot(t)
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "chat-server")
 
-	build := exec.Command("go", "build", "-o", binPath, "./apps/server")
+	args := []string{"build"}
+	if tags != "" {
+		args = append(args, "-tags="+tags)
+	}
+	args = append(args, "-o", binPath, "./apps/server")
+	build := exec.Command("go", args...)
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build ./apps/server failed: %v\n%s", err, out)
+		t.Fatalf("go build ./apps/server (tags=%q) failed: %v\n%s", tags, err, out)
 	}
 
 	port := freePort(t)

@@ -26,6 +26,7 @@ const helpText = `chatd — command-line client for the chat server.
 Usage:
   chatd [--server URL] <command> [args]
   chatd --help | -h | help
+  chatd --version | -v | version
 
 Commands:
   register <username>            Create an account and store a token.
@@ -44,6 +45,8 @@ Commands:
   watch <channel> [--once]       Stream new messages until ctx cancels;
                                  reconnects with backoff unless --once.
   help                           Show this message.
+  version                        Print the chatd version, VCS revision,
+                                 Go version, and OS/arch, then exit 0.
 
 Global flags:
   --server URL    Base URL of the chat server. Overrides $CHAT_SERVER.

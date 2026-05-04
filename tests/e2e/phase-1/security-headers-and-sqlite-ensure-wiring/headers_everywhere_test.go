@@ -76,11 +76,25 @@ func TestAC1_FourSecurityHeadersOnEveryResponsePath(t *testing.T) {
 
 	t.Run("panic_recovered_response", func(t *testing.T) {
 		// AC-1 explicitly names "responses written by `Recover` after
-		// a panic". The server has no production-built panic-probe
-		// endpoint we can hit black-box; without one we cannot trigger
-		// the Recover middleware's 500 response from a test. The
-		// findings doc anticipates this case and marks it test.skip
-		// pending a build-tagged probe (see the follow-up sub-issue).
-		t.Skip("AC-1 panic arm: no panic-probe endpoint reachable from the production binary; tracked as a follow-up to add a build-tagged /debug/panic route so this assertion can run")
+		// a panic". /debug/panic exists only when the server is built
+		// with -tags=panicprobe (apps/server/internal/wiring/panicprobe.go);
+		// this sub-test spawns a second binary with that tag so the
+		// Recover middleware writes a 500 we can inspect for headers.
+		probe := startServerWithTags(t, "panicprobe")
+
+		req, err := http.NewRequest(http.MethodGet, probe.httpURL+"/debug/panic", nil)
+		if err != nil {
+			t.Fatalf("new GET /debug/panic: %v", err)
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET /debug/panic: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusInternalServerError {
+			t.Fatalf("GET /debug/panic status = %d, want 500", resp.StatusCode)
+		}
+		requireSecHeaders(t, "GET /debug/panic (500 panic-recovered)", resp.Header)
 	})
 }
