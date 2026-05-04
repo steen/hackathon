@@ -33,7 +33,7 @@ rtk git checkout main
 rtk git pull --ff-only
 ```
 
-If working tree is dirty, **stop and report** — the user must clean up.
+Verify the `in-progress` label exists; if missing, recreate: `rtk gh label create "in-progress" --color 0E8A16`. If working tree is dirty, **stop and report** — the user must clean up.
 
 ### 2. Inventory
 
@@ -61,12 +61,15 @@ Sub-issue priority within the chosen epic is read from the GitHub native sub-iss
 A sub-issue is eligible iff all are true:
 
 1. Open and not assigned to an in-flight PR.
-2. Footprint disjoint from every open PR's footprint.
-3. Doesn't depend on code that lives only in an unmerged PR.
-4. Doesn't need to edit a conflict-magnet file (`apps/server/main.go`, `CHANGELOG.md`) that another open PR also touches.
-5. Branchable off `origin/main` without cherry-picks (no stacking).
+2. **No `in-progress` label** — STRICT. The label is a cross-process lock that another supervisor (this loop on a different machine, a different agent) may hold. **Never strip an `in-progress` label you didn't set in this same tick.** If the label is on, assume someone else is working it; skip and move on.
+3. Footprint disjoint from every open PR's footprint.
+4. Doesn't depend on code that lives only in an unmerged PR.
+5. Doesn't need to edit a conflict-magnet file (`apps/server/main.go`, `CHANGELOG.md`) that another open PR also touches.
+6. Branchable off `origin/main` without cherry-picks (no stacking).
 
 If empty, **idle** — emit `references/idle-banner.md` and skip to step 12.
+
+**Stale-label paranoia.** If you suspect a sub-issue's `in-progress` label is stale (no commits or activity in >24h, or you can prove a sibling tick set it but crashed), DO NOT strip it autonomously — surface to the user with the issue number and the evidence, and let them decide. Stripping silently risks two workers stepping on each other across machines.
 
 ### 5. Plan the batch
 
@@ -91,11 +94,16 @@ For each, derive: `branch_name` (`feat/<slug>` or `fix/<slug>`), `closes_or_refs
 
 If the epic has a "Security audit findings" umbrella, each remaining unfixed finding is a candidate (use `Refs`). Skip info-severity findings unless the rest of the queue is empty.
 
-### 7. Dispatch
+### 7. Claim + dispatch
 
-Call `issue-pr-worker` for every planned item with `isolation: "worktree"` + `run_in_background: true`. Use `references/worker-prompt-template.md` for the prompt scaffold.
+For each planned item:
+
+1. **Claim**: `rtk gh issue edit <N> --add-label in-progress`. This lock prevents another tick (here or on a sibling machine) from picking the same sub-issue.
+2. **Dispatch** an `issue-pr-worker` subagent with `isolation: "worktree"` + `run_in_background: true`. Use `references/worker-prompt-template.md` for the prompt scaffold.
 
 Never dispatch two subagents with overlapping footprints. Queue the second for next tick if needed.
+
+If the dispatch itself fails (worktree creation error, etc.), drop the `in-progress` label so the next tick retries: `rtk gh issue edit <N> --remove-label in-progress`.
 
 ### 8. Track
 
@@ -115,7 +123,7 @@ The agent's §9 report can arrive truncated ("Waiting for the monitor."). For ev
 
 ### 11. Cleanup
 
-**Pushed agents**: `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` (`-f -f` overrides locked + dirty). Skip if subagent is still running.
+**Pushed agents**: `rtk git worktree remove -f -f .claude/worktrees/agent-<id>` (`-f -f` overrides locked + dirty). Skip if subagent is still running. Do NOT remove the `in-progress` label on a successful dispatch — a separate agent owns that lifecycle once the PR is open, and stripping the label here races against it. The label persists until the sub-issue closes (auto-removed on close) or until that other agent decides to drop it.
 
 **Failed agents** have uncommitted WIP that `worktree remove` destroys. First:
 
@@ -124,7 +132,9 @@ rtk git -C .claude/worktrees/agent-<id> status --short
 rtk git -C .claude/worktrees/agent-<id> log --oneline origin/main..HEAD
 ```
 
-Then either commit + push the WIP as a draft, leave the worktree in place for user inspection, or (only if explicitly disposable) remove. When in doubt, defer cleanup.
+Then either commit + push the WIP as a draft, leave the worktree in place for user inspection, or (only if explicitly disposable) remove. When in doubt, defer cleanup. Drop the `in-progress` label on the sub-issue so the next tick can retry: `rtk gh issue edit <N> --remove-label in-progress`.
+
+**Stale-issue pushback** (worker reported "AC is already covered, no PR opened"): close the sub-issue per the existing pattern (#206 / #213 closing comments). The close auto-removes the label.
 
 After any merge: `rtk git fetch --all --prune` so local tracking refs match.
 
@@ -141,6 +151,7 @@ Without `auto`, exit cleanly.
 - Never spawn two subagents with overlapping footprints.
 - Never pick the same sub-issue twice across simultaneous ticks.
 - Never fall through to the next epic until the current has zero eligible sub-issues AND zero in-flight PRs.
+- Never strip the `in-progress` label on a successful dispatch — a separate agent owns the post-PR label lifecycle. The only exceptions are (a) when claim+dispatch itself fails before the worker starts (step 7), and (b) when reclaiming a stalled worker after WIP recovery (step 11). On a sub-issue close, the label is auto-removed by GitHub; do not pre-empt it.
 
 ## References
 
