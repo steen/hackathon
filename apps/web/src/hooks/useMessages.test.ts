@@ -116,6 +116,86 @@ describe("useMessages", () => {
     });
   });
 
+  it("reverses initial history (server newest-first → state oldest-first)", async () => {
+    // Server contract: listMessages returns newest-first to match the
+    // `before` cursor. The hook must flip that at the boundary so the
+    // rendered list reads oldest→newest with the composer under the newest.
+    listMessagesMock.mockResolvedValueOnce([
+      msg("M3", "third"),
+      msg("M2", "second"),
+      msg("M1", "first"),
+    ]);
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M1", "M2", "M3"]);
+    });
+  });
+
+  it("appends a live WS frame below the most recent history entry", async () => {
+    listMessagesMock.mockResolvedValueOnce([
+      msg("M3", "third"),
+      msg("M2", "second"),
+      msg("M1", "first"),
+    ]);
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M1", "M2", "M3"]);
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    const sock = FakeSocket.instances[0];
+    await act(async () => {
+      sock?.open();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      sock?.onmessage?.({
+        data: JSON.stringify({ type: "message", data: msg("M4", "live") }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M1", "M2", "M3", "M4"]);
+    });
+  });
+
+  it("optimistic pending entry sits at the bottom, below older history", async () => {
+    listMessagesMock.mockResolvedValueOnce([
+      msg("M3", "third"),
+      msg("M2", "second"),
+      msg("M1", "first"),
+    ]);
+    postMessageMock.mockImplementation(async () => {
+      await Promise.resolve();
+      return userMsg("M-server", "draft", "2026-01-01T00:00:01Z");
+    });
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M1", "M2", "M3"]);
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.send("draft");
+    });
+
+    const ids = result.current.messages.map((m) => m.id);
+    expect(ids.slice(0, 3)).toEqual(["M1", "M2", "M3"]);
+    expect(ids).toHaveLength(4);
+    const last = result.current.messages[3];
+    expect(last?.id.startsWith("pending-")).toBe(true);
+    expect(last?.status).toBe("pending");
+    expect(last?.body).toBe("draft");
+  });
+
   it("does NOT refetch on the initial WS open", async () => {
     listMessagesMock.mockResolvedValueOnce([msg("M1", "hello")]);
     const { result } = renderHook(() => useMessages("C1"));

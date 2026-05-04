@@ -1,39 +1,39 @@
 ---
 feature: changelog-entry
 phase: phase-3
-analyzed_at: 2026-05-03T19:11:26Z
-analyzed_commit: f2d750de9dbdf5b20e48b4a226633bcac3127fec
-implementation_status: stub
+analyzed_at: 2026-05-04T01:40Z
+analyzed_commit: 00b10ce9349fb1372c624e01d8c77bf0738747de
+implementation_status: implemented
 total_acs: 3
 covered: 0
 partial: 0
-missing: 0
-deferred: 3
+missing: 3
+deferred: 0
 ---
 
 # E2E test analysis: CHANGELOG entry for `0.1.0`
 
 **Spec:** `specs/plans/phase-3/50-feature-changelog-entry.md`
-**Implementation status:** stub — `CHANGELOG.md` exists with extensive per-PR entries but contains no `0.1.0` heading. Verified by `grep -n "0.1.0" /Users/steen/Kode/Hackathon/.claude/worktrees/test-agent/CHANGELOG.md` (zero matches). The file uses Keep-a-Changelog format with timestamped sections (`## YYYY-MM-DD HH:MMZ — <title>`) instead of versioned releases. `CHANGELOG.d/` exists with three per-PR fragment files (`2026-05-03T18:43Z-fix-ws-ticket-channel-check-order.md`, `server-max-header-bytes.md`, `server-trusted-proxy-warn.md`) but none represent the `0.1.0` cut. There is no `apps/server/internal/version/version.go` (verified by absence in `ls apps/server/internal/`).
+**Implementation status:** implemented — `CHANGELOG.md` now contains a `## [0.1.0] - 2026-05-03` heading (landed in commit `5ce5949 docs(changelog): add 0.1.0 Keep-a-Changelog entry rolling up Phases 0–3`) with `### Added`, `### Changed`, `### Security`, `### Fixed`, `### Notes` subsections. Verified by `grep -E "^## " CHANGELOG.md | head` showing `## [0.1.0] - 2026-05-03` as the second heading after `## Planned (next)`.
 **E2E test directory:** `tests/e2e/phase-3/changelog-entry/` (does not exist yet)
 
 ## Acceptance criteria
 
 | AC | Statement | Status | E2E test reference |
 |----|-----------|--------|---------------------|
-| AC-1 | `CHANGELOG.md` contains a `0.1.0` entry dated to the release day. | deferred | — |
-| AC-2 | The entry summarizes added features grouped by phase and explicitly references the user stories shipped (US-1 through US-12). | deferred | — |
-| AC-3 | Format follows Keep-a-Changelog (`Added` / `Changed` / `Security` sections at minimum). | deferred | — |
+| AC-1 | `CHANGELOG.md` contains a `0.1.0` entry dated to the release day. | missing | — |
+| AC-2 | The entry summarizes added features grouped by phase and explicitly references the user stories shipped (US-1 through US-12). | missing | — |
+| AC-3 | Format follows Keep-a-Changelog (`Added` / `Changed` / `Security` sections at minimum). | missing | — |
 
 ## Findings
 
 ### Missing E2E tests
 
-None — feature is stub.
+All 3 ACs missing. The impl landed at SHA `5ce5949` so the test can be live (no skips). This feature is documentation-only — the test is a static check that the markdown file is in the expected shape. Suggested test file: `tests/e2e/phase-3/changelog-entry/changelog_test.ts` (vitest, per the task brief; static markdown-asserting tests are the canonical case for vitest in this repo).
 
 ### Deferred E2E tests
 
-All 3 ACs deferred. This feature is documentation-only — the test is a static check that the markdown file is in the expected shape. Suggested test file: `tests/e2e/phase-3/changelog-entry/changelog_test.ts` (vitest, per the task brief; static markdown-asserting tests are the canonical case for vitest in this repo).
+None — impl is implemented.
 
 - **AC-1 (0.1.0 entry exists, dated):** read `CHANGELOG.md` from disk. Assert a heading matching `/^## \[?0\.1\.0\]?\s*[-—]\s*\d{4}-\d{2}-\d{2}/m` exists. The brackets are optional (Keep-a-Changelog uses `## [0.1.0] - YYYY-MM-DD` but the existing repo uses unbracketed `## YYYY-MM-DD ...`); accept both. The date must be valid `YYYY-MM-DD` format and within a reasonable range (`>= 2026-05-01`, `<= today + 1 day`).
   - Also accept the entry living in `CHANGELOG.d/0.1.0.md` (or similar) if the spec ends up using the per-PR fragment pattern documented in CLAUDE.md ("Don't write to conflict-magnet files in feature PRs"). The test should check both locations; pass if either has the entry.
