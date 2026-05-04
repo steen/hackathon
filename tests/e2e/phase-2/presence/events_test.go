@@ -3,7 +3,6 @@ package presence_e2e_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -34,7 +33,6 @@ func TestPresenceAC2_BroadcastsJoinAndLeaveOnConnectAndDisconnect(t *testing.T) 
 	alicePassword := randomSecret(t, 12)
 	bobPassword := randomSecret(t, 12)
 	aliceID, aliceTok := register(t, srv, "alice", alicePassword)
-	_ = aliceID
 	bobID, bobTok := register(t, srv, "bob", bobPassword)
 
 	aliceConn := dialAuthenticatedWS(t, srv, aliceTok)
@@ -112,10 +110,6 @@ func startPresenceCollector(t *testing.T, conn *websocket.Conn) <-chan presenceF
 		for {
 			_, data, err := conn.Read(ctx)
 			if err != nil {
-				var ce websocket.CloseError
-				if errors.As(err, &ce) || ctx.Err() != nil {
-					return
-				}
 				return
 			}
 			var env struct {
