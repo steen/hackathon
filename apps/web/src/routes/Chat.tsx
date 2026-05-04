@@ -1,9 +1,18 @@
 import type * as React from "react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
+
+// Mirrors apps/server/internal/http/messages_handlers.go's MaxMessageBodyBytes
+// (4 KiB). The server measures bytes after TrimSpace; the client prevalidates
+// in raw bytes so paste-of-large-text gets a warning before the user hits
+// Enter rather than after a round-trip.
+const MAX_BODY_BYTES = 4 * 1024;
+// Above this fraction of the cap, show the user the live byte counter so
+// they can see the limit approach. Below it, the chrome stays out of the way.
+const WARN_RATIO = 0.8;
 
 function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
   const label =
@@ -23,6 +32,10 @@ function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Eleme
   );
 }
 
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
   const channelsState = useChannels(true);
@@ -30,6 +43,7 @@ export function Chat(): React.JSX.Element {
   const messagesState = useMessages(activeChannel, user?.id ?? null);
   const presenceState = usePresence(true);
   const [draft, setDraft] = useState("");
+  const composingRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -43,13 +57,37 @@ export function Chat(): React.JSX.Element {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messagesState.messages]);
 
-  async function onSend(e: FormEvent<HTMLFormElement>): Promise<void> {
-    e.preventDefault();
-    if (activeChannel === null) return;
+  const draftBytes = useMemo(() => byteLength(draft), [draft]);
+  const overCap = draftBytes > MAX_BODY_BYTES;
+  const showCounter = draftBytes >= Math.floor(MAX_BODY_BYTES * WARN_RATIO);
+  const trimmedEmpty = draft.trim().length === 0;
+  const sendDisabled = activeChannel === null || trimmedEmpty || overCap;
+
+  async function submitDraft(): Promise<void> {
+    if (sendDisabled) return;
     const body = draft.trim();
     if (body.length === 0) return;
     setDraft("");
     await messagesState.send(body);
+  }
+
+  function onSend(e: FormEvent<HTMLFormElement>): void {
+    e.preventDefault();
+    void submitDraft();
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    // Enter sends; Shift+Enter inserts a newline. IME composition (Japanese,
+    // Chinese, Korean) fires Enter to commit a candidate — never treat that
+    // as a send.
+    if (e.key !== "Enter") return;
+    if (e.shiftKey) return;
+    if (composingRef.current) return;
+    // `isComposing` is the canonical flag for browsers that emit it; the
+    // ref handles older fallbacks. Keep both.
+    if (e.nativeEvent.isComposing) return;
+    e.preventDefault();
+    void submitDraft();
   }
 
   return (
@@ -136,7 +174,11 @@ export function Chat(): React.JSX.Element {
                   )}
                   {m.status === "failed" ? (
                     <>
-                      <span className="msg__badge msg__badge--error" role="status">
+                      <span
+                        className="msg__badge msg__badge--error"
+                        role="status"
+                        data-testid="msg-failed-badge"
+                      >
                         Failed to send
                       </span>
                       <button
@@ -158,23 +200,47 @@ export function Chat(): React.JSX.Element {
         </div>
         <form
           className="composer"
-          onSubmit={(e) => {
-            void onSend(e);
-          }}
+          onSubmit={onSend}
+          aria-describedby={showCounter ? "composer-counter" : undefined}
         >
-          <input
-            type="text"
+          <textarea
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);
             }}
+            onKeyDown={onKeyDown}
+            onCompositionStart={() => {
+              composingRef.current = true;
+            }}
+            onCompositionEnd={() => {
+              composingRef.current = false;
+            }}
             placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
             disabled={activeChannel === null}
             aria-label="message"
+            aria-invalid={overCap || undefined}
+            aria-errormessage={overCap ? "composer-counter" : undefined}
+            rows={2}
+            data-testid="composer-textarea"
           />
-          <button type="submit" disabled={activeChannel === null || draft.trim().length === 0}>
+          <button type="submit" disabled={sendDisabled}>
             Send
           </button>
+          {showCounter ? (
+            <span
+              id="composer-counter"
+              className={
+                overCap
+                  ? "composer__counter composer__counter--error"
+                  : "composer__counter composer__counter--warn"
+              }
+              role={overCap ? "alert" : "status"}
+              data-testid="composer-counter"
+            >
+              {draftBytes} / {MAX_BODY_BYTES} bytes
+              {overCap ? " — too long to send" : ""}
+            </span>
+          ) : null}
         </form>
       </main>
     </div>
