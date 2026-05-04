@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { WebSocketClient, type Event as WsEvent } from "@hackathon/api-client";
 import { getClient } from "../api.js";
+import { bannerMessage } from "../lib/userFacingError.js";
 
 export interface PresenceUser {
   id: string;
@@ -132,7 +133,7 @@ export function usePresence(enabled: boolean): UsePresence {
         }));
       } catch (err) {
         if (tok.cancelled) return;
-        const msg = err instanceof Error ? err.message : "failed to load presence";
+        const msg = bannerMessage("Failed to load presence", err);
         setState((s) => ({ ...s, loading: false, error: msg }));
       }
 
@@ -200,7 +201,7 @@ export function usePresence(enabled: boolean): UsePresence {
         await ws.connect();
       } catch (err) {
         if (tok.cancelled) return;
-        const msg = err instanceof Error ? err.message : "presence websocket failed";
+        const msg = bannerMessage("Presence connection failed", err);
         setState((s) => ({ ...s, error: msg }));
       }
     })();

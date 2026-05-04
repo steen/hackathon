@@ -156,12 +156,19 @@ describe("usePresence", () => {
     expect(result.current.users).toEqual([]);
   });
 
-  it("surfaces an error when the seed request fails", async () => {
-    requestMock.mockRejectedValue(new Error("seed boom"));
+  it("surfaces a curated error when the seed request fails without echoing the raw err.message", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const raw = new Error("seed boom internal-trace-xyz");
+    requestMock.mockRejectedValue(raw);
     const { result } = renderHook(() => usePresence(true));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
-    expect(result.current.error).toBe("seed boom");
+    // Curated copy carries the prefix; the raw err.message must not surface.
+    expect(result.current.error).toBe("Failed to load presence: Something went wrong.");
+    expect(result.current.error).not.toContain("seed boom");
+    expect(result.current.error).not.toContain("internal-trace-xyz");
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to load presence", raw);
+    consoleErrorSpy.mockRestore();
   });
 });

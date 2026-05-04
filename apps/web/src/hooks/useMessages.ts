@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
 import { getClient } from "../api.js";
+import { bannerMessage } from "../lib/userFacingError.js";
 
 export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "reconnecting";
 
@@ -116,7 +117,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         setMessages([...history].reverse());
       } catch (err) {
         if (tok.cancelled) return;
-        const msg = err instanceof Error ? err.message : "failed to load history";
+        const msg = bannerMessage("Failed to load message history", err);
         setError(msg);
       }
 
@@ -194,7 +195,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         await ws.connect();
       } catch (err) {
         if (tok.cancelled) return;
-        const msg = err instanceof Error ? err.message : "websocket failed";
+        const msg = bannerMessage("Message connection failed", err);
         setError(msg);
         setConnection("reconnecting");
       }
