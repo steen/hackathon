@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"hackathon/apps/server/wsproto"
 )
 
 // AC-1: WebSocket reads are capped at 64 KiB per frame; oversized
@@ -121,8 +122,8 @@ func TestAC1_WSFrameOver64KiBClosesConnection(t *testing.T) {
 		if ce.Code != websocket.StatusMessageTooBig {
 			t.Fatalf("at-limit frame: close code = %d, want %d", ce.Code, websocket.StatusMessageTooBig)
 		}
-		if !strings.Contains(ce.Reason, "4 KiB") {
-			t.Fatalf("at-limit frame: close reason = %q; want body-cap reason containing \"4 KiB\" (proves read-limit at 64 KiB did not fire)", ce.Reason)
+		if ce.Reason != wsproto.MessageBodyLimitCloseReason {
+			t.Fatalf("at-limit frame: close reason = %q; want %q (proves read-limit at 64 KiB did not fire)", ce.Reason, wsproto.MessageBodyLimitCloseReason)
 		}
 	})
 }
