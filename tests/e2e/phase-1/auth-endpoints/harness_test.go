@@ -79,6 +79,14 @@ func randomSecret(t *testing.T, byteLen int) string {
 // freePort asks the kernel for a free TCP port on loopback and returns
 // it. There is a tiny race window between Close and the server's
 // Listen; in practice this loopback path doesn't lose the port.
+//
+// Do NOT call t.Parallel() in any test in this package while freePort
+// works this way: two concurrent tests can land on the same port
+// between Close here and the spawned server's Listen in startServer,
+// flaking the suite. The fix is an FD-handoff (keep the listener open
+// and pass it via cmd.ExtraFiles + LISTEN_FD=, with a small server-side
+// hook) — see #196. Until that lands, every test in this file must run
+// serially.
 func freePort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")

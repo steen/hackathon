@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -556,5 +558,103 @@ describe("test_web_composer_failed_message_badge_renders_on_post_failure", () =>
     const badge = await screen.findByTestId("msg-failed-badge");
     expect(badge.textContent).toBe("Failed to send");
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+});
+
+describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () => {
+  it("posts a message and asserts the pending row carries the badge, italic body, and no inline style", async () => {
+    // vitest+vite does not inject imported CSS into the jsdom document
+    // (the `import "../styles.css"` path returns an empty module here),
+    // so read the stylesheet from disk and attach it as a <style> tag.
+    // jsdom's CSSOM resolves descendant selectors in getComputedStyle
+    // once the rules are present.
+    const cssPath = resolvePath(process.cwd(), "src/styles.css");
+    const cssText = readFileSync(cssPath, "utf-8");
+    const styleEl = document.createElement("style");
+    styleEl.dataset.testInjected = "msg-pending";
+    styleEl.textContent = cssText;
+    document.head.appendChild(styleEl);
+
+    happyPath();
+    // Hold postMessage open so the optimistic entry stays in `pending` for
+    // the duration of the assertions. Resolving after the test ends keeps
+    // the pending state fixed without leaking timers between tests.
+    const resolvers: (() => void)[] = [];
+    postMessageMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(() => {
+            resolve();
+          });
+        }),
+    );
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    // Wait for the composer to enable. listChannels and listMessages
+    // resolve independently — the input flips from disabled→enabled only
+    // after the active channel state is set, which is what gates send().
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    const input = await screen.findByLabelText<HTMLInputElement>("message");
+    await waitFor(() => {
+      expect(input.disabled).toBe(false);
+    });
+    const form = input.closest("form");
+    expect(form).not.toBeNull();
+    if (form === null) return;
+
+    act(() => {
+      fireEvent.change(input, { target: { value: "pending body" } });
+    });
+    act(() => {
+      fireEvent.submit(form);
+    });
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith("C1", "pending body");
+    });
+
+    // AC-1: the Sending… badge is exposed via role="status". Two
+    // role="status" elements exist on this page (the connection badge and
+    // the pending badge); narrow to the one whose text starts with
+    // "Sending" so the assertion fails specifically when the pending
+    // badge disappears.
+    const statusEls = await screen.findAllByRole("status");
+    const badge = statusEls.find((el) => el.textContent.startsWith("Sending"));
+    expect(badge).toBeDefined();
+
+    // Locate the pending article. The row carries data-status="pending"
+    // (set in Chat.tsx) and lives inside the message list.
+    const list = screen.getByTestId("message-list");
+    const pendingArticle = list.querySelector<HTMLElement>('article[data-status="pending"]');
+    expect(pendingArticle).not.toBeNull();
+
+    // AC-2: no inline `style` attribute, and no `opacity` in the inline
+    // style declaration. Either condition catches a regression that
+    // reintroduces `style={{ opacity: 0.6 }}`.
+    const inlineStyle = pendingArticle?.getAttribute("style");
+    expect(inlineStyle === null || inlineStyle === "").toBe(true);
+    expect(pendingArticle?.style.opacity ?? "").toBe("");
+
+    // AC-3: italic body. Read computed style via the imported stylesheet
+    // (`.msg--pending .msg__body { font-style: italic }`).
+    const body = pendingArticle?.querySelector<HTMLElement>(".msg__body");
+    expect(body).not.toBeNull();
+    if (body !== null && body !== undefined) {
+      const computed = window.getComputedStyle(body);
+      expect(computed.fontStyle).toBe("italic");
+    }
+
+    // Drain the held postMessage so the test cleanup sees a settled
+    // promise. The pending entry stays pending — no WS echo is delivered
+    // in this test — but the network call no longer dangles.
+    for (const r of resolvers) r();
+    styleEl.remove();
   });
 });

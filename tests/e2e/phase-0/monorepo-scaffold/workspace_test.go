@@ -5,6 +5,7 @@ package monorepo_scaffold_e2e_test
 
 import (
 	"bufio"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ func TestAC2_MonorepoScaffold_PnpmWorkspaceDeclaration(t *testing.T) {
 // non-blank line appears. Any non-list content under `packages:` (e.g.
 // a mapping) returns an error so the test surfaces unexpected shape
 // instead of silently passing.
-func parsePnpmWorkspacePackages(r interface{ Read(p []byte) (int, error) }) ([]string, error) {
+func parsePnpmWorkspacePackages(r io.Reader) ([]string, error) {
 	s := bufio.NewScanner(r)
 	var (
 		entries []string
@@ -62,6 +63,12 @@ func parsePnpmWorkspacePackages(r interface{ Read(p []byte) (int, error) }) ([]s
 		raw := s.Text()
 		// Strip trailing inline comments — pnpm-workspace.yaml may have
 		// a trailing `#` comment on a list entry; YAML allows it.
+		// Limitation: this is a naive substring search and does not
+		// recognize `#` inside quoted entries (e.g. `- "apps/#weird"`
+		// would be truncated at the `#`). pnpm workspace globs do not
+		// realistically contain `#`, so this is accepted; a quote-aware
+		// scan or a real YAML parser would be more cost than the bug
+		// warrants.
 		if i := strings.Index(raw, "#"); i >= 0 {
 			raw = raw[:i]
 		}
