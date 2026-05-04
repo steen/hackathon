@@ -150,7 +150,7 @@ export function Chat(): React.JSX.Element {
           aria-live="polite"
           aria-relevant="additions"
           aria-atomic="false"
-          aria-label="messages"
+          aria-label="conversation"
         >
           {messagesState.error !== null ? (
             <p role="alert" className="error">
