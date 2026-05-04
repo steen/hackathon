@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Channel } from "@hackathon/api-client";
 import { getClient } from "../api.js";
+import { bannerMessage } from "../lib/userFacingError.js";
 
 interface ChannelsState {
   channels: Channel[];
@@ -26,7 +27,7 @@ export function useChannels(enabled: boolean): UseChannels {
       const list = await getClient().listChannels();
       setState({ channels: list, loading: false, error: null });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "failed to load channels";
+      const msg = bannerMessage("Failed to load channels", err);
       setState((s) => ({ ...s, loading: false, error: msg }));
     }
   }, []);

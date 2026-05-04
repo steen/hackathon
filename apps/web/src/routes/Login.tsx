@@ -1,6 +1,7 @@
 import type * as React from "react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useAuth } from "../auth/AuthContext.js";
+import { formAuthMessage } from "../lib/userFacingError.js";
 
 export function Login({
   onSwitchToRegister,
@@ -25,7 +26,7 @@ export function Login({
     try {
       await login(username, password);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "login failed");
+      setError(formAuthMessage("Login failed", err));
     } finally {
       setBusy(false);
     }

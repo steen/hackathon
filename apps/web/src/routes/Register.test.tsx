@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ApiError } from "@hackathon/api-client";
 
 const registerMock = vi.fn();
 const meMock = vi.fn();
@@ -18,10 +19,17 @@ vi.mock("../api.js", () => ({
 import { AuthProvider } from "../auth/AuthContext.js";
 import { Register } from "./Register.js";
 
+let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
 afterEach(() => {
   cleanup();
   registerMock.mockReset();
   meMock.mockReset();
+  consoleErrorSpy.mockRestore();
 });
 
 describe("test_web_register_focuses_username_on_mount", () => {
@@ -59,6 +67,44 @@ describe("test_web_register_form_requires_invite_code", () => {
 
     expect(registerMock).not.toHaveBeenCalled();
     expect(screen.getByRole("alert")).toHaveTextContent(/invite code/i);
+  });
+
+  it("renders validation copy on 422 without leaking the raw err.message", async () => {
+    const raw = new ApiError(422, "unprocessable", "internal-validation-trace-55");
+    registerMock.mockRejectedValue(raw);
+    render(
+      <AuthProvider>
+        <Register onSwitchToLogin={() => undefined} />
+      </AuthProvider>,
+    );
+    const u = userEvent.setup();
+    await u.type(screen.getByLabelText(/username/i), "bob");
+    await u.type(screen.getByLabelText(/^password$/i), "passw0rd-placeholder");
+    await u.type(screen.getByLabelText(/invite code/i), "test-invite-code-placeholder");
+    await u.click(screen.getByRole("button", { name: /create account/i }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/please check the form and try again/i);
+    expect(alert).not.toHaveTextContent(/internal-validation-trace-55/i);
+    expect(alert).not.toHaveTextContent(/422/);
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Registration failed", raw);
+  });
+
+  it("renders invalid-credentials copy on 401 without leaking the raw err.message", async () => {
+    const raw = new ApiError(401, "unauthorized", "invite-rejected-internal-detail");
+    registerMock.mockRejectedValue(raw);
+    render(
+      <AuthProvider>
+        <Register onSwitchToLogin={() => undefined} />
+      </AuthProvider>,
+    );
+    const u = userEvent.setup();
+    await u.type(screen.getByLabelText(/username/i), "bob");
+    await u.type(screen.getByLabelText(/^password$/i), "passw0rd-placeholder");
+    await u.type(screen.getByLabelText(/invite code/i), "test-invite-code-placeholder");
+    await u.click(screen.getByRole("button", { name: /create account/i }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/that username and password don't match/i);
+    expect(alert).not.toHaveTextContent(/invite-rejected-internal-detail/i);
   });
 
   it("calls register with invite_code when all fields are present", async () => {
