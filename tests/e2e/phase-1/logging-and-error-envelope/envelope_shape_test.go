@@ -218,7 +218,6 @@ func requireEnvelope(t *testing.T, raw []byte, wantOK bool) {
 	// server adds a fourth top-level key that violates the contract.
 	var top map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
 	if err := dec.Decode(&top); err != nil {
 		t.Fatalf("envelope: cannot decode JSON object: %v\nbody=%s", err, raw)
 	}
