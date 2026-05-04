@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const registerMock = vi.fn();
@@ -22,6 +22,20 @@ afterEach(() => {
   cleanup();
   registerMock.mockReset();
   meMock.mockReset();
+});
+
+describe("test_web_register_focuses_username_on_mount", () => {
+  it("places focus on the username input when <Register /> mounts", async () => {
+    render(
+      <AuthProvider>
+        <Register onSwitchToLogin={() => undefined} />
+      </AuthProvider>,
+    );
+    const u = screen.getByLabelText(/username/i);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(u);
+    });
+  });
 });
 
 describe("test_web_register_form_requires_invite_code", () => {

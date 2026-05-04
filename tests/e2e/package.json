@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "e2e:cli": "vitest run --config vitest.config.ts"
+    "e2e:cli": "vitest run --config vitest.config.ts",
+    "e2e:ts-api-client": "vitest run --config phase-2/ts-api-client-package/vitest.config.ts",
+    "test": "vitest run --config phase-2/ts-api-client-package/vitest.config.ts"
   },
   "dependencies": {
     "@hackathon/api-client": "workspace:*"
