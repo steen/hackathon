@@ -68,7 +68,7 @@ func TestAC1_Register_PromptsForPasswordAndInviteCode(t *testing.T) {
 
 	res := chatdRun(t, xdg, stdin, nil, "--server", srv.url, "register", username)
 	if res.exitCode != 0 {
-		t.Fatalf("AC-1 prompts: exit=%d stderr=%q (see file comment for known bug)", res.exitCode, res.stderr)
+		t.Fatalf("AC-1 prompts: exit=%d stderr=%q", res.exitCode, res.stderr)
 	}
 	if _, err := readConfigFile(t, xdg); err != nil {
 		t.Errorf("AC-1 prompts: config file unreadable after prompted register: %v", err)
@@ -76,8 +76,8 @@ func TestAC1_Register_PromptsForPasswordAndInviteCode(t *testing.T) {
 }
 
 // AC-1 (negative): wrong invite code is rejected and no config is
-// written. Drives the flag path so this stays valid even while the
-// prompt-path bug is open.
+// written. Drives the flag path to keep this test independent of the
+// prompt-path code.
 func TestAC1_Register_WrongInviteCodeRejected(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()

@@ -77,13 +77,13 @@ func TestAC2_Login_PromptsForUsernameAndPassword(t *testing.T) {
 	stdin := username + "\n" + password + "\n"
 	res := chatdRun(t, xdg, stdin, nil, "--server", srv.url, "login")
 	if res.exitCode != 0 {
-		t.Fatalf("AC-2 prompts: exit=%d stderr=%q (see file comment for known bug)", res.exitCode, res.stderr)
+		t.Fatalf("AC-2 prompts: exit=%d stderr=%q", res.exitCode, res.stderr)
 	}
 }
 
 // AC-2 (negative): login with the wrong password does not persist a
-// token. Driven via flags so the prompt-path bug doesn't shadow the
-// real assertion.
+// token. Driven via flags to keep this assertion independent of the
+// prompt-path code.
 func TestAC2_Login_WrongPasswordDoesNotPersist(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
