@@ -63,6 +63,12 @@ func parsePnpmWorkspacePackages(r io.Reader) ([]string, error) {
 		raw := s.Text()
 		// Strip trailing inline comments — pnpm-workspace.yaml may have
 		// a trailing `#` comment on a list entry; YAML allows it.
+		// Limitation: this is a naive substring search and does not
+		// recognize `#` inside quoted entries (e.g. `- "apps/#weird"`
+		// would be truncated at the `#`). pnpm workspace globs do not
+		// realistically contain `#`, so this is accepted; a quote-aware
+		// scan or a real YAML parser would be more cost than the bug
+		// warrants.
 		if i := strings.Index(raw, "#"); i >= 0 {
 			raw = raw[:i]
 		}
