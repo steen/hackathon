@@ -1,6 +1,7 @@
 import type * as React from "react";
 import { useEffect, useState } from "react";
 import { useAuth } from "./auth/AuthContext.js";
+import { ErrorBanner } from "./components/ErrorBanner.js";
 import { Login } from "./routes/Login.js";
 import { Register } from "./routes/Register.js";
 import { Chat } from "./routes/Chat.js";
@@ -23,6 +24,7 @@ function setHash(path: string): void {
 export function App(): React.JSX.Element {
   const { token, user, loading } = useAuth();
   const [route, setRoute] = useState<Route>(() => readRoute());
+  const signedIn = token !== null && user !== null;
 
   useEffect(() => {
     function onChange(): void {
@@ -34,28 +36,64 @@ export function App(): React.JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    if (!signedIn) return;
+    const id = window.requestAnimationFrame(() => {
+      const composer = document.querySelector<HTMLInputElement>(
+        'input[aria-label="message"]:not([disabled])',
+      );
+      if (composer !== null) {
+        composer.focus();
+        return;
+      }
+      const heading = document.querySelector<HTMLElement>(".messages__header h2");
+      if (heading !== null) {
+        if (!heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
+        heading.focus();
+        return;
+      }
+      const list = document.querySelector<HTMLElement>('[data-testid="message-list"]');
+      if (list !== null) {
+        if (!list.hasAttribute("tabindex")) list.setAttribute("tabindex", "-1");
+        list.focus();
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, [signedIn]);
+
   if (loading) {
     return <div className="loading">Loading...</div>;
   }
 
+  let body: React.JSX.Element;
   if (token === null || user === null) {
     if (route === "register") {
-      return (
+      body = (
         <Register
           onSwitchToLogin={() => {
             setHash("/login");
           }}
         />
       );
+    } else {
+      body = (
+        <Login
+          onSwitchToRegister={() => {
+            setHash("/register");
+          }}
+        />
+      );
     }
-    return (
-      <Login
-        onSwitchToRegister={() => {
-          setHash("/register");
-        }}
-      />
-    );
+  } else {
+    body = <Chat />;
   }
 
-  return <Chat />;
+  return (
+    <>
+      <ErrorBanner />
+      {body}
+    </>
+  );
 }

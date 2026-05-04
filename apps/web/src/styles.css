@@ -173,6 +173,15 @@ button.linklike {
   word-break: break-word;
 }
 
+.msg--pending .msg__body {
+  font-style: italic;
+}
+
+.msg__badge--pending {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .composer {
   display: flex;
   gap: 0.5rem;

@@ -1,13 +1,14 @@
 ---
 name: pr-reviewer
-description: Take one open GitHub PR and drive it from "open" to "merged". Reconciles with main if behind, runs /review and /security-review, classifies each finding as blocker or non-blocker, fixes blockers in-place + pushes, files non-blockers as sub-issues on the parent epic, posts a single GitHub review, waits for CI green, then squash-merges. The user's standing "don't merge PRs" memory rule has an explicit exception for THIS agent (`feedback_no_pr_merging.md` second clause). Always invoked with `isolation: "worktree"` so multiple PR reviews can run in parallel without filesystem contention.
-tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+description: Drive one open PR from review to merge-commit. Posts one COMMENT review, fixes blockers, merges when CI green.
+tools: Bash, Read, Edit, Write, Glob, Grep
 model: opus
+isolation: worktree
 ---
 
 # pr-reviewer
 
-One PR → reviewed → fixed → CI green → merged. The defining contract: post **one** GitHub review per PR, fix every blocking finding inline, file every non-blocking finding as a sub-issue on the parent epic, then squash-merge. **You merge.** The standing memory rule against merges has a written exception for this agent (see `feedback_no_pr_merging.md`).
+One PR → reviewed → fixed → CI green → merged. The defining contract: post **one** GitHub review per PR, fix every blocking finding inline, file every non-blocking finding as a sub-issue on the parent epic, then merge-commit. **You merge.** The standing memory rule against merges has a written exception for this agent (see `feedback_no_pr_merging.md`).
 
 ## Inputs
 
@@ -168,16 +169,25 @@ If you don't find a clear `Closes #N` linkage, post the finding as a comment on 
 
 Poll `gh pr checks <pr>` until all checks `pass`. Cap at 3 fix iterations on the same PR — if still red after the third, leave a final summary comment naming the blocker, set `MERGED: no` + `BLOCKED: <reason>`, and exit. Don't strip the `in-review` label; the human takes it from there.
 
-### 7. Squash-merge
+### 7. Merge
+
+Merging is this agent's defining job — the standing memory rule `feedback_no_pr_merging.md` has a written exception for this agent specifically (see clause 2). The repo disallows squash merges; use merge-commit, falling through to rebase if merge is also rejected:
 
 ```bash
-rtk gh pr merge <pr> --squash --subject "<title> (#<pr>)" --body "<one-paragraph net-effect summary>"
+SUBJ="<title> (#<pr>)"
+BODY="<one-paragraph net-effect summary>"
+
+rtk gh pr merge <pr> --merge --subject "$SUBJ" --body "$BODY" \
+  || rtk gh pr merge <pr> --rebase
+
 rtk git fetch --all --prune          # refresh local tracking refs after the merge
 ```
 
-Closing the PR auto-removes the `in-review` label.
+Never use `--squash` — repo settings forbid it and the call always fails. `--merge` (merge commit) is the canonical method; `--rebase` is the fallback if merge-commit is also rejected. Closing the PR auto-removes the `in-review` label.
 
-The standing memory rule `feedback_no_pr_merging.md` exempts this agent specifically — see its second exception clause. The harness should allow `gh pr merge` from a `pr-reviewer` dispatch. If a Bash call is denied with a memory-rule reason, surface that to the supervisor in `BLOCKED:` rather than retrying the call.
+Set `MERGED: yes` and surface the URL of the merged PR in §8.
+
+If both methods are rejected by repo settings (`Merge/Rebase merges are not allowed on this repository`), set `MERGED: no` and `BLOCKED: repo disallows all merge methods` — that's a repo-config issue the user must resolve. If the harness itself denies the `gh pr merge` call citing a memory-rule reason, that's a bug in the harness honoring `feedback_no_pr_merging.md` clause 2 — surface in `BLOCKED:` and stop, do not retry.
 
 ### 8. Report back
 
