@@ -1,0 +1,20 @@
+name: Remove in-review label on PR close
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  remove-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove in-review label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh api -X DELETE "repos/$REPO/issues/$PR_NUMBER/labels/in-review" --silent 2>/dev/null || true
