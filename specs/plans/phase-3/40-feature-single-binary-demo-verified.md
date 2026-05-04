@@ -21,7 +21,23 @@
 ## Test plan
 - Manual: build the single binary, run with only `JWT_SECRET` and `CHAT_INVITE_CODE` set, complete a register → send → receive flow in the browser.
 - Manual: confirm the CLI also works against the same binary using the configured server URL.
-- `test_binary_starts_with_minimal_env` — covers US-10 minimum-config startup.
+- `test_binary_starts_with_minimal_env` — covers US-10 minimum-config startup. Lives at `tests/e2e/phase-3/single-binary-demo/demo_test.go`; runs `scripts/build-single-binary.sh` end-to-end, boots the produced binary with the auth-enabled env vars, and asserts both arms (HTTP `/` serves the real Vite SPA — proven by a `/assets/*.js` reference the placeholder lacks; `/api/auth/register` returns the PRD §10 JSON envelope, not the SPA HTML). Skips when `pnpm` is not on `PATH` so CI's `go` job (no pnpm setup) stays green; the `pnpm` and full-`e2e` jobs install pnpm and run it for real.
+
+## Verified demo path
+
+Reproduce locally:
+
+```bash
+pnpm --filter web build
+bash scripts/build-single-binary.sh   # writes ./bin/chat-server with the SPA embedded
+CHAT_JWT_SECRET="$(openssl rand -hex 32)" \
+CHAT_INVITE_CODE="$(openssl rand -hex 8)" \
+CHAT_DB_PATH="$(mktemp -t chatd.XXXXXX.sqlite)" \
+  ./bin/chat-server
+# then open http://127.0.0.1:8080
+```
+
+`scripts/build-single-binary.sh` is the canonical orchestration: it runs `pnpm --filter web build`, copies `apps/web/dist/*` into `apps/server/internal/web/dist/` (whose contents are `.gitignore`d except the tracked placeholder), then `go build -o ./bin/chat-server ./apps/server`. `CHAT_LISTEN_ADDR` defaults to `127.0.0.1:8080`; override it (and set `CHAT_ALLOW_PUBLIC_BIND=1`) only when the demo is intentionally exposed off the loopback.
 
 ## Files expected to be touched or created
 - `Makefile` or `package.json` (demo target)
