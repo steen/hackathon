@@ -120,7 +120,7 @@ func TestAC4_History_AcceptsFlagsAfterPositional(t *testing.T) {
 
 	res := chatdRun(t, xdg, "", nil, "--server", srv.url, "history", channelID, "--limit", "1")
 	if res.exitCode != 0 {
-		t.Fatalf("AC-4 spec syntax: exit=%d stderr=%q (see file comment for known bug)", res.exitCode, res.stderr)
+		t.Fatalf("AC-4 spec syntax: exit=%d stderr=%q", res.exitCode, res.stderr)
 	}
 }
 
