@@ -1,7 +1,7 @@
 // AC-4 (verbatim from specs/plans/phase-2/50-feature-presence.md):
 //
-//   "The web app shows online users in the chat page; the CLI `chatd
-//    watch` optionally surfaces presence events."
+//	"The web app shows online users in the chat page; the CLI `chatd
+//	 watch` optionally surfaces presence events."
 //
 // AC-4 spans two clients: the web app and the chatd CLI.
 //
@@ -16,12 +16,12 @@
 // ev.Message != nil, so the current impl drops presence frames
 // silently. This test pins THAT behavior end-to-end:
 //
-//   1. `chatd watch <channel>` stays alive while a peer joins/leaves
-//      via WS (no crash, no error on stderr).
-//   2. The chatd watcher's stdout does NOT emit any presence-related
-//      noise — no "presence", "join", or "leave" tokens, no JSON frame
-//      with "type":"presence" leaking through. Silence-by-default is
-//      the contract under "optionally".
+//  1. `chatd watch <channel>` stays alive while a peer joins/leaves
+//     via WS (no crash, no error on stderr).
+//  2. The chatd watcher's stdout does NOT emit any presence-related
+//     noise — no "presence", "join", or "leave" tokens, no JSON frame
+//     with "type":"presence" leaking through. Silence-by-default is
+//     the contract under "optionally".
 //
 // If chatd later grows a `--show-presence` flag (or similar) the test
 // must be updated to assert the surfaced format explicitly; until
@@ -57,58 +57,62 @@ func TestPresenceAC4_ChatdWatchStaysSilentOnPeerJoinAndLeave(t *testing.T) {
 	bobName := randomCLIUsername(t)
 	bobPass := randomCLIPassword(t)
 
-	aliceID, _ := register(t, srv, aliceName, alicePass)
+	aliceID, aliceToken := register(t, srv, aliceName, alicePass)
 	_, bobToken := register(t, srv, bobName, bobPass)
 
 	xdg := t.TempDir()
 	chatdLoginAlice(t, srv, xdg, aliceName, alicePass)
 
-	channelName := randomCLIChannelName(t)
-	// Use #-prefixed channel names so the URL encoding matches the
-	// existing /debug/subs polling helper, which queries
-	// channel=%23general by default.
-	channelArg := "#" + channelName
+	// Create a per-test channel so other tests' #general traffic and
+	// presence state cannot interfere with the assertions below. The
+	// channel ID is what the WS handler resolves; chatd watch and the
+	// raw WS dial both pass that ID through ?channel=<id>.
+	channelID := createChannel(t, srv, aliceToken, randomCLIChannelName(t))
 
-	w := startChatdWatch(t, srv, xdg, channelArg)
+	w := startChatdWatch(t, srv, xdg, channelID)
 	defer w.Stop()
 
 	// Wait for chatd's WS subscription to land before doing anything
 	// else. Polling /debug/subs is cleaner than sleeping.
 	if !waitFor(5*time.Second, func() bool {
-		return fetchSubsCount(t, srv, channelArg) >= 1
+		return fetchSubsCount(t, srv, channelID) >= 1
 	}) {
-		t.Fatalf("chatd watch did not subscribe to %s within 5s; stderr=%q", channelArg, w.StderrSnapshot())
+		t.Fatalf("chatd watch did not subscribe to %s within 5s; stderr=%q", channelID, w.StderrSnapshot())
 	}
 
 	// Bob joins via raw WS on the same channel — this exercises the
 	// presence broadcast path. Then bob leaves a moment later. Use
 	// /debug/subs to confirm the lifecycle so the assertions below
 	// run against a settled state.
-	bobConn := dialAuthenticatedWSChannel(t, srv, bobToken, channelArg)
+	bobConn := dialAuthenticatedWSChannel(t, srv, bobToken, channelID)
 	if !waitFor(5*time.Second, func() bool {
-		return fetchSubsCount(t, srv, channelArg) >= 2
+		return fetchSubsCount(t, srv, channelID) >= 2
 	}) {
 		_ = bobConn.CloseNow()
-		t.Fatalf("bob's WS subscription to %s never settled to >=2; stderr=%q", channelArg, w.StderrSnapshot())
+		t.Fatalf("bob's WS subscription to %s never settled to >=2; stderr=%q", channelID, w.StderrSnapshot())
 	}
 
-	// Sanity: GET /api/presence sees both users while both are online.
-	// This proves the join broadcast path actually fired and is what
-	// any "show online users" UI reads from. AC-4 wires the web/CLI
-	// surface to this same source of truth.
+	// Sanity: GET /api/presence sees alice while she's online via the
+	// chatd watch subscription. This proves the join broadcast path
+	// actually fired and is what any "show online users" UI reads
+	// from. AC-4 wires the web/CLI surface to this same source of
+	// truth.
 	if !waitFor(5*time.Second, func() bool {
-		ids := presenceUserIDs(t, srv, bobToken)
-		return containsString(ids, aliceID)
+		return containsID(fetchPresenceUsers(t, srv, bobToken), aliceID)
 	}) {
 		t.Fatalf("alice (%s) never appeared in /api/presence; stderr=%q", aliceID, w.StderrSnapshot())
 	}
 
-	_ = bobConn.CloseNow()
+	if err := bobConn.Close(websocket.StatusNormalClosure, "test done"); err != nil {
+		// Log but don't fail — close after the server has already
+		// torn the connection down returns a benign error.
+		t.Logf("bobConn.Close: %v", err)
+	}
 
 	// Wait for the leave to settle — the watcher must not have
 	// crashed in the meantime.
 	if !waitFor(5*time.Second, func() bool {
-		return fetchSubsCount(t, srv, channelArg) == 1
+		return fetchSubsCount(t, srv, channelID) == 1
 	}) {
 		t.Fatalf("subs count never dropped back to 1 after bob left; stderr=%q", w.StderrSnapshot())
 	}
@@ -145,50 +149,38 @@ func TestPresenceAC4_ChatdWatchStaysSilentOnPeerJoinAndLeave(t *testing.T) {
 	}
 }
 
-// presenceUserIDs hits GET /api/presence and returns the list of user
-// ids it reports as online. The endpoint requires a bearer.
-func presenceUserIDs(t *testing.T, srv *runningServer, bearer string) []string {
+// createChannel creates a channel via REST and returns its server-
+// assigned id. The id is what /ws?channel=<id> resolves through the
+// handler's ChannelLookup; chatd watch and the raw bob WS dial both
+// pass that id.
+func createChannel(t *testing.T, srv *runningServer, bearer, name string) string {
 	t.Helper()
-	status, env, raw := getJSON(t, srv, "/api/presence", bearer)
-	if status != http.StatusOK {
-		t.Fatalf("/api/presence: status %d body %s", status, raw)
+	status, env, raw := postJSON(t, srv, "/api/channels", bearer, map[string]string{"name": name})
+	if status != http.StatusCreated {
+		t.Fatalf("POST /api/channels: status %d body %s", status, raw)
 	}
 	if !env.OK || env.Data == nil {
-		t.Fatalf("/api/presence envelope ok=%v data=%v", env.OK, env.Data)
+		t.Fatalf("POST /api/channels envelope ok=%v data=%v", env.OK, env.Data)
 	}
 	var data struct {
-		Users []struct {
-			ID       string `json:"id"`
-			Username string `json:"username"`
-		} `json:"users"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(*env.Data, &data); err != nil {
-		t.Fatalf("decode /api/presence data: %v body=%s", err, raw)
+		t.Fatalf("decode /api/channels data: %v body=%s", err, raw)
 	}
-	ids := make([]string, 0, len(data.Users))
-	for _, u := range data.Users {
-		ids = append(ids, u.ID)
+	if data.ID == "" {
+		t.Fatalf("POST /api/channels: empty id (body=%s)", raw)
 	}
-	return ids
+	return data.ID
 }
 
-func containsString(haystack []string, needle string) bool {
-	for _, h := range haystack {
-		if h == needle {
-			return true
-		}
-	}
-	return false
-}
-
-// fetchSubsCount queries /debug/subs?channel=<channel> and returns
-// the integer body. The endpoint is unauthenticated. Mirrors the
-// harness helper but takes a channel argument so AC-4 can use a
-// per-test channel name without colliding with the #general default.
-func fetchSubsCount(t *testing.T, srv *runningServer, channel string) int {
+// fetchSubsCount queries /debug/subs?channel=<id> and returns the
+// integer body. The endpoint is unauthenticated. Mirrors the harness's
+// fetchSubscriberCount but takes a channel id argument so AC-4 can
+// poll its per-test channel rather than the #general default.
+func fetchSubsCount(t *testing.T, srv *runningServer, channelID string) int {
 	t.Helper()
-	q := strings.ReplaceAll(channel, "#", "%23")
-	u := fmt.Sprintf("%s/debug/subs?channel=%s", srv.httpURL, q)
+	u := fmt.Sprintf("%s/debug/subs?channel=%s", srv.httpURL, channelID)
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		t.Fatalf("new GET /debug/subs: %v", err)
@@ -210,14 +202,14 @@ func fetchSubsCount(t *testing.T, srv *runningServer, channel string) int {
 
 // dialAuthenticatedWSChannel mirrors dialAuthenticatedWS but pins a
 // channel query parameter. The harness's default helper subscribes to
-// #general; AC-4 wants a non-default channel so the per-test data is
-// isolated from any other test's #general subscribers.
-func dialAuthenticatedWSChannel(t *testing.T, srv *runningServer, bearer, channel string) *websocket.Conn {
+// #general; AC-4 wants a per-test channel so other tests' #general
+// subscribers cannot bleed into the assertions below.
+func dialAuthenticatedWSChannel(t *testing.T, srv *runningServer, bearer, channelID string) *websocket.Conn {
 	t.Helper()
 	ticket := mintTicket(t, srv, bearer)
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	url := srv.wsURL + "?ticket=" + ticket + "&channel=" + strings.ReplaceAll(channel, "#", "%23")
+	url := srv.wsURL + "?ticket=" + ticket + "&channel=" + channelID
 	c, resp, err := websocket.Dial(dialCtx, url, nil)
 	if err != nil {
 		body := ""
