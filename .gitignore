@@ -1,6 +1,16 @@
 # Node
 node_modules/
 dist/
+# Exception: the placeholder index.html under apps/server/internal/web/dist/
+# is a tracked source file. //go:embed in apps/server/internal/web/embed.go
+# requires the directory to exist at compile time; the placeholder keeps the
+# embed pattern non-empty when the repo is built without first running
+# `pnpm --filter web build`. Real SPA bundles copied in by the single-binary
+# build script (apps/web/dist/* -> apps/server/internal/web/dist/) stay
+# untracked because the parent `dist/` rule still ignores them.
+!apps/server/internal/web/dist/
+apps/server/internal/web/dist/*
+!apps/server/internal/web/dist/index.html
 .pnpm-store/
 *.log
 npm-debug.log*
