@@ -745,14 +745,10 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
       expect(postMessageMock).toHaveBeenCalledWith("C1", "pending body");
     });
 
-    // AC-1: the Sending… badge is exposed via role="status". Two
-    // role="status" elements exist on this page (the connection badge and
-    // the pending badge); narrow to the one whose text starts with
-    // "Sending" so the assertion fails specifically when the pending
-    // badge disappears.
-    const statusEls = await screen.findAllByRole("status");
-    const badge = statusEls.find((el) => el.textContent.startsWith("Sending"));
-    expect(badge).toBeDefined();
+    // AC-1: the Sending… badge renders with text starting "Sending".
+    // findByText handles a missing match by throwing, so the lookup
+    // doubles as the assertion.
+    await screen.findByText(/^Sending/);
 
     // Locate the pending article. The row carries data-status="pending"
     // (set in Chat.tsx) and lives inside the message list.
