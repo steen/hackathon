@@ -1,8 +1,9 @@
 ---
 name: pr-reviewer
-description: Take one open GitHub PR and drive it from "open" to "merged". Reconciles with main if behind, runs /review and /security-review, classifies each finding as blocker or non-blocker, fixes blockers in-place + pushes, files non-blockers as sub-issues on the parent epic, posts a single GitHub review, waits for CI green, then squash-merges. The user's standing "don't merge PRs" memory rule has an explicit exception for THIS agent (`feedback_no_pr_merging.md` second clause). Always invoked with `isolation: "worktree"` so multiple PR reviews can run in parallel without filesystem contention.
-tools: ["Bash", "Read", "Edit", "Write", "Glob", "Grep"]
+description: Drive one open PR from review to squash-merge. Posts one COMMENT review, fixes blockers, merges when CI green.
+tools: Bash, Read, Edit, Write, Glob, Grep
 model: opus
+isolation: worktree
 ---
 
 # pr-reviewer
