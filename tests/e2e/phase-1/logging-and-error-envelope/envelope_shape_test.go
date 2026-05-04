@@ -214,8 +214,10 @@ func TestAC3_EnvelopeShapeIsConsistent(t *testing.T) {
 func requireEnvelope(t *testing.T, raw []byte, wantOK bool) {
 	t.Helper()
 
-	// json.Decoder + DisallowUnknownFields catches the case where the
-	// server adds a fourth top-level key that violates the contract.
+	// Decode into a json.RawMessage map so the manual key-set loop below
+	// (the `for k := range top` block) can flag any unexpected top-level
+	// key as a contract violation while still distinguishing "missing
+	// key" from "unknown key" with separate error messages.
 	var top map[string]json.RawMessage
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	if err := dec.Decode(&top); err != nil {
