@@ -13,11 +13,11 @@
 //	chatd [--server URL] history <channel> [--limit N] [--before ID]
 //	chatd [--server URL] send <channel> <message|->
 //	chatd [--server URL] watch <channel>
+//	chatd help | --help | -h
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -39,8 +39,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(rest) == 0 {
-		return errors.New("usage: chatd [--server URL] {register|login|whoami|logout|channels|history|send|watch} args")
+	// No subcommand -> print help and exit 0. A bare `help`, `--help`,
+	// or `-h` as the first positional token does the same. Per-subcommand
+	// `-h` is still owned by each flag.FlagSet (e.g. `chatd send -h`).
+	if len(rest) == 0 || isTopLevelHelp(rest[0]) {
+		return cmd.WriteHelp(os.Stdout)
 	}
 
 	env := cmd.DefaultEnv()
@@ -50,6 +53,10 @@ func run(ctx context.Context, args []string) error {
 	defer stop()
 
 	return Dispatch(ctx, env, rest)
+}
+
+func isTopLevelHelp(tok string) bool {
+	return tok == "help" || tok == "--help" || tok == "-h"
 }
 
 // stripServerFlag pulls --server / --server=URL out of args before

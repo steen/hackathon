@@ -117,17 +117,20 @@ export function Chat(): React.JSX.Element {
                 : m.status === "failed"
                   ? "msg msg--failed"
                   : "msg";
-            const style = m.status === "pending" ? { opacity: 0.6 } : undefined;
             return (
               <article
                 key={m.id}
                 className={cls}
-                style={style}
                 data-testid="msg"
                 data-status={m.status ?? "sent"}
               >
                 <div className="msg__meta">
                   <span className="msg__sender">{m.sender_user_id}</span>
+                  {m.status === "pending" ? (
+                    <span className="msg__badge msg__badge--pending" role="status">
+                      Sending…
+                    </span>
+                  ) : null}
                   {m.status === "pending" || m.created_at.length === 0 ? null : (
                     <time dateTime={m.created_at}>{m.created_at}</time>
                   )}
