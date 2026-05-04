@@ -9,10 +9,21 @@
 // it forwards from this package.
 package wsproto
 
+import "fmt"
+
+// MessageBodyLimit caps the decoded chat-message body in bytes
+// (PRD §9, SEC-8). Enforced on inbound WS frames in
+// apps/server/internal/wsapi; mirrored by the REST path in
+// apps/server/internal/http.
+const MessageBodyLimit = 4 * 1024
+
 // MessageBodyLimitCloseReason is the WebSocket close-reason text the
-// server emits when an inbound frame's decoded body exceeds the 4 KiB
+// server emits when an inbound frame's decoded body exceeds the
 // chat-message body cap (PRD §9, SEC-8). Both close code 1009 paths
 // (this body cap and the 64 KiB read-limit cap in wsapi) share the
 // status code; the e2e frame-size test asserts on this exact reason
 // to disambiguate which path fired.
-const MessageBodyLimitCloseReason = "message body exceeds 4 KiB limit"
+//
+// Derived from MessageBodyLimit so the wire text cannot drift if the
+// cap value ever changes.
+var MessageBodyLimitCloseReason = fmt.Sprintf("message body exceeds %d KiB limit", MessageBodyLimit/1024)
