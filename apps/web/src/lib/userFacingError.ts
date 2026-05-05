@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ApiError } from "@hackathon/api-client";
 
 // Curated user-facing copy. The raw error never reaches the UI — only one of
@@ -95,4 +96,59 @@ export function classifyRegisterAuthError(err: unknown): string {
 export function registerAuthMessage(prefix: string, err: unknown): string {
   console.error(prefix, err);
   return classifyRegisterAuthError(err);
+}
+
+// App-error sink: a tiny module-level pub/sub used to surface hook-level
+// failures (presence seed, channels list, message history/socket) via the
+// App-shell ErrorBanner. The AuthContext keeps its own `error` field for
+// session-related faults; this sink covers everything else and is read by
+// ErrorBanner alongside the auth error so users see one global notice rather
+// than per-feature inline state. Hooks call `reportAppError()` once per
+// failure (inside their catch blocks); the banner calls `dismissAppError()`
+// on user dismiss. Single-slot semantics — only the latest reported message
+// is held — match the existing ErrorBanner's single-message UX.
+//
+// Module-level so the publishing call site (a hook's catch handler, possibly
+// running outside of React's tree on a delayed promise) doesn't have to find
+// a context value via `useContext`. Subscriptions go through React via
+// `useAppError()` so the banner re-renders on dispatch.
+
+type AppErrorListener = (msg: string | null) => void;
+
+let currentAppError: string | null = null;
+const appErrorListeners = new Set<AppErrorListener>();
+
+export function reportAppError(msg: string): void {
+  if (msg === currentAppError) return;
+  currentAppError = msg;
+  for (const fn of appErrorListeners) fn(currentAppError);
+}
+
+export function dismissAppError(): void {
+  if (currentAppError === null) return;
+  currentAppError = null;
+  for (const fn of appErrorListeners) fn(null);
+}
+
+// Test helper — also useful between component test cases. Not exported in
+// production paths beyond test hooks resetting suite-shared state.
+export function _resetAppErrorSinkForTests(): void {
+  currentAppError = null;
+  appErrorListeners.clear();
+}
+
+function subscribeAppError(fn: AppErrorListener): () => void {
+  appErrorListeners.add(fn);
+  return () => {
+    appErrorListeners.delete(fn);
+  };
+}
+
+export function useAppError(): string | null {
+  const [err, setErr] = useState<string | null>(currentAppError);
+  useEffect(() => {
+    setErr(currentAppError);
+    return subscribeAppError(setErr);
+  }, []);
+  return err;
 }

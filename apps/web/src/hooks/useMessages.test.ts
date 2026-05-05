@@ -47,6 +47,7 @@ vi.mock("../api.js", () => ({
 }));
 
 import { useMessages } from "./useMessages.js";
+import { _resetAppErrorSinkForTests, useAppError } from "../lib/userFacingError.js";
 
 interface MsgRow {
   id: string;
@@ -69,6 +70,7 @@ function msg(id: string, body: string): MsgRow {
 beforeEach(() => {
   (globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket;
   wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+  _resetAppErrorSinkForTests();
 });
 
 afterEach(() => {
@@ -78,6 +80,7 @@ afterEach(() => {
   wsTicketMock.mockReset();
   listMessagesMock.mockReset();
   postMessageMock.mockReset();
+  _resetAppErrorSinkForTests();
 });
 
 function userMsg(id: string, body: string, createdAt: string): MsgRow {
@@ -711,6 +714,20 @@ describe("useMessages", () => {
 
     expect(result.current.messages).toHaveLength(60);
     expect(result.current.canLoadOlder).toBe(false);
+  });
+
+  it("dispatches the curated history error into the shared app-error sink", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    listMessagesMock.mockRejectedValueOnce(new Error("history boom"));
+    const { result: hook } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(hook.current.error).not.toBeNull();
+    });
+    const { result: sink } = renderHook(() => useAppError());
+    await waitFor(() => {
+      expect(sink.current).toBe("Failed to load message history: Something went wrong.");
+    });
+    consoleErrorSpy.mockRestore();
   });
 
   it("surfaces a curated error when initial history fails without echoing the raw err.message", async () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Channel } from "@hackathon/api-client";
 import { getClient } from "../api.js";
-import { bannerMessage } from "../lib/userFacingError.js";
+import { bannerMessage, reportAppError } from "../lib/userFacingError.js";
 
 interface ChannelsState {
   channels: Channel[];
@@ -29,6 +29,7 @@ export function useChannels(enabled: boolean): UseChannels {
     } catch (err) {
       const msg = bannerMessage("Failed to load channels", err);
       setState((s) => ({ ...s, loading: false, error: msg }));
+      reportAppError(msg);
     }
   }, []);
 

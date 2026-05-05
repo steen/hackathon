@@ -13,11 +13,13 @@ vi.mock("../api.js", () => ({
 }));
 
 import { useChannels } from "./useChannels.js";
+import { _resetAppErrorSinkForTests, useAppError } from "../lib/userFacingError.js";
 
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  _resetAppErrorSinkForTests();
 });
 
 afterEach(() => {
@@ -25,6 +27,7 @@ afterEach(() => {
   listChannelsMock.mockReset();
   createChannelMock.mockReset();
   consoleErrorSpy.mockRestore();
+  _resetAppErrorSinkForTests();
 });
 
 describe("useChannels", () => {
@@ -54,6 +57,21 @@ describe("useChannels", () => {
     expect(result.current.error).not.toContain("internal-db-trace-77");
     expect(result.current.error).not.toContain("503");
     expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to load channels", raw);
+  });
+
+  it("dispatches the curated error into the shared app-error sink", async () => {
+    const raw = new ApiError(503, "service_unavailable", "internal-trace-99");
+    listChannelsMock.mockRejectedValueOnce(raw);
+    const { result: hook } = renderHook(() => useChannels(true));
+    await waitFor(() => {
+      expect(hook.current.loading).toBe(false);
+    });
+    const { result: sink } = renderHook(() => useAppError());
+    await waitFor(() => {
+      expect(sink.current).toBe(
+        "Failed to load channels: The server is having trouble right now. Please try again.",
+      );
+    });
   });
 
   it("maps a fetch TypeError to the curated network copy", async () => {
