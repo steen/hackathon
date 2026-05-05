@@ -18,4 +18,10 @@
 //     — same call out as the clihelp package next door.
 //   - No imports from apps/** internal packages: keep the black-box
 //     boundary that motivates these tests.
+//   - Helpers that may grow per-caller variation take a trailing
+//     variadic options struct (e.g. `Register(... opts ...RegisterOptions)`)
+//     so the no-options call stays backward-compatible while migrating
+//     harnesses can opt into extra request fields without forking a
+//     parallel `RegisterWith…` helper. See StartServer/StartOptions for
+//     the same shape.
 package testsupport
