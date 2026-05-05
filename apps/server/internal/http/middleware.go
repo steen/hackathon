@@ -76,11 +76,13 @@ func (s *statusRecorder) Flush() {
 // the URL is logged. Latency is wall clock; status is observed via the
 // wrapped ResponseWriter.
 //
-// remote_ip is the host portion of r.RemoteAddr; X-Forwarded-For is NOT
-// trusted here because CHAT_TRUSTED_PROXY is not yet wired (PRD §9 / §11).
-// When the trusted-proxy flag lands, the parser should plug into the
-// remoteIP helper below and into auth_handlers.go's clientIP.
-func AccessLog(next http.Handler) http.Handler {
+// remote_ip is the host portion of r.RemoteAddr by default. When
+// trustedProxy is true (CHAT_TRUSTED_PROXY=1, PRD §9 / §11), the
+// leftmost X-Forwarded-For entry wins iff it parses as an IP literal;
+// otherwise we fall back to RemoteAddr. The flag is plumbed through
+// the wiring layer so production callers honor it and unit tests can
+// exercise both branches.
+func AccessLog(trustedProxy bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -110,33 +112,43 @@ func AccessLog(next http.Handler) http.Handler {
 		}
 		// G706: r.Method is constrained by net/http to a fixed set; redacted goes
 		// through url.URL.EscapedPath() which never emits raw CR/LF — no log
-		// injection vector reachable here. remote_ip is the SplitHostPort host
-		// (no scheme bytes); user_id is set by auth middleware from a verified
-		// JWT subject (no client-controlled bytes).
+		// injection vector reachable here. remote_ip comes either from
+		// SplitHostPort (no scheme bytes) or from LeftmostForwardedFor
+		// which validates the value via netip.ParseAddr; user_id is set by
+		// auth middleware from a verified JWT subject (no client-controlled bytes).
 		log.Printf("access method=%s path=%s status=%d latency_ms=%d request_id=%s remote_ip=%s user_id=%s", //nolint:gosec // G706: see comment above.
 			r.Method,
 			redacted,
 			rec.status,
 			time.Since(start).Milliseconds(),
 			RequestID(r.Context()),
-			remoteIP(r.RemoteAddr),
+			remoteIP(r, trustedProxy),
 			userID,
 		)
 	})
 }
 
-// remoteIP returns the host portion of an http.Request RemoteAddr value.
-// Falls back to the raw input when SplitHostPort fails (e.g. Unix-socket
-// transports that omit the port). Never trusts X-Forwarded-For — see the
-// AccessLog docstring for the deferred CHAT_TRUSTED_PROXY work.
-func remoteIP(remoteAddr string) string {
-	if remoteAddr == "" {
+// remoteIP returns the source IP for the access log. When trustedProxy
+// is true and the leftmost X-Forwarded-For entry validates as an IP
+// literal, that wins; otherwise we fall back to the host portion of
+// r.RemoteAddr (and finally to the raw RemoteAddr string when
+// SplitHostPort fails — e.g. Unix-socket transports without a port).
+//
+// Header validation lives in LeftmostForwardedFor; the trustedProxy
+// gate is here so callers (AccessLog) only need to pass the flag.
+func remoteIP(r *http.Request, trustedProxy bool) string {
+	if trustedProxy {
+		if ip := LeftmostForwardedFor(r); ip != "" {
+			return ip
+		}
+	}
+	if r == nil || r.RemoteAddr == "" {
 		return ""
 	}
-	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		return host
 	}
-	return remoteAddr
+	return r.RemoteAddr
 }
 
 // redactURL returns the request-target form (path + query, no scheme/host)

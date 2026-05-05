@@ -57,6 +57,14 @@ type Config struct {
 	InviteCode      string
 	ListenAddr      string
 	AllowPublicBind bool
+	// TrustedProxy enables honoring the leftmost X-Forwarded-For entry
+	// when extracting the source IP for the access log, the per-IP
+	// rate-limit key, and auth-event audit rows. PRD §9 / §11 documents
+	// only the binary on/off form (CIDR allowlists are a future
+	// enhancement, NOT in scope). True iff CHAT_TRUSTED_PROXY=1; any
+	// other value (unset, "0", "true", "yes") leaves the safe default
+	// in place: ignore X-Forwarded-For and trust only RemoteAddr.
+	TrustedProxy bool
 }
 
 // Load reads configuration from the environment. It applies defaults
@@ -71,7 +79,17 @@ func Load() Config {
 		InviteCode:      os.Getenv(EnvInviteCode),
 		ListenAddr:      addr,
 		AllowPublicBind: os.Getenv(EnvAllowPublicBind) == "1",
+		TrustedProxy:    os.Getenv(EnvTrustedProxy) == "1",
 	}
+}
+
+// LoadTrustedProxy returns the parsed CHAT_TRUSTED_PROXY flag without
+// loading the rest of Config. Wiring code that needs only this single
+// boolean (e.g. registerAuth's per-IP rate-limit middleware) calls this
+// helper to avoid re-parsing every env var on every request boundary.
+// Match the AllowPublicBind precedent: strict "1" only.
+func LoadTrustedProxy() bool {
+	return os.Getenv(EnvTrustedProxy) == "1"
 }
 
 // CheckResult names a single startup check and whether it passed.

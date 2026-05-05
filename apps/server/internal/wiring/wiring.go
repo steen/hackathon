@@ -11,6 +11,7 @@ import (
 	"net/http"
 
 	"hackathon/apps/server/internal/auth"
+	"hackathon/apps/server/internal/config"
 	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/repo"
@@ -60,8 +61,13 @@ type Deps struct {
 func Build(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 
+	// Read CHAT_TRUSTED_PROXY once per Build (process startup) rather
+	// than on every request. Threaded into AccessLog (remote_ip field)
+	// and into registerAuth (clientIP for audit + IP rate-limit key).
+	trustedProxy := config.LoadTrustedProxy()
+
 	registerSeed(deps)
-	authFeature := registerAuth(mux, deps)
+	authFeature := registerAuth(mux, deps, trustedProxy)
 	registerChannels(mux, deps, authFeature.Require)
 	registerPresence(mux, deps, authFeature.Require)
 	registerWS(mux, deps, authFeature.Tickets)
@@ -82,7 +88,7 @@ func Build(deps Deps) http.Handler {
 	// upgrade still works through this chain.
 	return httpapi.SecurityHeaders(
 		httpapi.RequestIDMiddleware(
-			httpapi.AccessLog(
+			httpapi.AccessLog(trustedProxy,
 				httpapi.Recover(
 					httpapi.BodyCap(mux),
 				),
