@@ -3,6 +3,8 @@ package cli_full_commands_e2e_test
 import (
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-4: `chatd history <channel> [--limit N] [--before ID]` prints
@@ -18,12 +20,12 @@ func TestAC4_History_PrintsAllMessagesByDefault(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channelID := createChannelViaREST(t, srv, token, randomChannelName(t))
+	channelID := createChannelViaREST(t, srv, token, clihelp.RandomChannelName(t))
 	bodies := []string{"first", "second", "third"}
 	for _, body := range bodies {
 		_ = postMessageViaREST(t, srv, token, channelID, body)
@@ -50,12 +52,12 @@ func TestAC4_History_RespectsLimitFlagWhenBeforeArg(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channelID := createChannelViaREST(t, srv, token, randomChannelName(t))
+	channelID := createChannelViaREST(t, srv, token, clihelp.RandomChannelName(t))
 	for _, body := range []string{"first", "second", "third"} {
 		_ = postMessageViaREST(t, srv, token, channelID, body)
 	}
@@ -77,12 +79,12 @@ func TestAC4_History_RespectsBeforeFlagWhenBeforeArg(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channelID := createChannelViaREST(t, srv, token, randomChannelName(t))
+	channelID := createChannelViaREST(t, srv, token, clihelp.RandomChannelName(t))
 	bodies := []string{"first", "second", "third"}
 	ids := make([]string, len(bodies))
 	for i, body := range bodies {
@@ -108,12 +110,12 @@ func TestAC4_History_AcceptsFlagsAfterPositional(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channelID := createChannelViaREST(t, srv, token, randomChannelName(t))
+	channelID := createChannelViaREST(t, srv, token, clihelp.RandomChannelName(t))
 	for _, body := range []string{"first", "second"} {
 		_ = postMessageViaREST(t, srv, token, channelID, body)
 	}

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-8: `chatd logout` clears the stored token from the config file
@@ -20,13 +22,13 @@ func TestAC8_Logout_ClearsConfigAndInvalidatesServerSide(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
 
 	// Login via chatd (flag path) so the config file matches a real
 	// flag-driven flow.
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 	pre, err := readConfigFile(t, xdg)
 	if err != nil {
 		t.Fatalf("setup: read config: %v", err)

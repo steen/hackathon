@@ -3,6 +3,8 @@ package cli_full_commands_e2e_test
 import (
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-7: `chatd whoami` prints the current authenticated username (or
@@ -11,14 +13,14 @@ func TestAC7_Whoami_PrintsUsernameWhenLoggedIn(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
 
 	// Log in via chatd (flag path — see harness_test.go) so the
 	// config file is created exactly the way a flag-driven user
 	// would create it.
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
 	res := chatdRun(t, xdg, "", nil, "--server", srv.url, "whoami")
 	if res.exitCode != 0 {
