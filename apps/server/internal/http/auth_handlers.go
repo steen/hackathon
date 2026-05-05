@@ -286,7 +286,7 @@ func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not invalidate token")
 		return
 	}
-	uname, _ := h.lookupUsername(r, uid)
+	uname, _ := auth.UsernameFromContext(r.Context())
 	h.logEvent(r.Context(), uid, uname, AuthEventLogout, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{"ok": true})
 }
@@ -306,7 +306,7 @@ func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	tok, exp := h.deps.Tickets.Issue(uid)
-	uname, _ := h.lookupUsername(r, uid)
+	uname, _ := auth.UsernameFromContext(r.Context())
 	h.logEvent(r.Context(), uid, uname, AuthEventTicketIssued, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"ticket":     tok,
