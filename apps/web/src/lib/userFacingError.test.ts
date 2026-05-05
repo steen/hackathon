@@ -170,18 +170,17 @@ describe("formAuthMessage", () => {
 });
 
 describe("classifyRegisterAuthError", () => {
+  // Register has no password to mismatch — REASON_INVALID_CREDENTIALS would be the wrong copy.
   it("maps 401/403 to invite-rejected (not invalid-credentials)", () => {
     const out401 = classifyRegisterAuthError(
       new ApiError(401, "unauthorized", "invite_code rejected internal"),
     );
     expect(out401).toBe(REASON_INVITE_REJECTED);
-    expect(out401).not.toBe(REASON_INVALID_CREDENTIALS);
 
     const out403 = classifyRegisterAuthError(
       new ApiError(403, "forbidden", "invite scope internal-detail"),
     );
     expect(out403).toBe(REASON_INVITE_REJECTED);
-    expect(out403).not.toBe(REASON_INVALID_CREDENTIALS);
   });
 
   it("maps 400/422 to validation copy", () => {
