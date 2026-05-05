@@ -93,6 +93,26 @@ func TestApplyCreatesMessagesCursorIndex(t *testing.T) {
 	}
 }
 
+// TestApplyCreatesAuthEventsKindIndex pins the audit-log kind index from
+// migration 0003 — `GROUP BY kind` / `WHERE kind = ?` queries scan the whole
+// auth_events table without it (idx_auth_events_user_at does not cover plans
+// with no leading user_id predicate). Catches a future migration that drops
+// or renames the index.
+func TestApplyCreatesAuthEventsKindIndex(t *testing.T) {
+	ctx := context.Background()
+	sqlDB := openMemDB(t)
+	if err := appdb.Apply(ctx, sqlDB); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	var name string
+	err := sqlDB.QueryRowContext(ctx,
+		`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_auth_events_kind'`,
+	).Scan(&name)
+	if err != nil {
+		t.Errorf("expected idx_auth_events_kind index after Apply: %v", err)
+	}
+}
+
 // TestApplyIsIdempotent re-runs Apply on an already-migrated DB and verifies
 // no error and no duplicate rows in schema_migrations.
 // (Acceptance: "migration runner ... is idempotent on re-run".)
