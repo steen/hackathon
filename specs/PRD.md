@@ -380,7 +380,7 @@ POST /api/auth/ws-ticket  (Bearer)
 ### Channels
 
 ```
-GET  /api/channels                      → [ { "id", "name", "created_at" } ]
+GET  /api/channels                      → { "channels": [ { "id", "name", "created_at" } ] }
 POST /api/channels        { "name" }    → { "id", "name", "created_at" }
 ```
 
@@ -388,7 +388,7 @@ POST /api/channels        { "name" }    → { "id", "name", "created_at" }
 
 ```
 GET  /api/channels/{id}/messages?limit=50&before=<msg_id>
-                                        → [ { "id", "channel_id", "sender_user_id", "body", "created_at" } ]
+                                        → { "messages": [ { "id", "channel_id", "sender_user_id", "body", "created_at" } ] }
 POST /api/channels/{id}/messages
                           { "body" }    → <Message>
 ```
@@ -424,7 +424,7 @@ Outbound (server → client):
 
 ### Design deviations from earlier PRD revisions
 
-Phase 2 implementation locked in four divergences from the original spec. Each was reviewed in issues #121–#124 and resolved as a PRD update rather than a code change; this section is the canonical record so the spec stays honest without rewriting history.
+Phase 2 implementation locked in several divergences from the original spec. Each was reviewed and resolved as a PRD update rather than a code change; this section is the canonical record so the spec stays honest without rewriting history.
 
 | Area | Original spec | Implementation | Why kept | Locked in by |
 |---|---|---|---|---|
@@ -433,6 +433,7 @@ Phase 2 implementation locked in four divergences from the original spec. Each w
 | Presence frame shape | Per-channel snapshot `{channel_id, users:[{id,username}]}` on every change | Global delta `{kind:"join"\|"leave", user_id}` on transition + `GET /api/presence` snapshot for reconciliation | Cheaper on the wire (delta vs. full set), matches the implemented `usePresence` hook and the e2e suite. Snapshot on (re)connect closes the catch-up gap. | PR #80, #105 |
 | CLI framework | cobra | stdlib `flag` + `splitFlagsAndPositional` helper (allows flags after positional args) | 9 flat commands don't justify cobra's footprint. Migration becomes worthwhile once subcommand groups, generated `--help`, or shell completion are needed (see §13). | PR #88, PR #117 |
 | HTTP routing | `github.com/go-chi/chi/v5` | stdlib `net/http.ServeMux` with Go 1.22+ method+pattern syntax (`apps/server/internal/wiring/auth.go`, `apps/server/internal/wiring/presence.go`, `apps/server/internal/http/channels_handlers.go`) | Go 1.22+ pattern syntax covers our route count with zero added dependency; chi was never imported. Revisit if we need middleware composition or sub-routers chi handles natively. | issue #718 |
+| List-endpoint payload shape | Bare arrays — `GET /api/channels → [...]`, `GET /api/channels/{id}/messages → [...]` | Wrapped under a named key — `{ "channels": [...] }` and `{ "messages": [...] }` (`apps/server/internal/http/channels_handlers.go:55`, `messages_handlers.go:90`) | Internal consistency with `GET /api/presence` (`{ "users": [...] }`), which the PRD already documents wrapped — one rule for all list endpoints. Forward-compat: the messages endpoint is already cursor-paged via `?before=`, and a wrapped object absorbs future paging metadata (`next_before`, `has_more`) without a breaking wire change. Both clients (`packages/api-client/src/http.ts`, `packages/go-client/channels.go`, `messages.go`) already consume the wrapped shape. | issue #713 |
 
 ## 11. Success Criteria
 
