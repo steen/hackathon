@@ -192,6 +192,14 @@ button.linklike {
   font-style: italic;
 }
 
+.empty-state {
+  color: var(--muted);
+  font-style: italic;
+  margin: 0;
+  padding: 1rem 0;
+  text-align: center;
+}
+
 .msg__badge--pending {
   color: var(--muted);
   font-style: italic;

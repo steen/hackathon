@@ -1268,3 +1268,52 @@ describe("test_web_chat_landmarks_have_accessible_names", () => {
     expect(await screen.findByRole("main", { name: "Messages" })).toBeInTheDocument();
   });
 });
+
+describe("test_web_chat_empty_channels_renders_wait_for_admin_copy", () => {
+  it("zero-channel state renders the 'wait for an admin' empty-state inside the messages log region", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([]);
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const empty = await screen.findByTestId("empty-state-no-channels");
+    expect(empty.textContent).toBe("No channels available yet. Wait for an admin to create one.");
+    // Sits inside the role="log" region so the polite-live announcement
+    // path covers SR users; no separate live region needed.
+    const list = screen.getByTestId("message-list");
+    expect(list.contains(empty)).toBe(true);
+    // Composer stays disabled with no channel selected.
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    expect(ta).toBeDisabled();
+  });
+});
+
+describe("test_web_chat_empty_messages_in_selected_channel_renders_start_of_channel_hint", () => {
+  it("populated channels with an empty messages list renders the 'start of #general' hint", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const hint = await screen.findByTestId("empty-state-channel-hint");
+    expect(hint.textContent).toBe("This is the start of #general — send a message to say hi.");
+    // No-channels copy must not render once a channel is active.
+    expect(screen.queryByTestId("empty-state-no-channels")).toBeNull();
+  });
+});
