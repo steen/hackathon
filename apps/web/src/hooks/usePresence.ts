@@ -42,6 +42,10 @@ interface PresenceListResponse {
 interface PresenceFrameData {
   kind: "join" | "leave";
   user_id: string;
+  // Server-populated username for the affected user (#490). The field is
+  // additive — older servers omit it, in which case we fall back to the
+  // seeded `knownUsernames` directory below.
+  username?: string;
 }
 
 const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
