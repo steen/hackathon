@@ -48,6 +48,36 @@ export interface WebSocketClientOptions {
 
 const DEFAULT_BACKOFF = [500, 1000, 2000, 5000, 10000];
 
+/**
+ * Reconnecting WebSocket client. Tickets are fetched via `opts.http.wsTicket`
+ * each connect; the URL is built from `http.getBaseUrl()`.
+ *
+ * Tests inject `setTimeout`/`clearTimeout` per-instance to drive reconnect
+ * delays without touching real timers — preferred over stubbing the global
+ * clock so concurrent tests don't share state. The injected `setTimeout`
+ * receives the reconnect callback and the chosen backoff; returning the
+ * "timer handle" is enough (it is only fed back to `clearTimeout`).
+ *
+ * @example Deterministic reconnect in a test:
+ * ```ts
+ * const timers: (() => void)[] = [];
+ * const c = new WebSocketClient({
+ *   http,
+ *   channelId: "C1",
+ *   WebSocket: FakeSocket,
+ *   reconnect: true,
+ *   backoffMs: [1],
+ *   setTimeout: (fn) => {
+ *     timers.push(fn);
+ *     return timers.length;
+ *   },
+ *   clearTimeout: () => undefined,
+ * });
+ * await c.connect();
+ * FakeSocket.instances[0]?.forceClose();
+ * timers[0]?.(); // fire the queued reconnect synchronously
+ * ```
+ */
 export class WebSocketClient {
   private readonly opts: WebSocketClientOptions;
   private readonly listeners: Listeners = {
