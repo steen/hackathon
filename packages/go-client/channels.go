@@ -8,7 +8,7 @@ import (
 
 // Channel mirrors the server-side repo.Channel JSON shape.
 type Channel struct {
-	ID        string    `json:"id"`
+	ID        ULID      `json:"id"`
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
 }

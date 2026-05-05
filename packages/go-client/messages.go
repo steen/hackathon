@@ -11,9 +11,9 @@ import (
 
 // Message mirrors the server-side repo.Message JSON shape (PRD §10).
 type Message struct {
-	ID           string    `json:"id"`
-	ChannelID    string    `json:"channel_id"`
-	SenderUserID string    `json:"sender_user_id"`
+	ID           ULID      `json:"id"`
+	ChannelID    ULID      `json:"channel_id"`
+	SenderUserID ULID      `json:"sender_user_id"`
 	Body         string    `json:"body"`
 	CreatedAt    time.Time `json:"created_at"`
 }
@@ -33,7 +33,7 @@ type postMessageRequest struct {
 // server default" — limit defaults to 50, capped server-side at 200;
 // before is an exclusive ULID cursor.
 type ListMessagesOptions struct {
-	Before string
+	Before ULID
 	Limit  int
 }
 
@@ -43,7 +43,7 @@ type ListMessagesOptions struct {
 func (c *Client) ListMessages(ctx context.Context, channelID string, opts ListMessagesOptions) ([]Message, error) {
 	q := url.Values{}
 	if opts.Before != "" {
-		q.Set("before", opts.Before)
+		q.Set("before", string(opts.Before))
 	}
 	if opts.Limit > 0 {
 		q.Set("limit", strconv.Itoa(opts.Limit))
