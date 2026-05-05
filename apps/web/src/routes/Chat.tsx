@@ -288,16 +288,29 @@ export function Chat(): React.JSX.Element {
             </p>
           ) : null}
           {messagesState.canLoadOlder ? (
-            <button
-              type="button"
-              className="messages__load-older"
-              data-testid="load-older-button"
-              onClick={() => {
-                void messagesState.loadOlder();
-              }}
-            >
-              Load older messages
-            </button>
+            <>
+              <button
+                type="button"
+                className="messages__load-older"
+                data-testid="load-older-button"
+                onClick={() => {
+                  void messagesState.loadOlder();
+                }}
+                disabled={messagesState.isLoadingOlder}
+                aria-busy={messagesState.isLoadingOlder ? "true" : undefined}
+              >
+                {messagesState.isLoadingOlder ? "Loading older messages…" : "Load older messages"}
+              </button>
+              {messagesState.loadOlderError !== null ? (
+                <p
+                  role="alert"
+                  className="error messages__load-older-error"
+                  data-testid="load-older-error"
+                >
+                  {messagesState.loadOlderError}
+                </p>
+              ) : null}
+            </>
           ) : null}
           {messagesState.messages.map((m) => {
             const cls =
