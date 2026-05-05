@@ -65,16 +65,36 @@ func PostJSON(t *testing.T, httpURL, path, bearer string, body any) (int, Envelo
 	return resp.StatusCode, env, raw
 }
 
+// RegisterOptions tunes Register beyond the three required fields.
+// Zero value is the canonical phase-1 body shape.
+type RegisterOptions struct {
+	// ExtraFields is merged into the JSON request body after the
+	// required username/password/invite_code keys. Caller-supplied keys
+	// shadow the defaults, so a caller can pass `invite_code: ""` to
+	// drive the missing-invite path. Values are encoded as-is by
+	// encoding/json, so non-string types (bools, numbers, structs) work
+	// alongside the string defaults.
+	ExtraFields map[string]any
+}
+
 // Register POSTs /api/auth/register with the supplied invite code,
 // fails the test on a non-2xx, and returns (userID, token) parsed
-// from the success envelope.
-func Register(t *testing.T, httpURL, inviteCode, username, password string) (userID, token string) {
+// from the success envelope. An optional RegisterOptions merges extra
+// JSON fields into the request body for harnesses that exercise
+// non-default register payloads.
+func Register(t *testing.T, httpURL, inviteCode, username, password string, opts ...RegisterOptions) (userID, token string) {
 	t.Helper()
-	status, env, raw := PostJSON(t, httpURL, "/api/auth/register", "", map[string]string{
+	body := map[string]any{
 		"username":    username,
 		"password":    password,
 		"invite_code": inviteCode,
-	})
+	}
+	if len(opts) > 0 {
+		for k, v := range opts[0].ExtraFields {
+			body[k] = v
+		}
+	}
+	status, env, raw := PostJSON(t, httpURL, "/api/auth/register", "", body)
 	if status != http.StatusCreated && status != http.StatusOK {
 		t.Fatalf("register %s: status %d body %s", username, status, raw)
 	}
