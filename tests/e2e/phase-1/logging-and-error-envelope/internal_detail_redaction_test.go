@@ -36,11 +36,12 @@ import (
 // request.
 //
 // The panic half (stack-trace + panic value emitted by Recover in
-// apps/server/internal/http/middleware.go) requires a build-tag-gated
-// /debug/panic route that does not exist on `main` today; that route
-// is tracked at #306. The panic_logs_stack_with_request_id sub-test
-// below is `t.Skip`'d until that probe lands and documents the full
-// assertion sketch the future round-trip should restore.
+// apps/server/internal/http/middleware.go) needs a deterministic
+// /debug/panic route. That route lives in
+// apps/server/internal/wiring/panicprobe.go behind `//go:build
+// panicprobe` (#306) and is unreachable on default builds. The
+// panic_logs_stack_with_request_id sub-test below builds the server
+// with `-tags=panicprobe` via startServer(t, startServerOpts{...}).
 func TestAC4_InternalDetailNotInClientLoggedWithRequestID(t *testing.T) {
 	srv := startServer(t)
 
@@ -159,23 +160,21 @@ func TestAC4_InternalDetailNotInClientLoggedWithRequestID(t *testing.T) {
 		// wired stack, assert (a) the response body is the generic
 		// internal envelope without the panic value or stack, and
 		// (b) the server log contains a `panic request_id=<id>` line
-		// (emitted by the Recover middleware in middleware.go) that
-		// includes a stack-trace marker and the same request id the
-		// client received.
+		// (emitted by Recover in
+		// apps/server/internal/http/middleware.go:184 — format
+		// `panic request_id=%s value=%v\n%s`) that includes a
+		// stack-trace marker and the same request id the client
+		// received.
 		//
-		// This requires a build-tag-gated /debug/panic route on the
-		// production binary. None exists at this commit (verified
-		// via `git grep -n panicprobe -- '*.go'` → zero hits). The
-		// follow-up to add a `//go:build panicprobe`-gated handler
-		// is tracked at #306 (parent epic #63). Once #306 ships,
-		// drop the t.Skip and restore the round-trip below.
-		t.Skip("AC-4 panic half requires the panic-probe build tag/route from #306; " +
-			"skipping until that handler lands. The assertion sketch below stays " +
-			"in compileable form so the harness API matches when the probe arrives.")
+		// /debug/panic is registered by
+		// apps/server/internal/wiring/panicprobe.go behind
+		// `//go:build panicprobe` (#306). The default chat-server
+		// binary compiles panicprobe_off.go and never registers the
+		// route, so this sub-test boots its own server with
+		// `-tags=panicprobe`.
+		probe := startServer(t, startServerOpts{BuildTags: "panicprobe"})
 
-		// Build the server with `-tags=panicprobe` (startServer
-		// would need a probe-aware variant once #306 lands).
-		statusPanic, hdrPanic, _, rawPanic := getJSON(t, srv, "/debug/panic", "")
+		statusPanic, hdrPanic, _, rawPanic := getJSON(t, probe, "/debug/panic", "")
 		if statusPanic != http.StatusInternalServerError {
 			t.Fatalf("/debug/panic: status %d, want 500", statusPanic)
 		}
@@ -196,14 +195,23 @@ func TestAC4_InternalDetailNotInClientLoggedWithRequestID(t *testing.T) {
 		}
 
 		// Server log must carry the panic line with the request id
-		// AND a stack-trace marker (`goroutine ` is emitted by
-		// runtime/debug.Stack — see the Recover middleware in
-		// middleware.go).
-		panicLine := awaitLogLine(t, srv,
+		// AND a stack-trace marker. Recover writes
+		//   log.Printf("panic request_id=%s value=%v\n%s",
+		//              reqID, rec, debug.Stack())
+		// (apps/server/internal/http/middleware.go:184), so the
+		// `goroutine ` marker (emitted by runtime/debug.Stack) lands
+		// on the line right after the panic header — not on the
+		// same line. awaitLogLine pinpoints the header by
+		// request_id; we then assert the captured stderr buffer
+		// also contains the stack-trace marker after that point.
+		_ = awaitLogLine(t, probe,
 			[]string{"panic ", "request_id=" + reqIDPanic},
 			5*time.Second)
-		if !strings.Contains(panicLine, "goroutine ") {
-			t.Errorf("panic log line missing stack marker `goroutine `; line=%q", panicLine)
+		fullLog := probe.logs.String()
+		idx := strings.Index(fullLog, "request_id="+reqIDPanic)
+		if idx < 0 || !strings.Contains(fullLog[idx:], "goroutine ") {
+			t.Errorf("panic log missing stack marker `goroutine ` after request_id=%s; full log:\n%s",
+				reqIDPanic, fullLog)
 		}
 	})
 }

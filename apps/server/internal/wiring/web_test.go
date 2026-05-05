@@ -54,6 +54,14 @@ func TestReservedPrefixesCoverWiringMux(t *testing.T) {
 				return true
 			}
 			ident, ok := sel.X.(*ast.Ident)
+			// The wiring contract pins the receiver name "mux": every
+			// register<Feature> function in this package takes its
+			// *http.ServeMux as a parameter named "mux" (see web.go,
+			// auth.go, channels.go, presence.go, ws.go, panicprobe.go).
+			// Matching by identifier name — not by resolved type via
+			// go/types — is intentional and cheap; if a future wiring
+			// file renames the parameter, the convention break is the
+			// signal to either rename it back or broaden this visitor.
 			if !ok || ident.Name != "mux" {
 				return true
 			}

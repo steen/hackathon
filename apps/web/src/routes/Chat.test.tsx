@@ -539,6 +539,126 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
       expect(live.textContent).toBe("a new user joined");
     });
   });
+
+  it("announces 'a user left' when the leaving id is not in the seeded directory", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => !s.url.includes("channel="))).toBe(true);
+    });
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U-stranger" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("a user left");
+    });
+  });
+});
+
+describe("test_web_presence_live_region_rebroadcasts_join_when_already_present", () => {
+  it("re-fires the live-region announcement on a repeat join for a user already in the list (seq-bumped state forces re-eval)", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({
+          users: [
+            { id: "U1", username: "alice" },
+            { id: "U2", username: "bob" },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
+    });
+
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    expect(presenceSock).toBeDefined();
+
+    // First join for U1, who is already seeded into the list. Without the
+    // `seq` field on PresenceEvent the lastEvent object would be referentially
+    // equal to its predecessor (kind+id+username unchanged) and the
+    // useMemo announcement would not re-evaluate.
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("alice joined");
+    });
+
+    // Intervening event flips the announcement to a different string so the
+    // next U1 join is observable as a text *change*, not a no-op re-render.
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U2" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("bob left");
+    });
+    expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+
+    // Second join for U1 while still in the list. The `seq` bump produces a
+    // fresh lastEvent object, the useMemo re-fires, and the live region
+    // flips back to "alice joined" — the path the existing tests miss.
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("alice joined");
+    });
+  });
 });
 
 async function renderWithChannel(): Promise<HTMLTextAreaElement> {
@@ -809,6 +929,81 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
     // promise. The pending entry stays pending — no WS echo is delivered
     // in this test — but the network call no longer dangles.
     for (const r of resolvers) r();
+  });
+});
+
+describe("test_web_self_authored_optimistic_message_is_aria_hidden_for_sr", () => {
+  it("self-authored optimistic-send <article> carries aria-hidden=true while data-status=pending so the polite log region does not read the user's own message back to them", async () => {
+    happyPath();
+    // Hold postMessage open so the optimistic entry stays pending across
+    // the assertions. Resolvers drained after the test prevents leaked
+    // promises.
+    const resolvers: (() => void)[] = [];
+    postMessageMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(() => {
+            resolve();
+          });
+        }),
+    );
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(ta).not.toBeDisabled();
+    });
+
+    fireEvent.change(ta, { target: { value: "my own message" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith("C1", "my own message");
+    });
+
+    const list = screen.getByTestId("message-list");
+    const pendingArticle = await waitFor(() => {
+      const a = list.querySelector<HTMLElement>('article[data-status="pending"]');
+      expect(a).not.toBeNull();
+      return a;
+    });
+    expect(pendingArticle?.getAttribute("aria-hidden")).toBe("true");
+
+    for (const r of resolvers) r();
+  });
+});
+
+describe("test_web_other_authored_message_is_not_aria_hidden", () => {
+  it("a message whose sender is another user is not aria-hidden — SR users still hear inbound traffic", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    // History fixture in happyPath includes M1 from sender U2 (not self U1).
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const articles = list.querySelectorAll<HTMLElement>('article[data-testid="msg"]');
+    expect(articles.length).toBeGreaterThan(0);
+    for (const a of articles) {
+      // History row is from U2, so no article should be aria-hidden here —
+      // belt-and-suspenders against a future regression that aria-hides
+      // the wrong rows.
+      expect(a.getAttribute("aria-hidden")).toBeNull();
+    }
   });
 });
 

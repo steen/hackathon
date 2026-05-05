@@ -4,6 +4,7 @@ import {
   REASON_CANCELED,
   REASON_GENERIC,
   REASON_INVALID_CREDENTIALS,
+  REASON_INVITE_REJECTED,
   REASON_NETWORK,
   REASON_SERVER_UNAVAILABLE,
   REASON_SESSION_INVALID,
@@ -12,7 +13,9 @@ import {
   bannerMessage,
   classifyError,
   classifyFormAuthError,
+  classifyRegisterAuthError,
   formAuthMessage,
+  registerAuthMessage,
   userFacingMessage,
 } from "./userFacingError.js";
 
@@ -163,5 +166,76 @@ describe("formAuthMessage", () => {
   it("composes a validation reason for 422 form rejects", () => {
     const raw = new ApiError(422, "unprocessable", "field internal-detail");
     expect(formAuthMessage("Registration failed", raw)).toBe(REASON_VALIDATION);
+  });
+});
+
+describe("classifyRegisterAuthError", () => {
+  it("maps 401/403 to invite-rejected (not invalid-credentials)", () => {
+    const out401 = classifyRegisterAuthError(
+      new ApiError(401, "unauthorized", "invite_code rejected internal"),
+    );
+    expect(out401).toBe(REASON_INVITE_REJECTED);
+    expect(out401).not.toBe(REASON_INVALID_CREDENTIALS);
+
+    const out403 = classifyRegisterAuthError(
+      new ApiError(403, "forbidden", "invite scope internal-detail"),
+    );
+    expect(out403).toBe(REASON_INVITE_REJECTED);
+    expect(out403).not.toBe(REASON_INVALID_CREDENTIALS);
+  });
+
+  it("maps 400/422 to validation copy", () => {
+    expect(classifyRegisterAuthError(new ApiError(400, "bad_request", "username too short"))).toBe(
+      REASON_VALIDATION,
+    );
+    expect(
+      classifyRegisterAuthError(
+        new ApiError(422, "unprocessable", "invite_code malformed internal"),
+      ),
+    ).toBe(REASON_VALIDATION);
+  });
+
+  it("falls through to server-unavailable for 503", () => {
+    expect(classifyRegisterAuthError(new ApiError(503, "down", "db-internal"))).toBe(
+      REASON_SERVER_UNAVAILABLE,
+    );
+  });
+
+  it("maps fetch TypeError to network copy", () => {
+    expect(classifyRegisterAuthError(new TypeError("Failed to fetch xyz-internal-detail"))).toBe(
+      REASON_NETWORK,
+    );
+  });
+
+  it("falls back to generic for plain Error", () => {
+    expect(classifyRegisterAuthError(new Error("boom internal-stack-trace"))).toBe(REASON_GENERIC);
+  });
+
+  it("never echoes raw err.message for any 4xx body", () => {
+    const cases = [
+      new ApiError(401, "unauthorized", "secret-invite-detail-401"),
+      new ApiError(403, "forbidden", "secret-scope-detail-403"),
+      new ApiError(400, "bad_request", "secret-field-detail-400"),
+      new ApiError(422, "unprocessable", "secret-field-detail-422"),
+    ];
+    for (const raw of cases) {
+      const out = classifyRegisterAuthError(raw);
+      expect(out).not.toContain(raw.message);
+      expect(out).not.toContain(String(raw.status));
+    }
+  });
+});
+
+describe("registerAuthMessage", () => {
+  it("returns invite-rejected for 401 and taps console.error with (prefix, raw)", () => {
+    const raw = new ApiError(401, "unauthorized", "invite-rejected-internal");
+    const out = registerAuthMessage("Registration failed", raw);
+    expect(out).toBe(REASON_INVITE_REJECTED);
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Registration failed", raw);
+  });
+
+  it("returns validation copy for 422", () => {
+    const raw = new ApiError(422, "unprocessable", "field internal-detail");
+    expect(registerAuthMessage("Registration failed", raw)).toBe(REASON_VALIDATION);
   });
 });

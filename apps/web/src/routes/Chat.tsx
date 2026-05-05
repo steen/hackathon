@@ -1,5 +1,13 @@
 import type * as React from "react";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
@@ -101,24 +109,34 @@ export function Chat(): React.JSX.Element {
   // event. The presence list itself reorders rather than appends rows, so
   // SR users don't get an aria-live additions announcement from the list —
   // we mirror the event into a sibling status region instead. When the
-  // username is unknown (live join for an id not in the seeded directory)
-  // the phrase elides the id rather than reading out a UUID.
+  // username is unknown (live event for an id not in the seeded directory)
+  // the phrase elides the id rather than reading out a UUID. The fallback
+  // differs by kind: "a new user" reads naturally for joins but is
+  // grammatically odd for leaves (the leaver isn't new from the listener's
+  // frame), so unknown leaves drop "new" — see issue #495.
   const presenceAnnouncement = useMemo<string>(() => {
     const ev = presenceState.lastEvent;
     if (ev === null) return "";
-    const who = ev.username.length > 0 ? ev.username : "a new user";
-    return ev.kind === "join" ? `${who} joined` : `${who} left`;
+    if (ev.username.length > 0) {
+      return ev.kind === "join" ? `${ev.username} joined` : `${ev.username} left`;
+    }
+    return ev.kind === "join" ? "a new user joined" : "a user left";
   }, [presenceState.lastEvent]);
 
   // Auth user before presence: own messages render correctly even before
   // the /api/presence seed lands. Falls back to the raw id so an unknown
   // sender (history from a user who has since left) doesn't crash — #148.
-  const resolveSender = (id: string): string => {
-    if (user !== null && user.id === id) return user.username;
-    const known = presenceState.usernames.get(id);
-    if (known !== undefined && known.length > 0) return known;
-    return id;
-  };
+  // Memoized so a future per-message memoized child can rely on a stable
+  // reference identity across renders (#535).
+  const resolveSender = useCallback(
+    (id: string): string => {
+      if (user !== null && user.id === id) return user.username;
+      const known = presenceState.usernames.get(id);
+      if (known !== undefined && known.length > 0) return known;
+      return id;
+    },
+    [user, presenceState.usernames],
+  );
 
   const activeChannelName = useMemo<string | null>(() => {
     if (activeChannel === null) return null;
@@ -251,12 +269,24 @@ export function Chat(): React.JSX.Element {
                 : m.status === "failed"
                   ? "msg msg--failed"
                   : "msg";
+            // Suppress SR announcement of the user's own messages — the
+            // optimistic-send path appends them immediately on submit, and
+            // SR users typed them so the polite-log readback is annoying
+            // (#139, #468). The WS echo (`useMessages` reconcile) reuses
+            // the same pending row, so the article keeps aria-hidden once
+            // its sender resolves to self. Failed-status rows stay
+            // announceable (the failed-badge `role="status"` plus the
+            // Retry button must remain in the a11y tree) — failed-send
+            // SR behaviour is tracked separately as #147.
+            const isSelf = user !== null && m.sender_user_id === user.id;
+            const ariaHidden = isSelf && m.status !== "failed" ? "true" : undefined;
             return (
               <article
                 key={m.id}
                 className={cls}
                 data-testid="msg"
                 data-status={m.status ?? "sent"}
+                aria-hidden={ariaHidden}
               >
                 <div className="msg__meta">
                   <span className="msg__sender">{resolveSender(m.sender_user_id)}</span>
