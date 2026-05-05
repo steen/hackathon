@@ -343,6 +343,14 @@ button.linklike {
     padding: 0.6rem 0.75rem;
   }
 
+  .composer textarea {
+    min-height: 44px;
+  }
+
+  .composer button {
+    min-height: 44px;
+  }
+
   .messages {
     min-height: 0;
   }
