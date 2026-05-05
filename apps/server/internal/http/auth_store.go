@@ -113,6 +113,16 @@ func (s *authStore) LogRateLimited(r *stdhttp.Request, userID, ip string) {
 	_ = s.LogAuthEvent(r.Context(), userID, "", AuthEventRateLimited, ip, r.UserAgent())
 }
 
+// authEventUsernameMax bounds how many bytes of an attempted username
+// land in auth_events.username. SEC-7 caps request bodies at 16KB, so
+// without this clamp a user pasting their password into the username
+// field on the login form would persist that plaintext into the audit
+// column. 64 is 4× the registration regex max (32) — enough to keep
+// over-long probes legible for forensics, small enough to bound any
+// single-row leak from an audit-DB read. Byte length, not rune count,
+// keeps the bound deterministic.
+const authEventUsernameMax = 64
+
 // LogAuthEvent appends one auth_events row. Per the migration's column
 // set: (user_id NULLABLE, username NULLABLE, kind, ip, ua, at). Either
 // userID or username (or both) may be empty — empty strings are stored
@@ -120,7 +130,15 @@ func (s *authStore) LogRateLimited(r *stdhttp.Request, userID, ip string) {
 // string". A failed login against an unknown username carries
 // username != "" with userID == "", which is the whole point of the
 // 0004 migration.
+//
+// username is truncated to authEventUsernameMax bytes before insert so
+// a pasted-password fat-finger cannot smuggle plaintext into the audit
+// column. Truncation happens here (not at call sites) so the
+// LogRateLimited middleware path inherits the same bound automatically.
 func (s *authStore) LogAuthEvent(ctx context.Context, userID, username, kind, ip, ua string) error {
+	if len(username) > authEventUsernameMax {
+		username = username[:authEventUsernameMax]
+	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO auth_events(user_id, username, kind, ip, ua, at) VALUES (?, ?, ?, ?, ?, ?)`,
 		nullableText(userID), nullableText(username), kind, ip, ua, time.Now().UTC(),
