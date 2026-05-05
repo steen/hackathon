@@ -3,6 +3,8 @@ package cli_full_commands_e2e_test
 import (
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-3: `chatd channels` lists channels.
@@ -14,17 +16,17 @@ func TestAC3_Channels_ListsChannels(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
 
 	// Persist the token via chatd login (flag path — see
 	// harness_test.go) so the CLI command picks it up the same way a
 	// flag-driven user would.
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	a := randomChannelName(t)
-	b := randomChannelName(t)
+	a := clihelp.RandomChannelName(t)
+	b := clihelp.RandomChannelName(t)
 	_ = createChannelViaREST(t, srv, token, a)
 	_ = createChannelViaREST(t, srv, token, b)
 

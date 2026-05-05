@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-1: `chatd register <username>` prompts for password and invite
@@ -21,8 +23,8 @@ func TestAC1_Register_PersistsTokenViaFlags(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 
 	res := chatdRun(t, xdg, "", nil,
 		"--server", srv.url, "register",
@@ -62,8 +64,8 @@ func TestAC1_Register_PromptsForPasswordAndInviteCode(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	stdin := password + "\n" + srv.inviteCode + "\n"
 
 	res := chatdRun(t, xdg, stdin, nil, "--server", srv.url, "register", username)
@@ -82,8 +84,8 @@ func TestAC1_Register_WrongInviteCodeRejected(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 
 	res := chatdRun(t, xdg, "", nil,
 		"--server", srv.url, "register",

@@ -2,6 +2,8 @@ package cli_full_commands_e2e_test
 
 import (
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-6: `chatd send <channel> <message>` posts a message; supports
@@ -14,12 +16,12 @@ func TestAC6_Send_PostsInlineMessage(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channel := randomChannelName(t)
+	channel := clihelp.RandomChannelName(t)
 	channelID := createChannelViaREST(t, srv, token, channel)
 
 	body := "hello-from-inline-arg"
@@ -40,12 +42,12 @@ func TestAC6_Send_PostsMessageFromStdinWhenDash(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channel := randomChannelName(t)
+	channel := clihelp.RandomChannelName(t)
 	channelID := createChannelViaREST(t, srv, token, channel)
 
 	body := "from-stdin-pipe"
