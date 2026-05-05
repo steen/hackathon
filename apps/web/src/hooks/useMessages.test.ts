@@ -400,6 +400,78 @@ describe("useMessages", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("send plumbs a curated failureReason onto the failed entry", async () => {
+    listMessagesMock.mockResolvedValueOnce([]);
+    // A plain Error reaches REASON_GENERIC. Asserting the exact curated
+    // string (not a substring of the raw err) is the contract: the raw
+    // err.message must never leak into the row.
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const raw = new Error("boom internal-trace-77");
+    postMessageMock.mockRejectedValueOnce(raw);
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.send("doomed");
+    });
+
+    const failed = result.current.messages[0];
+    expect(failed?.status).toBe("failed");
+    expect(failed?.failureReason).toBe("Something went wrong.");
+    expect(failed?.failureReason ?? "").not.toContain("boom");
+    expect(failed?.failureReason ?? "").not.toContain("internal-trace-77");
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to send message", raw);
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("retry clears a stale failureReason on the row", async () => {
+    listMessagesMock.mockResolvedValueOnce([]);
+    postMessageMock.mockRejectedValueOnce(new Error("first"));
+    // Second attempt hangs so the row sits in `pending` for the assertion.
+    let resolveSecond: (() => void) | undefined;
+    postMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSecond = () => {
+            resolve();
+          };
+        }),
+    );
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await result.current.send("retry-me");
+    });
+    const failedId = result.current.messages[0]?.id ?? "";
+    expect(result.current.messages[0]?.failureReason).toBe("Something went wrong.");
+
+    await act(async () => {
+      void result.current.retry(failedId);
+      await Promise.resolve();
+    });
+    const pending = result.current.messages[0];
+    expect(pending?.status).toBe("pending");
+    expect(pending?.failureReason).toBeUndefined();
+
+    resolveSecond?.();
+    consoleErrorSpy.mockRestore();
+  });
+
   it("optimistic entry is de-duped against the WS frame, not appended twice", async () => {
     listMessagesMock.mockResolvedValueOnce([]);
     postMessageMock.mockImplementation(async () => {
