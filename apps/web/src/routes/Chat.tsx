@@ -149,6 +149,14 @@ export function Chat(): React.JSX.Element {
   const trimmedEmpty = draft.trim().length === 0;
   const sendDisabled = activeChannel === null || trimmedEmpty || overCap;
 
+  // Empty-state surfaces only after the initial channel fetch settles (no
+  // loading, no error). Showing the "no channels" copy mid-load would race
+  // the eventual list and flash for SR users.
+  const showNoChannelsEmpty =
+    !channelsState.loading && channelsState.error === null && channelsState.channels.length === 0;
+  const showEmptyChannelHint =
+    activeChannel !== null && messagesState.error === null && messagesState.messages.length === 0;
+
   async function submitDraft(): Promise<void> {
     if (sendDisabled) return;
     const body = draft.trim();
@@ -260,6 +268,16 @@ export function Chat(): React.JSX.Element {
           {messagesState.error !== null ? (
             <p role="alert" className="error">
               {messagesState.error}
+            </p>
+          ) : null}
+          {showNoChannelsEmpty ? (
+            <p className="empty-state" data-testid="empty-state-no-channels">
+              No channels available yet. Wait for an admin to create one.
+            </p>
+          ) : null}
+          {showEmptyChannelHint && activeChannelName !== null ? (
+            <p className="empty-state" data-testid="empty-state-channel-hint">
+              {`This is the start of #${activeChannelName} — send a message to say hi.`}
             </p>
           ) : null}
           {messagesState.messages.map((m) => {
