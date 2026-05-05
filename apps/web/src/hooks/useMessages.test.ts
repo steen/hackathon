@@ -549,6 +549,170 @@ describe("useMessages", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("loadOlder prepends a reversed page above existing messages (50 + 50 = 100, oldest first)", async () => {
+    // Initial page: 50 newest-first rows. With ULIDs that sort
+    // lexicographically, M050 is the latest and M001 is the oldest of the
+    // page. After reverse the state reads M001 -> M050.
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    // Older page (in response to before=M001): 50 newest-first rows older
+    // than M001. M-051 is the newest of the page (just before M001),
+    // M-100 is the oldest.
+    const older = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(100 - i).padStart(4, "0")}`, `older-${String(100 - i)}`),
+    );
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockResolvedValueOnce(older);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(50);
+    });
+    expect(result.current.canLoadOlder).toBe(true);
+    // First (top-of-list) entry is the oldest of the initial page.
+    expect(result.current.messages[0]?.id).toBe("M001");
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(listMessagesMock).toHaveBeenLastCalledWith("C1", {
+      before: "M001",
+      limit: 50,
+    });
+    expect(result.current.messages).toHaveLength(100);
+    // Older block sits at the top, oldest first; newest of the block sits
+    // immediately above the previous-top row M001.
+    const ids = result.current.messages.map((m) => m.id);
+    expect(ids[0]).toBe("M0051");
+    expect(ids[49]).toBe("M0100");
+    expect(ids[50]).toBe("M001");
+    expect(ids[99]).toBe("M050");
+    expect(result.current.canLoadOlder).toBe(true);
+  });
+
+  it("loadOlder twice prepends two pages in order (50 + 50 + 50 = 150, oldest first)", async () => {
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`B${String(50 - i).padStart(3, "0")}`, `b-${String(50 - i)}`),
+    );
+    // First older page: 50 rows older than B001, IDs A050..A001 in
+    // newest-first server order; reversed in state to A001..A050.
+    const olderA = Array.from({ length: 50 }, (_, i) =>
+      msg(`A${String(50 - i).padStart(3, "0")}`, `a-${String(50 - i)}`),
+    );
+    // Second older page: 50 rows older than A001, IDs Z050..Z001.
+    // (Pretend Z sorts before A for the purpose of this test — we only
+    // check ordering of the prepended block, not lexicographic sanity of
+    // the IDs themselves.)
+    const olderZ = Array.from({ length: 50 }, (_, i) =>
+      msg(`Z${String(50 - i).padStart(3, "0")}`, `z-${String(50 - i)}`),
+    );
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockResolvedValueOnce(olderA);
+    listMessagesMock.mockResolvedValueOnce(olderZ);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(50);
+    });
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.messages).toHaveLength(100);
+    expect(result.current.messages[0]?.id).toBe("A001");
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(listMessagesMock).toHaveBeenLastCalledWith("C1", {
+      before: "A001",
+      limit: 50,
+    });
+    expect(result.current.messages).toHaveLength(150);
+    const ids = result.current.messages.map((m) => m.id);
+    // Top-of-list is now the oldest of the second prepended block.
+    expect(ids[0]).toBe("Z001");
+    expect(ids[49]).toBe("Z050");
+    expect(ids[50]).toBe("A001");
+    expect(ids[99]).toBe("A050");
+    expect(ids[100]).toBe("B001");
+    expect(ids[149]).toBe("B050");
+  });
+
+  it("loadOlder dedups rows already in state (server returns an overlapping row)", async () => {
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    // Older page: 49 fresh rows + 1 row (M001) that is already in state.
+    // The hook must skip the duplicate and prepend only 49 rows.
+    const older: MsgRow[] = [
+      ...Array.from({ length: 49 }, (_, i) =>
+        msg(`M${String(99 - i).padStart(4, "0")}`, `older-${String(99 - i)}`),
+      ),
+      msg("M001", "body-1"),
+    ];
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockResolvedValueOnce(older);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(50);
+    });
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(result.current.messages).toHaveLength(99);
+    const ids = result.current.messages.map((m) => m.id);
+    // Reversed older page is M0051..M0099 then M001 (overlap). The dedup
+    // strips the M001 duplicate, leaving 49 prepended rows above the
+    // existing M001..M050.
+    expect(ids[0]).toBe("M0051");
+    expect(ids[48]).toBe("M0099");
+    expect(ids[49]).toBe("M001");
+    expect(ids[98]).toBe("M050");
+    // Page came back full (50) so the "more might exist" heuristic stays on.
+    expect(result.current.canLoadOlder).toBe(true);
+  });
+
+  it("canLoadOlder stays false when initial history is short", async () => {
+    listMessagesMock.mockResolvedValueOnce([msg("M1", "only")]);
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.messages).toHaveLength(1);
+    });
+    expect(result.current.canLoadOlder).toBe(false);
+  });
+
+  it("canLoadOlder flips off when an older page returns short", async () => {
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    // Older page returns only 10 rows — fewer than the limit, so the
+    // channel's start is now visible and the trigger should hide.
+    const older = Array.from({ length: 10 }, (_, i) =>
+      msg(`O${String(10 - i).padStart(3, "0")}`, `older-${String(10 - i)}`),
+    );
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockResolvedValueOnce(older);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.canLoadOlder).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(result.current.messages).toHaveLength(60);
+    expect(result.current.canLoadOlder).toBe(false);
+  });
+
   it("surfaces a curated error when initial history fails without echoing the raw err.message", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const raw = new Error("history boom internal-stack-trace-42");

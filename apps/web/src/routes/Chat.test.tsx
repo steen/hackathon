@@ -1338,6 +1338,81 @@ describe("test_web_chat_empty_channels_renders_wait_for_admin_copy", () => {
   });
 });
 
+describe("test_web_chat_load_older_button_visible_only_after_full_page", () => {
+  it("does not render the Load older button when the initial history page is short", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("load-older-button")).toBeNull();
+  });
+
+  it("renders the Load older button when the initial page is full and clicking it requests before=<oldest>", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // A full 50-row newest-first page. After the hook reverses it, M001
+    // is the top-of-list (oldest) row — the ULID that loadOlder must
+    // forward as `before`.
+    const initial = Array.from({ length: 50 }, (_, i) => ({
+      id: `M${String(50 - i).padStart(3, "0")}`,
+      channel_id: "C1",
+      sender_user_id: "U2",
+      body: `body-${String(50 - i)}`,
+      created_at: "2026-01-01T00:00:00Z",
+    }));
+    const older = Array.from({ length: 1 }, () => ({
+      id: "M000",
+      channel_id: "C1",
+      sender_user_id: "U2",
+      body: "older",
+      created_at: "2025-12-31T00:00:00Z",
+    }));
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockResolvedValueOnce(older);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const trigger = await screen.findByTestId("load-older-button");
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger.textContent).toBe("Load older messages");
+
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(listMessagesMock).toHaveBeenCalledWith("C1", { before: "M001", limit: 50 });
+    });
+
+    // Older page returned a single row — short page → trigger hides.
+    await waitFor(() => {
+      expect(screen.queryByTestId("load-older-button")).toBeNull();
+    });
+    // The prepended row sits above the previous-top row.
+    const list = screen.getByTestId("message-list");
+    const bodies = Array.from(list.querySelectorAll<HTMLElement>(".msg__body")).map(
+      (el) => el.textContent,
+    );
+    expect(bodies[0]).toBe("older");
+    expect(bodies[1]).toBe("body-1");
+  });
+});
+
 describe("test_web_chat_empty_messages_in_selected_channel_renders_start_of_channel_hint", () => {
   it("populated channels with an empty messages list renders the 'start of #general' hint", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });
