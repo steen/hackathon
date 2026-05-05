@@ -250,6 +250,64 @@ func TestLoad_AllowPublicBind_OnlyAcceptsOne(t *testing.T) {
 	}
 }
 
+func TestLoad_LogLevel_DefaultsWhenUnset(t *testing.T) {
+	t.Setenv(EnvLogLevel, "")
+	c := Load()
+	if c.LogLevel != DefaultLogLevel {
+		t.Errorf("LogLevel = %q, want %q", c.LogLevel, DefaultLogLevel)
+	}
+	if c.LogLevelInvalid != "" {
+		t.Errorf("LogLevelInvalid = %q, want empty for unset env", c.LogLevelInvalid)
+	}
+}
+
+func TestLoad_LogLevel_AcceptsCanonicalValues(t *testing.T) {
+	for _, v := range []string{"debug", "info", "warn", "error"} {
+		t.Setenv(EnvLogLevel, v)
+		c := Load()
+		if c.LogLevel != v {
+			t.Errorf("LogLevel(%q) = %q, want %q", v, c.LogLevel, v)
+		}
+		if c.LogLevelInvalid != "" {
+			t.Errorf("LogLevel(%q) marked invalid: %q", v, c.LogLevelInvalid)
+		}
+	}
+}
+
+func TestLoad_LogLevel_CaseInsensitive(t *testing.T) {
+	cases := []struct {
+		raw, want string
+	}{
+		{"DEBUG", "debug"},
+		{"Info", "info"},
+		{"  WARN ", "warn"},
+		{"Error", "error"},
+	}
+	for _, tc := range cases {
+		t.Setenv(EnvLogLevel, tc.raw)
+		c := Load()
+		if c.LogLevel != tc.want {
+			t.Errorf("LogLevel(%q) = %q, want %q", tc.raw, c.LogLevel, tc.want)
+		}
+		if c.LogLevelInvalid != "" {
+			t.Errorf("LogLevel(%q) marked invalid: %q", tc.raw, c.LogLevelInvalid)
+		}
+	}
+}
+
+func TestLoad_LogLevel_UnknownFallsBackAndMarksInvalid(t *testing.T) {
+	for _, v := range []string{"verbose", "trace", "warning", "fatal"} {
+		t.Setenv(EnvLogLevel, v)
+		c := Load()
+		if c.LogLevel != DefaultLogLevel {
+			t.Errorf("LogLevel(%q) = %q, want fallback %q", v, c.LogLevel, DefaultLogLevel)
+		}
+		if c.LogLevelInvalid != v {
+			t.Errorf("LogLevelInvalid(%q) = %q, want %q", v, c.LogLevelInvalid, v)
+		}
+	}
+}
+
 func TestErrorsNeverContainSecret(t *testing.T) {
 	// Use distinctive secrets unlikely to appear as natural English
 	// substrings of the error template, so a positive substring match
