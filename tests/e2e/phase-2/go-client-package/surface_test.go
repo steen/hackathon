@@ -151,7 +151,7 @@ func TestAC1_GoClientPackageExposesTypedMethods(t *testing.T) {
 
 		// PostMessage
 		messageBody := "hello from AC-1 surface test"
-		msg, err := client.PostMessage(ctx, string(channel.ID), messageBody)
+		msg, err := client.PostMessage(ctx, string(channel.ID), goclient.PostMessageOptions{Body: messageBody})
 		if err != nil {
 			t.Fatalf("PostMessage: %v", err)
 		}
