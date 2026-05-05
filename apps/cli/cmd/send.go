@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	goclient "hackathon/packages/go-client"
 )
 
 // Send implements `chatd send <channel> <message>`. When <message> is
@@ -39,7 +41,7 @@ func Send(ctx context.Context, env *Env, args []string) error {
 	if err != nil {
 		return err
 	}
-	msg, err := client.PostMessage(ctx, channel, body)
+	msg, err := client.PostMessage(ctx, channel, goclient.PostMessageOptions{Body: body})
 	if err != nil {
 		return err
 	}

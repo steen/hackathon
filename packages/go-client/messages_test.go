@@ -84,7 +84,7 @@ func TestPostMessage(t *testing.T) {
 	defer srv.Close()
 
 	c := goclient.New(srv.URL, goclient.WithToken("tok"))
-	msg, err := c.PostMessage(context.Background(), fixtureChannelID, "hello")
+	msg, err := c.PostMessage(context.Background(), fixtureChannelID, goclient.PostMessageOptions{Body: "hello"})
 	if err != nil {
 		t.Fatalf("PostMessage: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestPostMessageNotFound(t *testing.T) {
 	defer srv.Close()
 
 	c := goclient.New(srv.URL, goclient.WithToken("tok"))
-	_, err := c.PostMessage(context.Background(), fixtureChannelID, "hi")
+	_, err := c.PostMessage(context.Background(), fixtureChannelID, goclient.PostMessageOptions{Body: "hi"})
 	if !goclient.IsCode(err, "not_found") {
 		t.Fatalf("err = %v, want not_found", err)
 	}

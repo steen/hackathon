@@ -24,17 +24,22 @@ type messagesListResponse struct {
 	Messages []Message `json:"messages"`
 }
 
-// postMessageRequest is the wire body for POST /api/channels/{id}/messages.
-type postMessageRequest struct {
-	Body string `json:"body"`
-}
-
 // ListMessagesOptions tunes ListMessages. Zero values mean "use the
 // server default" — limit defaults to 50, capped server-side at 200;
 // before is an exclusive ULID cursor.
 type ListMessagesOptions struct {
 	Before ULID
 	Limit  int
+}
+
+// PostMessageOptions carries the body — and any future tunables — for
+// PostMessage. It exists so PostMessage matches the package-wide
+// `ctx, requiredPositional..., opts struct` shape used by ListMessages
+// and Watch; new fields can land here without another breaking signature
+// change. The JSON tag pins the wire field name so renaming the Go
+// field never breaks the server contract.
+type PostMessageOptions struct {
+	Body string `json:"body"`
 }
 
 // ListMessages returns up to opts.Limit messages from channelID, newest
@@ -62,10 +67,10 @@ func (c *Client) ListMessages(ctx context.Context, channelID string, opts ListMe
 // PostMessage creates a message in channelID and returns the persisted
 // row (with server-assigned ULID and timestamp). The server broadcasts
 // the same record to every WS subscriber on the channel.
-func (c *Client) PostMessage(ctx context.Context, channelID, body string) (*Message, error) {
+func (c *Client) PostMessage(ctx context.Context, channelID string, opts PostMessageOptions) (*Message, error) {
 	path := fmt.Sprintf("/api/channels/%s/messages", url.PathEscape(channelID))
 	var out Message
-	if err := c.do(ctx, http.MethodPost, path, postMessageRequest{Body: body}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, opts, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
