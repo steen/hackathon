@@ -58,7 +58,7 @@ function parseUtcDate(y: string, m: string, d: string): Date | null {
 // Phase grouping mechanism is the implementer's call: accept any of
 // `### Phase N`, `**Phase N**`, or a bullet starting with `Phase N:`.
 
-const SECTION_HEADING_RE = /\n## \[?0\.1\.0\]?[^\n]*/;
+const SECTION_HEADING_RE = /(?:^|\n)## \[?0\.1\.0\]?[^\n]*/;
 const PHASE_PATTERNS: readonly RegExp[] = [
   /^### Phase \d+\b/m,
   /\*\*Phase \d+\*\*/,
@@ -143,6 +143,7 @@ describe("changelog-entry AC-2: 0.1.0 entry references US-1..US-12 grouped by ph
 
     if (body === null || matchedSource === null) {
       expect.fail(`expected a 0.1.0 section in one of: ${sources.join(", ")}`);
+      return;
     }
 
     for (let i = 1; i <= 12; i += 1) {
