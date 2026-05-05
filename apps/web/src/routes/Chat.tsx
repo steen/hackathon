@@ -154,8 +154,15 @@ export function Chat(): React.JSX.Element {
   // the eventual list and flash for SR users.
   const showNoChannelsEmpty =
     !channelsState.loading && channelsState.error === null && channelsState.channels.length === 0;
+  // Mirrors the no-channels guard above: hold the hint until the initial
+  // listMessages fetch settles. Otherwise the connecting → connected window
+  // (state is `messages === []`, `error === null`) flashes the hint for the
+  // duration of the fetch on every channel switch.
   const showEmptyChannelHint =
-    activeChannel !== null && messagesState.error === null && messagesState.messages.length === 0;
+    activeChannel !== null &&
+    !messagesState.historyLoading &&
+    messagesState.error === null &&
+    messagesState.messages.length === 0;
 
   async function submitDraft(): Promise<void> {
     if (sendDisabled) return;

@@ -730,6 +730,45 @@ describe("useMessages", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("historyLoading is true from mount until the initial listMessages call resolves", async () => {
+    let resolveHistory: ((rows: MsgRow[]) => void) | undefined;
+    listMessagesMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow[]>((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useMessages("C1"));
+    // Mid-fetch: messages are empty, error is null, but historyLoading
+    // marks the gap so the view can suppress empty-state copy.
+    expect(result.current.historyLoading).toBe(true);
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      resolveHistory?.([msg("M1", "hello")]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.historyLoading).toBe(false);
+    });
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M1"]);
+  });
+
+  it("historyLoading flips false on initial-history failure too", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    listMessagesMock.mockRejectedValueOnce(new Error("boom"));
+    const { result } = renderHook(() => useMessages("C1"));
+    expect(result.current.historyLoading).toBe(true);
+    await waitFor(() => {
+      expect(result.current.historyLoading).toBe(false);
+    });
+    expect(result.current.error).not.toBeNull();
+    consoleErrorSpy.mockRestore();
+  });
+
   it("surfaces a curated error when initial history fails without echoing the raw err.message", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const raw = new Error("history boom internal-stack-trace-42");
