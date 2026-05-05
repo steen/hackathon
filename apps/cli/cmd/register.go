@@ -61,7 +61,7 @@ func Register(ctx context.Context, env *Env, args []string) error {
 	}
 	cfg.Server = client.BaseURL()
 	cfg.Token = resp.Token
-	cfg.User = &config.User{ID: resp.User.ID, Username: resp.User.Username}
+	cfg.User = &config.User{ID: string(resp.User.ID), Username: resp.User.Username}
 	if err := saveConfig(env, cfg); err != nil {
 		return err
 	}

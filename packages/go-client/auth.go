@@ -9,7 +9,7 @@ import (
 // User mirrors the {id, username} pair the server returns from auth
 // endpoints (POST /api/auth/login, POST /api/auth/register, GET /api/auth/me).
 type User struct {
-	ID       string `json:"id"`
+	ID       ULID   `json:"id"`
 	Username string `json:"username"`
 }
 
