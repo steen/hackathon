@@ -17,11 +17,24 @@ First tagged release. Rolls up Phases 0–3: a single Go binary serving HTTP + W
 This entry is assembled from per-PR fragments in `CHANGELOG.d/` and the timestamped sections below; both formats coexist in this file (Keep-a-Changelog for tagged releases, timestamped sections for in-flight PRs).
 
 ### Added
+
+**Phase 0 — Walking skeleton.**
+
+- **Real-time fan-out baseline (US-5).** Server `/ws` endpoint with an in-memory hub that broadcasts every received message to all subscribers of a channel; two `chatd watch` clients receive a message piped via `chatd send`. Hardcoded `#general`, no auth, no DB — proves the wire end-to-end and stays green for the rest of the project via `scripts/smoke.sh`.
+
+**Phase 1 — Persistence + auth.**
+
 - **Accounts and sessions (US-1, US-2, US-11, US-12).** Invite-code-gated registration, login with bcrypt + constant-time failure path, `/api/me`, server-side logout that bumps a per-user `token_version` so previously-issued JWTs stop verifying without a deny-list. `POST /api/auth/ws-ticket` mints 30-second single-use tickets the WS upgrader redeems before accepting the handshake.
 - **Channels and messages (US-3, US-4, US-5, US-6).** `GET/POST /api/channels` with `^[a-z0-9][a-z0-9-]{0,39}$` name validation; `GET/POST /api/channels/{id}/messages` with ULID-cursor pagination (`?before=&limit=`, default 50, max 200). `POST` persists then broadcasts so a WS subscriber can never see a message a follow-up history fetch would miss. WS `/ws?channel=<id>&ticket=<hex>` subscribes the connection to the named channel.
+
+**Phase 2 — Web UI + shared clients.**
+
 - **Presence (US-7).** `GET /api/presence` returns the currently-online user list; per-connection `presence` WS frames (`{kind:"join"|"leave", user_id}`) deliver deltas. Multiple sessions for the same user collapse to one entry.
 - **CLI — `chatd` (US-8).** `chatd register`, `chatd login`, `chatd channels`, `chatd send`, `chatd watch`, `chatd history` against the same HTTP + WS endpoints the web app uses. Built on the Go stdlib `flag` package; supports flags after positional args (`chatd history <channel> --limit N`). Scripted invocations work with stdin redirection (e.g. `chatd register alice <<< $'pw\ninvite\n'`).
 - **Web app (US-9).** Vite + React + TypeScript SPA served from the same binary. Login, channel list, message view with paginated history, optimistic send (pending render swapped for the persisted row when the WS frame arrives; failed sends get a Retry button), live presence sidebar, WS-drop reconnect with message catch-up via `GET /api/channels/{id}/messages?limit=50` on every reopen.
+
+**Phase 3 — Polish, demo.**
+
 - **Single-binary deploy (US-10).** One Go binary, env-var configured (`CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, `CHAT_DB_PATH`, `CHAT_LISTEN_ADDR`, `CHAT_ALLOWED_ORIGINS`). `pnpm dev` boots the full stack from a clean clone for the demo path.
 - **End-to-end test suite.** `tests/e2e` boots the real server binary on a random port with an ephemeral SQLite + secrets, then drives the real `chatd` CLI and the real web app (Playwright + chromium against the Vite dev server) through register → login → channel create → post → echo, watch + reconnect on server restart, logout invalidation, presence join/leave, two-context cross-receive, WS drop+restore, and CLI ↔ web cross-client interop. Wired into CI as a separate `e2e` job.
 
