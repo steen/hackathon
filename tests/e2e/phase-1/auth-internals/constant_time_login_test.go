@@ -47,10 +47,11 @@ const constantTimeSamples = 4
 
 // minRatio is the floor for medianUnknown / medianKnown. A correctly
 // implemented dummy-compare path keeps the ratio near 1.0; a missing
-// compare collapses it to ~0.01. We pick 0.5 as the boundary: noisy
-// enough to absorb scheduler jitter at N=4, strict enough to fail
-// fast if the dummy path is ever removed.
-const minRatio = 0.5
+// compare collapses it to ~0.01. The boundary at 0.40 absorbs CI
+// scheduler stalls (#609 saw 0.49 on a stalled runner) while staying
+// well above the ~0.01 a real timing oracle would produce. Don't
+// tighten without checking the issue history.
+const minRatio = 0.40
 
 func TestAC3_ConstantTimeLoginOnUnknownUser(t *testing.T) {
 	if testing.Short() {
