@@ -21,6 +21,32 @@ import (
 	"time"
 )
 
+// Retry/backoff:
+//
+// This client is fire-once by design. REST calls (auth.go, channels.go,
+// messages.go) issue exactly one http.Client.Do per invocation; there
+// is no built-in retry, exponential backoff, or jitter, and 429/503
+// Retry-After headers are not honored automatically. Network transients
+// (connection resets, DNS hiccups, idempotent 5xx) surface to the
+// caller as a wrapped error from the underlying transport, and a
+// non-2xx envelope surfaces as *APIError.
+//
+// Retry policy is the caller's responsibility. Pass a context with the
+// total deadline you're willing to spend, and wrap calls in whatever
+// retry+backoff loop matches the call site's idempotency story —
+// retrying PostMessage blindly will duplicate posts. apps/cli/cmd/watch.go
+// is the in-tree reference for this pattern (exponential backoff
+// capped at 30s for the WS reconnect loop).
+//
+// WebSocket connections (ws.go) are likewise one-shot at the client
+// layer: Watch returns when the stream ends and the caller decides
+// whether to mint a fresh ticket and reconnect.
+//
+// If you find yourself reaching for retries in three places, prefer
+// wrapping the *http.Client passed to WithHTTPClient with a retrying
+// RoundTripper rather than forking this package — that keeps the
+// retry policy under your control and out of the typed API surface.
+
 // DefaultTimeout is the per-request HTTP timeout when the caller does
 // not pass a custom transport. WebSocket upgrades do not use it —
 // Watch's lifetime is bound to its caller-supplied context.
