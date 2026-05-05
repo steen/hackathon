@@ -158,3 +158,49 @@ describe("changelog-entry AC-2: 0.1.0 entry references US-1..US-12 grouped by ph
     ).toBe(true);
   });
 });
+
+// AC-3 (issue #663): the 0.1.0 entry follows Keep-a-Changelog with `### Added`,
+// `### Changed`, and `### Security` sections at minimum. Literal `###` heading
+// depth — `## Added` would break aggregation tooling that splits by section.
+//
+// Scope assertions to the 0.1.0 section body, not the whole file: existing
+// per-PR entries above 0.1.0 use `### Added` / `### Fixed` / `### Notes`,
+// and matching them would mask a missing 0.1.0 section.
+//
+// "At minimum" — extra sections (`### Fixed`, `### Removed`, `### Notes`) are
+// permitted and must not fail the test.
+const REQUIRED_KAC_SECTIONS: readonly string[] = ["Added", "Changed", "Security"];
+
+describe("changelog-entry AC-3: 0.1.0 entry follows Keep-a-Changelog section conventions", () => {
+  it("AC-3: the 0.1.0 section body contains ### Added, ### Changed, and ### Security headings", async () => {
+    const sources = [
+      path.join(repoRoot, "CHANGELOG.md"),
+      path.join(repoRoot, "CHANGELOG.d", "0.1.0.md"),
+    ];
+
+    let body: string | null = null;
+    let matchedSource: string | null = null;
+    for (const src of sources) {
+      const file = await readIfExists(src);
+      if (file === null) continue;
+      const extracted = extract010Body(file);
+      if (extracted !== null) {
+        body = extracted;
+        matchedSource = src;
+        break;
+      }
+    }
+
+    if (body === null || matchedSource === null) {
+      expect.fail(`expected a 0.1.0 section in one of: ${sources.join(", ")}`);
+    }
+
+    for (const section of REQUIRED_KAC_SECTIONS) {
+      const re = new RegExp(`^### ${section}\\b`, "m");
+      expect(
+        re.test(body),
+        `expected '### ${section}' heading in 0.1.0 section of ${matchedSource}`,
+      ).toBe(true);
+    }
+  });
+});
