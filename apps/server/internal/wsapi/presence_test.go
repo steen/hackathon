@@ -216,6 +216,9 @@ func waitForPresenceCount(h *hub.Hub, want int, timeout time.Duration) error {
 		if time.Now().After(deadline) {
 			return &decodeErr{got: "presence count never reached target"}
 		}
+		// Poll: presence updates fire asynchronously off the hub join
+		// path, and there is no synchronous "presence applied" signal —
+		// keep the wait short so the deadline branch still wins on hangs.
 		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -219,6 +219,9 @@ func TestCLIWatchReceivesRealTimeMessage(t *testing.T) {
 		if n > 0 {
 			break
 		}
+		// Poll: the fake server registers subscribers asynchronously,
+		// so there is no synchronous handshake signal we can wait on
+		// before kicking off the broadcast below.
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -236,6 +239,9 @@ func TestCLIWatchReceivesRealTimeMessage(t *testing.T) {
 		if strings.Contains(rig.stdout.String(), "watch-me") {
 			break
 		}
+		// Poll: Watch streams stdout from a goroutine, so we cannot
+		// block on a channel — wait for the marker to appear before
+		// cancelling the context that ends the stream.
 		time.Sleep(10 * time.Millisecond)
 	}
 	cancel()
