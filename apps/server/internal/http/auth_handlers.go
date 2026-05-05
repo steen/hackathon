@@ -47,6 +47,12 @@ type AuthDeps struct {
 	// failure backoff (PRD §9). When nil, the per-username gate is
 	// skipped — useful for tests that exercise other code paths.
 	UserLimiter *ratelimit.UserLimiter
+	// TrustedProxy is the parsed CHAT_TRUSTED_PROXY flag (PRD §9 / §11).
+	// When true, the auth audit log and the per-IP rate-limit key honor
+	// the leftmost X-Forwarded-For entry. Default (false) trusts only
+	// r.RemoteAddr; this is what existing tests assume so the zero value
+	// is the safe one.
+	TrustedProxy bool
 }
 
 // AuthHandlers is the bag of http.HandlerFuncs the auth feature
@@ -100,24 +106,24 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	if h.deps.InviteCode == "" {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "registration is disabled")
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(h.deps.InviteCode)) != 1 {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "invalid invite code")
 		return
 	}
 	username := strings.TrimSpace(req.Username)
 	if !usernameRe.MatchString(username) {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
 			"username must be 3-32 chars: letters, digits, dash, underscore")
 		return
 	}
 	if err := auth.EnforcePolicy(req.Password); err != nil {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		switch {
 		case errors.Is(err, auth.ErrPasswordTooShort):
 			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
@@ -132,13 +138,13 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}
 	hash, err := auth.Hash(req.Password)
 	if err != nil {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not hash password")
 		return
 	}
 	id := ids.NewULID()
 	if err := h.store.CreateUser(r.Context(), id, username, hash, h.deps.Now()); err != nil {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		if errors.Is(err, ErrUsernameTaken) {
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "username already taken")
 			return
@@ -146,7 +152,7 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create user")
 		return
 	}
-	h.logEvent(r.Context(), id, AuthEventRegister, clientIP(r), r.UserAgent())
+	h.logEvent(r.Context(), id, AuthEventRegister, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	tok, err := auth.Issue(h.deps.SigningKey, id, 0, h.deps.Now())
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not issue token")
@@ -187,7 +193,7 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	username := strings.TrimSpace(req.Username)
 	if h.deps.UserLimiter != nil {
 		if ok, retry := h.deps.UserLimiter.Allow(username); !ok {
-			h.store.LogRateLimited(r, "", clientIP(r))
+			h.store.LogRateLimited(r, "", clientIP(r, h.deps.TrustedProxy))
 			writeRateLimited(w, retry)
 			return
 		}
@@ -199,7 +205,7 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if h.deps.UserLimiter != nil {
 			h.deps.UserLimiter.RegisterFailure(username)
 		}
-		h.logEvent(r.Context(), "", AuthEventLoginFailure, clientIP(r), r.UserAgent())
+		h.logEvent(r.Context(), "", AuthEventLoginFailure, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, auth.LoginErrorMessage)
 		return
 	}
@@ -211,7 +217,7 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not issue token")
 		return
 	}
-	h.logEvent(r.Context(), user.ID, AuthEventLoginSuccess, clientIP(r), r.UserAgent())
+	h.logEvent(r.Context(), user.ID, AuthEventLoginSuccess, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	if u, ok := h.lookupUsername(r, user.ID); ok {
 		username = u
 	}
@@ -263,7 +269,7 @@ func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not invalidate token")
 		return
 	}
-	h.logEvent(r.Context(), uid, AuthEventLogout, clientIP(r), r.UserAgent())
+	h.logEvent(r.Context(), uid, AuthEventLogout, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{"ok": true})
 }
 
@@ -282,7 +288,7 @@ func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	tok, exp := h.deps.Tickets.Issue(uid)
-	h.logEvent(r.Context(), uid, AuthEventTicketIssued, clientIP(r), r.UserAgent())
+	h.logEvent(r.Context(), uid, AuthEventTicketIssued, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"ticket":     tok,
 		"expires_at": exp.UTC().Format(time.RFC3339Nano),
@@ -314,12 +320,18 @@ func decodeJSON(r *stdhttp.Request, dst interface{}) error {
 	return dec.Decode(dst)
 }
 
-// clientIP extracts the source IP for the access log. For now we trust
-// only RemoteAddr; honoring X-Forwarded-For is gated on
-// CHAT_TRUSTED_PROXY (PRD §9) and lands with the rate-limit feature.
-// SplitHostPort handles IPv6 ("[::1]:1234") that a naive LastIndex(":")
-// would mangle.
-func clientIP(r *stdhttp.Request) string {
+// clientIP extracts the source IP for auth-event audit rows and the
+// per-IP rate-limit bucket key. When trustedProxy is true (PRD §9 /
+// §11, CHAT_TRUSTED_PROXY=1) and the leftmost X-Forwarded-For entry
+// parses as an IP literal, that wins; otherwise we fall back to the
+// host portion of r.RemoteAddr. SplitHostPort handles IPv6
+// ("[::1]:1234") that a naive LastIndex(":") would mangle.
+func clientIP(r *stdhttp.Request, trustedProxy bool) string {
+	if trustedProxy {
+		if ip := LeftmostForwardedFor(r); ip != "" {
+			return ip
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

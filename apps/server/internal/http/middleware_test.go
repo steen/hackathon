@@ -17,7 +17,7 @@ import (
 func TestAccessLogStripsTokenQueryParam_SEC11(t *testing.T) {
 	logs := captureLog(t)
 
-	h := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me?token=super-secret-jwt&foo=bar", nil)
@@ -39,7 +39,7 @@ func TestAccessLogStripsTokenQueryParam_SEC11(t *testing.T) {
 func TestAccessLogStripsTicketQueryParam_SEC11(t *testing.T) {
 	logs := captureLog(t)
 
-	h := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusSwitchingProtocols)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/ws?ticket=one-shot-ticket-value", nil)
@@ -59,7 +59,7 @@ func TestAccessLogStripsTicketQueryParam_SEC11(t *testing.T) {
 func TestAccessLogRedactsRepeatedAndEncodedKeys(t *testing.T) {
 	logs := captureLog(t)
 
-	h := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/x?token=alpha&token=beta&ticket=%2Fweird%3D", nil)
@@ -76,7 +76,7 @@ func TestAccessLogRedactsRepeatedAndEncodedKeys(t *testing.T) {
 func TestAccessLogRecordsMethodPathStatusLatencyAndRequestID(t *testing.T) {
 	logs := captureLog(t)
 
-	chain := RequestIDMiddleware(AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	chain := RequestIDMiddleware(AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 	})))
 	req := httptest.NewRequest(http.MethodPost, "/api/foo", nil)
@@ -97,7 +97,7 @@ func TestAccessLogRecordsMethodPathStatusLatencyAndRequestID(t *testing.T) {
 func TestAccessLogRecordsRemoteIPHostPortion(t *testing.T) {
 	logs := captureLog(t)
 
-	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	chain := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -113,10 +113,81 @@ func TestAccessLogRecordsRemoteIPHostPortion(t *testing.T) {
 	}
 }
 
+// PRD §9 / §11: when CHAT_TRUSTED_PROXY is unset the access log must
+// IGNORE X-Forwarded-For and record the host portion of RemoteAddr,
+// even if the client supplied a forged XFF chain. The corresponding
+// e2e test (PR #636) covers the same default through the full server;
+// this unit test pins the AccessLog branch directly so a regression in
+// the helper surfaces here first.
+func TestAccessLogIgnoresXFFWhenTrustedProxyFalse(t *testing.T) {
+	logs := captureLog(t)
+
+	chain := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "203.0.113.7:54321"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	chain.ServeHTTP(httptest.NewRecorder(), req)
+
+	out := logs.String()
+	if !strings.Contains(out, "remote_ip=203.0.113.7") {
+		t.Fatalf("access log dropped RemoteAddr fallback: %s", out)
+	}
+	if strings.Contains(out, "1.2.3.4") || strings.Contains(out, "5.6.7.8") {
+		t.Fatalf("access log honored XFF with trustedProxy=false: %s", out)
+	}
+}
+
+// PRD §9 / §11: when CHAT_TRUSTED_PROXY=1 the access log records the
+// leftmost X-Forwarded-For entry, not the proxy's RemoteAddr.
+func TestAccessLogHonorsXFFWhenTrustedProxyTrue(t *testing.T) {
+	logs := captureLog(t)
+
+	chain := AccessLog(true, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "10.0.0.1:54321" // proxy
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	chain.ServeHTTP(httptest.NewRecorder(), req)
+
+	out := logs.String()
+	if !strings.Contains(out, "remote_ip=1.2.3.4") {
+		t.Fatalf("access log did not honor leftmost XFF: %s", out)
+	}
+	if strings.Contains(out, "remote_ip=10.0.0.1") {
+		t.Fatalf("access log fell back to RemoteAddr despite valid XFF: %s", out)
+	}
+}
+
+// Defense-in-depth: with trustedProxy=true and a malformed leftmost XFF
+// entry, the helper must reject the value and fall back to RemoteAddr
+// rather than poison the log line with arbitrary client-supplied bytes.
+func TestAccessLogFallsBackOnGarbageXFF(t *testing.T) {
+	logs := captureLog(t)
+
+	chain := AccessLog(true, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.RemoteAddr = "10.0.0.1:54321"
+	req.Header.Set("X-Forwarded-For", "not-an-ip, 5.6.7.8")
+	chain.ServeHTTP(httptest.NewRecorder(), req)
+
+	out := logs.String()
+	if !strings.Contains(out, "remote_ip=10.0.0.1") {
+		t.Fatalf("access log did not fall back to RemoteAddr on garbage XFF: %s", out)
+	}
+	if strings.Contains(out, "not-an-ip") {
+		t.Fatalf("access log accepted garbage XFF leftmost: %s", out)
+	}
+}
+
 func TestAccessLogRecordsUserIDFromContext(t *testing.T) {
 	logs := captureLog(t)
 
-	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	chain := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
@@ -132,7 +203,7 @@ func TestAccessLogRecordsUserIDFromContext(t *testing.T) {
 func TestAccessLogUserIDRendersDashWhenUnset(t *testing.T) {
 	logs := captureLog(t)
 
-	chain := AccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	chain := AccessLog(false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -259,7 +330,7 @@ func TestAccessLogRecordsAuthenticatedUserIDThroughRealChain(t *testing.T) {
 		WriteUnauthorized: WriteUnauthorized,
 		WithUserID:        WithUserID,
 	})
-	chain := SecurityHeaders(RequestIDMiddleware(AccessLog(require(handler))))
+	chain := SecurityHeaders(RequestIDMiddleware(AccessLog(false, require(handler))))
 
 	logs := captureLog(t)
 

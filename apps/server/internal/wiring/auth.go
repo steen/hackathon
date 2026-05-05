@@ -15,9 +15,14 @@ import (
 // the middleware + ticket store so the WS and channels features can
 // reuse them without rebuilding the dependency graph.
 //
+// trustedProxy is the parsed CHAT_TRUSTED_PROXY flag (PRD §9 / §11),
+// threaded through to the auth handlers (clientIP for audit rows) and
+// the IP rate-limit middleware (per-IP bucket key). Without this the
+// rate-limit bucket collapses to one key behind a reverse proxy.
+//
 // Skips registration entirely when Deps.Repo is nil — the no-DB
 // boot path used by smoke tests has no users to authenticate.
-func registerAuth(mux *http.ServeMux, deps Deps) authBundle {
+func registerAuth(mux *http.ServeMux, deps Deps, trustedProxy bool) authBundle {
 	if deps.Repo == nil {
 		return authBundle{}
 	}
@@ -37,11 +42,12 @@ func registerAuth(mux *http.ServeMux, deps Deps) authBundle {
 	userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
 
 	ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
-		DB:          deps.Repo.DB(),
-		Tickets:     tickets,
-		SigningKey:  deps.JWTSecret,
-		InviteCode:  deps.InviteCode,
-		UserLimiter: userLimiter,
+		DB:           deps.Repo.DB(),
+		Tickets:      tickets,
+		SigningKey:   deps.JWTSecret,
+		InviteCode:   deps.InviteCode,
+		UserLimiter:  userLimiter,
+		TrustedProxy: trustedProxy,
 	})
 
 	require := auth.RequireJWT(auth.MiddlewareConfig{
@@ -51,8 +57,8 @@ func registerAuth(mux *http.ServeMux, deps Deps) authBundle {
 		WithUserID:        httpapi.WithUserID,
 	})
 
-	loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink())
-	registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink())
+	loginRL := httpapi.IPRateLimit(loginIPLimiter, 5*time.Minute, ah.AuditSink(), trustedProxy)
+	registerRL := httpapi.IPRateLimit(registerIPLimiter, 15*time.Minute, ah.AuditSink(), trustedProxy)
 
 	mux.Handle("/api/auth/register", registerRL(http.HandlerFunc(ah.Register)))
 	mux.Handle("/api/auth/login", loginRL(http.HandlerFunc(ah.Login)))
