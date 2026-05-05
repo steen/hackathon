@@ -280,6 +280,18 @@ export function Chat(): React.JSX.Element {
               {`This is the start of #${activeChannelName} — send a message to say hi.`}
             </p>
           ) : null}
+          {messagesState.canLoadOlder ? (
+            <button
+              type="button"
+              className="messages__load-older"
+              data-testid="load-older-button"
+              onClick={() => {
+                void messagesState.loadOlder();
+              }}
+            >
+              Load older messages
+            </button>
+          ) : null}
           {messagesState.messages.map((m) => {
             const cls =
               m.status === "pending"
