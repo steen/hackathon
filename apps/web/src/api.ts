@@ -40,6 +40,12 @@ export function getClient(): Client {
   return cached;
 }
 
+// Cleanup contract: this helper only swaps the cached pointer. It does not
+// call any cleanup hook on the outgoing Client. Tests that install a custom
+// Client with mutable state (custom setToken sink, custom wsCtor, etc.) own
+// resetting that state between cases — passing `null` here will not flush it.
+// The default path (getClient() → createClient(...)) is unaffected because a
+// fresh Client is constructed on the next getClient() call.
 export function setClientForTesting(c: Client | null): void {
   cached = c;
 }
