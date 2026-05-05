@@ -26,6 +26,8 @@ interface UseMessages {
   error: string | null;
   send: (body: string) => Promise<void>;
   retry: (pendingId: string) => Promise<void>;
+  loadOlder: () => Promise<void>;
+  canLoadOlder: boolean;
 }
 
 const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
@@ -61,11 +63,17 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [canLoadOlder, setCanLoadOlder] = useState<boolean>(false);
+  const loadingOlderRef = useRef<boolean>(false);
+  const messagesRef = useRef<MessageView[]>([]);
   const wsRef = useRef<WebSocketClient | null>(null);
   // Tracks original submit time per pending id, so the reconcile path can
   // bound the WS-frame match to a recent window without leaking timestamps
   // into the rendered MessageView.
   const pendingMetaRef = useRef<Map<string, PendingMeta>>(new Map());
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   const userIdRef = useRef<string | null>(currentUserId ?? null);
   userIdRef.current = currentUserId ?? null;
   const channelIdRef = useRef<string | null>(channelId);
@@ -75,6 +83,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     if (channelId === null) {
       setMessages([]);
       setConnection("idle");
+      setCanLoadOlder(false);
       pendingMetaRef.current.clear();
       return;
     }
@@ -82,6 +91,8 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     setMessages([]);
     setError(null);
     setConnection("connecting");
+    setCanLoadOlder(false);
+    loadingOlderRef.current = false;
     pendingMetaRef.current.clear();
 
     let openCount = 0;
@@ -120,6 +131,10 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         // The view wants oldest→newest (composer sits under the newest row),
         // so reverse at the boundary and keep every in-state op unchanged.
         setMessages([...history].reverse());
+        // Heuristic: a full page implies more older history might exist
+        // behind the cursor. A short page implies the channel's start is
+        // already in view, so the "Load older" trigger stays hidden.
+        setCanLoadOlder(history.length >= CATCHUP_LIMIT);
       } catch (err) {
         if (tok.cancelled) return;
         const msg = bannerMessage("Failed to load message history", err);
@@ -287,7 +302,48 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     [submitPending],
   );
 
-  return { messages, connection, error, send, retry };
+  const loadOlder = useCallback(async (): Promise<void> => {
+    const ch = channelIdRef.current;
+    if (ch === null) return;
+    if (loadingOlderRef.current) return;
+    // Read the oldest currently-visible ULID from a ref mirror of state.
+    // The ref avoids re-binding the callback on every messages change while
+    // sidestepping the reducer-no-op trick (which is not reliably
+    // synchronous under React 18's concurrent rendering).
+    let oldestId: string | undefined;
+    for (const m of messagesRef.current) {
+      if (m.status === "pending" || m.status === "failed") continue;
+      oldestId = m.id;
+      break;
+    }
+    if (oldestId === undefined) return;
+    loadingOlderRef.current = true;
+    try {
+      const page = await getClient().listMessages(ch, {
+        before: oldestId,
+        limit: CATCHUP_LIMIT,
+      });
+      // Server returns newest-first; reverse to oldest→newest before
+      // prepending so the prepended block reads chronologically and the
+      // newest of the block sits immediately above the previous-top row.
+      const reversed = [...page].reverse();
+      setMessages((prev) => {
+        if (reversed.length === 0) return prev;
+        const seen = new Set(prev.map((p) => p.id));
+        const fresh = reversed.filter((m) => !seen.has(m.id));
+        if (fresh.length === 0) return prev;
+        return [...fresh, ...prev];
+      });
+      setCanLoadOlder(page.length >= CATCHUP_LIMIT);
+    } catch (err) {
+      const msg = bannerMessage("Failed to load older messages", err);
+      setError(msg);
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, []);
+
+  return { messages, connection, error, send, retry, loadOlder, canLoadOlder };
 }
 
 export { BACKOFF_MS };

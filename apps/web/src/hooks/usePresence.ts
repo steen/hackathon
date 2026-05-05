@@ -42,6 +42,10 @@ interface PresenceListResponse {
 interface PresenceFrameData {
   kind: "join" | "leave";
   user_id: string;
+  // Server-populated username for the affected user (#490). The field is
+  // additive — older servers omit it, in which case we fall back to the
+  // seeded `knownUsernames` directory below.
+  username?: string;
 }
 
 const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
@@ -65,11 +69,12 @@ function sameUsernames(a: Map<string, string>, b: Map<string, string>): boolean 
 }
 
 function sortUsers(users: PresenceUser[]): PresenceUser[] {
-  // Server `presence` WS frames omit username, so a user added from a
-  // live join carries an empty string until the next page load reseeds
-  // from /api/presence. Sort named entries first so the list reads
-  // alphabetically by username, with anonymous (id-only) entries
-  // pushed to the bottom and tie-broken by id.
+  // Server `presence` WS frames now carry username (#490) when the
+  // wiring registers a resolver, but the field is still optional on
+  // the wire. A user added from a live join can therefore carry an
+  // empty string when the server omitted it. Sort named entries first
+  // so the list reads alphabetically by username, with anonymous
+  // (id-only) entries pushed to the bottom and tie-broken by id.
   return [...users].sort((a, b) => {
     const aNamed = a.username.length > 0;
     const bNamed = b.username.length > 0;
@@ -119,8 +124,12 @@ export function usePresence(enabled: boolean): UsePresence {
     // and their leave the same. Username changes (if/when supported) are
     // also not picked up. The bound is therefore "until the tab reloads
     // or the hook unmounts/remounts" rather than a fixed duration.
-    // Periodic reseed is deferred pending #490 (server-side username in
-    // WS frames), which would supersede the directory entirely; see #496.
+    // The directory still backstops frames that arrive without a
+    // username (older servers, or any path where the server-side
+    // resolver returned ""). #490 added the frame-carried username so
+    // first-time-seen users no longer require a reseed for the live
+    // region to read out their name; the staleness window above
+    // therefore only bites users the server failed to resolve.
     const knownUsernames = new Map<string, string>();
     let seq = 0;
 
@@ -185,9 +194,28 @@ export function usePresence(enabled: boolean): UsePresence {
         if (ev.type !== "presence") return;
         const data = ev.data as PresenceFrameData;
         if (typeof data.user_id !== "string" || data.user_id.length === 0) return;
+        // Frame-carried username (#490) wins over the seeded directory
+        // when present — it is authoritative for users who registered
+        // after the hook mounted (the seed never refreshes). Empty string
+        // means the server omitted the field (older server, or no lookup
+        // registered) and we fall back to the directory.
+        const frameUsername =
+          typeof data.username === "string" && data.username.length > 0 ? data.username : "";
+        if (frameUsername.length > 0) {
+          knownUsernames.set(data.user_id, frameUsername);
+        }
         setState((prev) => {
+          // Mirror the frame-derived addition into exposed state so
+          // consumers (Chat sender resolution) see new users picked up
+          // from live joins, not just the initial seed.
+          let usernames = prev.usernames;
+          if (frameUsername.length > 0 && prev.usernames.get(data.user_id) !== frameUsername) {
+            usernames = new Map(prev.usernames);
+            usernames.set(data.user_id, frameUsername);
+          }
           if (data.kind === "join") {
-            const username = knownUsernames.get(data.user_id) ?? "";
+            const username =
+              frameUsername.length > 0 ? frameUsername : (knownUsernames.get(data.user_id) ?? "");
             seq += 1;
             const event: PresenceEvent = {
               kind: "join",
@@ -196,21 +224,26 @@ export function usePresence(enabled: boolean): UsePresence {
               seq,
             };
             if (prev.users.some((u) => u.id === data.user_id)) {
-              return { ...prev, lastEvent: event };
+              return { ...prev, usernames, lastEvent: event };
             }
             return {
               ...prev,
               users: sortUsers([...prev.users, { id: data.user_id, username }]),
+              usernames,
               lastEvent: event,
             };
           }
           if (data.kind === "leave") {
-            // For a leave, prefer the username from the live list (which
-            // may have arrived without username on a same-session join);
-            // fall back to the seeded directory.
+            // For a leave, prefer the frame's username, then the live
+            // list (which may have arrived without username on a
+            // same-session join), then the seeded directory.
             const fromList = prev.users.find((u) => u.id === data.user_id)?.username ?? "";
             const username =
-              fromList.length > 0 ? fromList : (knownUsernames.get(data.user_id) ?? "");
+              frameUsername.length > 0
+                ? frameUsername
+                : fromList.length > 0
+                  ? fromList
+                  : (knownUsernames.get(data.user_id) ?? "");
             seq += 1;
             const event: PresenceEvent = {
               kind: "leave",
@@ -220,9 +253,9 @@ export function usePresence(enabled: boolean): UsePresence {
             };
             const next = prev.users.filter((u) => u.id !== data.user_id);
             if (next.length === prev.users.length) {
-              return { ...prev, lastEvent: event };
+              return { ...prev, usernames, lastEvent: event };
             }
-            return { ...prev, users: next, lastEvent: event };
+            return { ...prev, users: next, usernames, lastEvent: event };
           }
           return prev;
         });

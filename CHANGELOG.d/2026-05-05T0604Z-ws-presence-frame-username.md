@@ -1,0 +1,1 @@
+- WS `presence` frame now carries an optional `username` field (#490). When the server-side resolver hook is registered, live-region announcements read out the username for users who joined after the initial seed; without a hook the field is omitted and the wire shape stays byte-compatible with the pre-#490 contract. Production wiring of the hook is tracked in #586.
