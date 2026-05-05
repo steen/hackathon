@@ -121,9 +121,11 @@ func chatdEnv(xdg string, extra ...string) []string {
 
 // LoginViaFlags drives `chatd login` using --username / --password
 // flags so the test never hits the readSecret prompt path. This is
-// the setup-helper variant — it fails the test on non-zero exit.
-// AC tests that need to assert login behavior itself should invoke
-// chatd directly rather than through this helper.
+// the setup-helper variant — it fails the test on non-zero exit and
+// discards stdout/stderr. AC tests that need to assert login behavior
+// itself (output, exit code, stdin handling) must drive `chatd`
+// through their own per-package subprocess wrapper; clihelp does not
+// expose a generic Run helper.
 func LoginViaFlags(t *testing.T, httpURL, xdg, username, password string) {
 	t.Helper()
 	bin := BuildChatd(t)
