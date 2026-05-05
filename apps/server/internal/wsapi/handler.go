@@ -33,21 +33,20 @@ const (
 	SendRatePerSec = 10.0
 )
 
-// MessageBodyLimit and MessageBodyLimitCloseReason re-export the
-// wsproto canonical values so existing wsapi callers (handler logic,
-// internal tests) keep their import path unchanged. Both definitions
-// live in wsproto so the close-reason text is derived from the byte
-// count at one source of truth — the e2e tests under tests/e2e/ can
-// reference them without tripping Go's internal-package rule.
+// MessageBodyLimit re-exports the wsproto constant so existing wsapi
+// callers (handler logic, internal tests) keep their import path
+// unchanged. The canonical definition lives in wsproto so the e2e
+// tests under tests/e2e/ can reference it without tripping Go's
+// internal-package rule.
 //
 // PRD §9, SEC-8. Mirrors internal/http.MessageBodyLimit; the WS path
 // enforces it independently so wsapi has no HTTP-side dependency.
+//
+// The close-reason text (wsproto.MessageBodyLimitCloseReason) is a
+// package-level var, so it is referenced at the call site rather than
+// re-aliased here — an init-time copy would drift silently if the
+// source were ever rebuilt at runtime.
 const MessageBodyLimit = wsproto.MessageBodyLimit
-
-// MessageBodyLimitCloseReason aliases the wsproto var. It cannot be a
-// const because the wire text is computed via fmt.Sprintf to stay in
-// sync with MessageBodyLimit.
-var MessageBodyLimitCloseReason = wsproto.MessageBodyLimitCloseReason
 
 // Config carries the per-handler dependencies that vary between
 // production wiring and tests. OriginPatterns is forwarded to
@@ -250,7 +249,7 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 			return
 		}
 		if len(data) > MessageBodyLimit {
-			_ = conn.Close(websocket.StatusMessageTooBig, MessageBodyLimitCloseReason)
+			_ = conn.Close(websocket.StatusMessageTooBig, wsproto.MessageBodyLimitCloseReason)
 			return
 		}
 		if !bucket.allow() {
