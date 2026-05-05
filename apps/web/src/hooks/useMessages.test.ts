@@ -169,10 +169,17 @@ describe("useMessages", () => {
       msg("M2", "second"),
       msg("M1", "first"),
     ]);
-    postMessageMock.mockImplementation(async () => {
-      await Promise.resolve();
-      return userMsg("M-server", "draft", "2026-01-01T00:00:01Z");
-    });
+    // Hang the REST POST so the optimistic row stays pending while we
+    // verify position. The REST-side reconcile (#677) swaps the row as
+    // soon as the response resolves, so without a hung mock the
+    // pending- row would never be observable.
+    let resolvePost: ((m: MsgRow) => void) | undefined;
+    postMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow>((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
 
     const { result } = renderHook(() => useMessages("C1", "U1"));
     await waitFor(() => {
@@ -186,8 +193,10 @@ describe("useMessages", () => {
       await Promise.resolve();
     });
 
+    let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      await result.current.send("draft");
+      sendPromise = result.current.send("draft");
+      await Promise.resolve();
     });
 
     const ids = result.current.messages.map((m) => m.id);
@@ -197,6 +206,12 @@ describe("useMessages", () => {
     expect(last?.id.startsWith("pending-")).toBe(true);
     expect(last?.status).toBe("pending");
     expect(last?.body).toBe("draft");
+
+    // Drain the in-flight POST so the test doesn't leak a pending mock.
+    await act(async () => {
+      resolvePost?.(userMsg("M-server", "draft", "2026-01-01T00:00:01Z"));
+      await sendPromise;
+    });
   });
 
   it("does NOT refetch on the initial WS open", async () => {
@@ -325,12 +340,15 @@ describe("useMessages", () => {
     });
   });
 
-  it("send appends an optimistic pending entry immediately, then reconciles when the WS frame arrives", async () => {
+  it("send appends an optimistic pending entry immediately, then reconciles when the REST response resolves", async () => {
     listMessagesMock.mockResolvedValueOnce([]);
-    postMessageMock.mockImplementation(async () => {
-      await Promise.resolve();
-      return userMsg("M-server", "hi there", "2026-01-01T00:00:00.500Z");
-    });
+    let resolvePost: ((m: MsgRow) => void) | undefined;
+    postMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow>((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
 
     const { result } = renderHook(() => useMessages("C1", "U1"));
     await waitFor(() => {
@@ -344,12 +362,14 @@ describe("useMessages", () => {
       expect(result.current.connection).toBe("open");
     });
 
+    let sendPromise: Promise<void> | undefined;
     await act(async () => {
-      await result.current.send("hi there");
+      sendPromise = result.current.send("hi there");
+      await Promise.resolve();
     });
 
-    // Immediately after send, the optimistic entry is present with a
-    // pending- prefix and status "pending".
+    // Mid-flight (REST POST hung): the optimistic entry sits in state
+    // with a pending- prefix and status "pending".
     expect(result.current.messages).toHaveLength(1);
     const pending = result.current.messages[0];
     expect(pending?.id.startsWith("pending-")).toBe(true);
@@ -357,9 +377,19 @@ describe("useMessages", () => {
     expect(pending?.body).toBe("hi there");
     expect(postMessageMock).toHaveBeenCalledWith("C1", "hi there");
 
-    // Server's WS frame echoes the persisted message — same body, same
-    // sender, recent created_at — and the hook swaps the pending entry
-    // for the server row in place (no double-render).
+    // REST resolves with the persisted Message; the hook swaps the
+    // pending row in place using the server response (#677).
+    await act(async () => {
+      resolvePost?.(userMsg("M-server", "hi there", "2026-01-01T00:00:00.500Z"));
+      await sendPromise;
+    });
+
+    await waitFor(() => {
+      expect(result.current.messages.map((m) => m.id)).toEqual(["M-server"]);
+    });
+    expect(result.current.messages[0]?.status).toBeUndefined();
+
+    // The subsequent WS broadcast for the same id is a no-op.
     await act(async () => {
       FakeSocket.instances[0]?.onmessage?.({
         data: JSON.stringify({
@@ -369,11 +399,7 @@ describe("useMessages", () => {
       });
       await Promise.resolve();
     });
-
-    await waitFor(() => {
-      expect(result.current.messages.map((m) => m.id)).toEqual(["M-server"]);
-    });
-    expect(result.current.messages[0]?.status).toBeUndefined();
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M-server"]);
   });
 
   it("send marks the optimistic entry failed when REST POST rejects", async () => {
@@ -512,6 +538,167 @@ describe("useMessages", () => {
       expect(result.current.messages.map((m) => m.id)).toEqual(["M-srv"]);
     });
     expect(result.current.messages).toHaveLength(1);
+  });
+
+  it("reconciles via the REST response immediately, before any WS echo arrives (#677)", async () => {
+    // Demo regression (2026-05-05): the sender's optimistic row stayed
+    // alongside the WS-confirmed row, producing two visible rows. The
+    // hook now folds the pending entry away as soon as postMessage
+    // resolves, using the persisted Message in the response. The later
+    // WS broadcast (same id) is dropped by the existing dedup.
+    listMessagesMock.mockResolvedValueOnce([]);
+    postMessageMock.mockImplementation(async () => {
+      await Promise.resolve();
+      return userMsg("M-server", "hello", "2026-01-01T00:00:01Z");
+    });
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.send("hello");
+    });
+
+    // After REST resolves, exactly one row — the persisted server row —
+    // not the pending entry plus a still-pending optimistic row.
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M-server"]);
+    expect(result.current.messages[0]?.status).toBeUndefined();
+
+    // A subsequent WS broadcast for the same id is a no-op.
+    await act(async () => {
+      FakeSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: userMsg("M-server", "hello", "2026-01-01T00:00:01Z"),
+        }),
+      });
+      await Promise.resolve();
+    });
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M-server"]);
+  });
+
+  it("REST-side reconcile drops the pending row when the WS frame outraced the response (#677)", async () => {
+    // The WS broadcast can land before the REST response in principle.
+    // The pre-existing body+sender+timestamp heuristic in the WS handler
+    // swaps the pending row in place. When the REST response then
+    // arrives carrying the same id, the REST-side reconcile sees the
+    // server row already in state and just drops the leftover pending
+    // entry — never two rows.
+    listMessagesMock.mockResolvedValueOnce([]);
+    let resolvePost: ((m: MsgRow) => void) | undefined;
+    postMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow>((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = result.current.send("racey");
+      await Promise.resolve();
+    });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0]?.status).toBe("pending");
+
+    // WS frame arrives first.
+    await act(async () => {
+      FakeSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: userMsg("M-srv", "racey", "2026-01-01T00:00:00.250Z"),
+        }),
+      });
+      await Promise.resolve();
+    });
+    // Pre-existing heuristic already swapped the pending row.
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M-srv"]);
+
+    // REST response lands afterwards with the same persisted message.
+    await act(async () => {
+      resolvePost?.(userMsg("M-srv", "racey", "2026-01-01T00:00:00.250Z"));
+      await sendPromise;
+    });
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M-srv"]);
+    expect(result.current.messages).toHaveLength(1);
+  });
+
+  it("another user's WS broadcast does not drop the local pending row (#677)", async () => {
+    // Negative case: the receiver path must not be affected. A frame
+    // for someone else's send arriving while our REST is in-flight
+    // leaves our pending row intact and appends the foreign row.
+    listMessagesMock.mockResolvedValueOnce([]);
+    let resolvePost: ((m: MsgRow) => void) | undefined;
+    postMessageMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow>((resolve) => {
+          resolvePost = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useMessages("C1", "U1"));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    await act(async () => {
+      FakeSocket.instances[0]?.open();
+      await Promise.resolve();
+    });
+
+    let sendPromise: Promise<void> | undefined;
+    await act(async () => {
+      sendPromise = result.current.send("mine");
+      await Promise.resolve();
+    });
+    expect(result.current.messages).toHaveLength(1);
+
+    // A different sender's broadcast — different sender_user_id, so the
+    // WS reconcile heuristic skips the pending row entirely.
+    await act(async () => {
+      FakeSocket.instances[0]?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M-other",
+            channel_id: "C1",
+            sender_user_id: "U2",
+            body: "mine",
+            created_at: "2026-01-01T00:00:00.500Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+    expect(result.current.messages.map((m) => m.id)).toHaveLength(2);
+    const pendingRow = result.current.messages.find((m) => m.status === "pending");
+    expect(pendingRow?.body).toBe("mine");
+    expect(pendingRow?.sender_user_id).toBe("U1");
+    const foreignRow = result.current.messages.find((m) => m.id === "M-other");
+    expect(foreignRow?.sender_user_id).toBe("U2");
+
+    // REST resolves; only our pending row is reconciled.
+    await act(async () => {
+      resolvePost?.(userMsg("M-mine", "mine", "2026-01-01T00:00:00.700Z"));
+      await sendPromise;
+    });
+    const ids = result.current.messages.map((m) => m.id).sort();
+    expect(ids).toEqual(["M-mine", "M-other"]);
+    expect(result.current.messages.find((m) => m.status === "pending")).toBeUndefined();
   });
 
   it("a failed catchup leaves the existing list intact", async () => {

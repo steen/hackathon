@@ -1,0 +1,3 @@
+### Fixed
+
+- `apps/web` Chat route no longer renders the sender's own message twice (one italic "Sending…" optimistic row plus the WS-confirmed row). `useMessages` now reconciles the pending row against the persisted `Message` returned by the REST POST itself, swapping the optimistic entry in place as soon as the response resolves. The subsequent WS broadcast carrying the same id is dropped by the existing id-dedup. The pre-existing body+sender+timestamp WS-side heuristic stays as a fallback for the rare case where a WS frame outraces the REST response. Receivers' views are unchanged. (2026-05-05T13:28Z, #677)
