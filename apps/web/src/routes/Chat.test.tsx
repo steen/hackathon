@@ -60,7 +60,7 @@ vi.mock("../api.js", () => ({
 }));
 
 import { AuthProvider } from "../auth/AuthContext.js";
-import { Chat } from "./Chat.js";
+import { Chat, IS_AT_BOTTOM_TOLERANCE_PX } from "./Chat.js";
 
 beforeEach(() => {
   (globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket;
@@ -1024,6 +1024,107 @@ describe("test_web_self_authored_optimistic_message_is_aria_hidden_for_sr", () =
   });
 });
 
+describe("test_web_self_authored_aria_hidden_persists_after_ws_reconcile", () => {
+  it("self-authored row stays aria-hidden=true after the WS echo lands and data-status flips pending→sent", async () => {
+    happyPath();
+    // Force the WS-echo reconcile path (not the REST-response shortcut):
+    // returning undefined from postMessage skips the in-place swap in
+    // submitPending, so the pending row only flips to sent when the
+    // mocked WS frame arrives. This is the path #575 is regression-
+    // covering — a bug minting a new row id on echo would re-introduce
+    // SR readback for self-authored sent rows.
+    postMessageMock.mockResolvedValue(undefined);
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(ta).not.toBeDisabled();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+    expect(sock).toBeDefined();
+    await act(async () => {
+      sock?.open();
+      await Promise.resolve();
+    });
+
+    fireEvent.change(ta, { target: { value: "my own message" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith("C1", "my own message");
+    });
+
+    const list = screen.getByTestId("message-list");
+    const pendingArticle = await waitFor(() => {
+      const a = list.querySelector<HTMLElement>('article[data-status="pending"]');
+      expect(a).not.toBeNull();
+      return a;
+    });
+    // Baseline: pending row is aria-hidden (covered by
+    // test_web_self_authored_optimistic_message_is_aria_hidden_for_sr,
+    // re-asserted here so the post-echo delta is unambiguous).
+    expect(pendingArticle?.getAttribute("aria-hidden")).toBe("true");
+
+    // Server echo for the same draft. happyPath() seeds the user as U1,
+    // so sender_user_id matches self and useMessages folds this onto
+    // the pending row by body+sender (the WS-side reconcile branch).
+    await act(async () => {
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M-echo",
+            channel_id: "C1",
+            sender_user_id: "U1",
+            body: "my own message",
+            created_at: new Date().toISOString(),
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    // After reconcile: status flipped pending→sent (data-status="sent"
+    // is the default branch in Chat.tsx) and the row count is unchanged
+    // (no duplicate appended).
+    await waitFor(() => {
+      const stillPending = list.querySelector('article[data-status="pending"]');
+      expect(stillPending).toBeNull();
+    });
+    const articles = list.querySelectorAll<HTMLElement>('article[data-testid="msg"]');
+    // History (M1, U2) + reconciled self row (M-echo, U1) = 2 articles.
+    expect(articles).toHaveLength(2);
+
+    // The reconciled self-authored row must still be aria-hidden so SR
+    // users do not hear their own outbound message read back when the
+    // server echo lands. Locate by body text to disambiguate from the
+    // history row (also data-status="sent").
+    const selfArticle = Array.from(articles).find(
+      (a) => a.querySelector(".msg__body")?.textContent === "my own message",
+    );
+    expect(selfArticle).toBeDefined();
+    expect(selfArticle?.getAttribute("aria-hidden")).toBe("true");
+    // History row (sender U2) must remain announceable — belt-and-
+    // braces against a regression that flips the predicate the wrong way.
+    const otherArticle = Array.from(articles).find(
+      (a) => a.querySelector(".msg__body")?.textContent === "hello from history",
+    );
+    expect(otherArticle).toBeDefined();
+    expect(otherArticle?.getAttribute("aria-hidden")).toBeNull();
+  });
+});
+
 describe("test_web_other_authored_message_is_not_aria_hidden", () => {
   it("a message whose sender is another user is not aria-hidden — SR users still hear inbound traffic", async () => {
     happyPath();
@@ -1807,12 +1908,14 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
 
     const list = screen.getByTestId("message-list");
     // Boundary case: distance = scrollHeight - (scrollTop + clientHeight)
-    // = 1000 - (592 + 400) = 8. The `<= 8` check in Chat.tsx must treat
+    // = IS_AT_BOTTOM_TOLERANCE_PX. The `<=` check in Chat.tsx must treat
     // this as still-at-bottom and fire the auto-scroll. If a refactor
-    // tightens the comparison to `< 8`, this case regresses.
-    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
-    list.scrollTop = 592;
+    // tightens the comparison to `<`, this case regresses.
+    const scrollHeight = 1000;
+    const clientHeight = 400;
+    Object.defineProperty(list, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: clientHeight, configurable: true });
+    list.scrollTop = scrollHeight - clientHeight - IS_AT_BOTTOM_TOLERANCE_PX;
     fireEvent.scroll(list);
 
     await act(async () => {
@@ -1833,7 +1936,7 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     });
 
     expect(screen.getByText("live arrival at 8px boundary")).toBeInTheDocument();
-    expect(list.scrollTop).toBe(1000);
+    expect(list.scrollTop).toBe(scrollHeight);
   });
 
   it("does not auto-scroll when distance from bottom is 9px (boundary exclusive)", async () => {
@@ -1853,13 +1956,15 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
 
     const list = screen.getByTestId("message-list");
-    // Boundary case: distance = 1000 - (591 + 400) = 9, just past the
-    // 8px tolerance. The user counts as scrolled-up; auto-scroll must
-    // not fire. If a refactor loosens the comparison to `<= 9` or
-    // `<= 16`, this case regresses.
-    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
-    list.scrollTop = 591;
+    // Boundary case: distance = IS_AT_BOTTOM_TOLERANCE_PX + 1, just past
+    // the tolerance. The user counts as scrolled-up; auto-scroll must
+    // not fire. If a refactor loosens the comparison, this case regresses.
+    const scrollHeight = 1000;
+    const clientHeight = 400;
+    const scrollTop = scrollHeight - clientHeight - (IS_AT_BOTTOM_TOLERANCE_PX + 1);
+    Object.defineProperty(list, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: clientHeight, configurable: true });
+    list.scrollTop = scrollTop;
     fireEvent.scroll(list);
 
     await act(async () => {
@@ -1880,7 +1985,7 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     });
 
     expect(screen.getByText("live arrival at 9px past boundary")).toBeInTheDocument();
-    expect(list.scrollTop).toBe(591);
+    expect(list.scrollTop).toBe(scrollTop);
   });
 });
 

@@ -21,7 +21,9 @@ import { describe, it, expect } from "vitest";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..", "..", "..");
 
-const HEADING_RE = /^## \[?0\.1\.0\]?\s*[-—]\s*(\d{4})-(\d{2})-(\d{2})/m;
+const ONE_DAY_MS = 86_400_000;
+
+const HEADING_RE = /^## (?:\[0\.1\.0\]|0\.1\.0)\s*[-—]\s*(\d{4})-(\d{2})-(\d{2})/m;
 
 async function readIfExists(p: string): Promise<string | null> {
   try {
@@ -56,7 +58,7 @@ function parseUtcDate(y: string, m: string, d: string): Date | null {
 // Phase grouping mechanism is the implementer's call: accept any of
 // `### Phase N`, `**Phase N**`, or a bullet starting with `Phase N:`.
 
-const SECTION_HEADING_RE = /\n## \[?0\.1\.0\]?[^\n]*/;
+const SECTION_HEADING_RE = /(?:^|\n)## \[?0\.1\.0\]?[^\n]*/;
 const PHASE_PATTERNS: readonly RegExp[] = [
   /^### Phase \d+\b/m,
   /\*\*Phase \d+\*\*/,
@@ -104,8 +106,7 @@ describe("changelog-entry AC-1: 0.1.0 entry exists with valid release-day date",
 
     const lower = Date.UTC(2026, 4, 1); // 2026-05-01
     const now = new Date();
-    const upper =
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + 24 * 60 * 60 * 1000;
+    const upper = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) + ONE_DAY_MS;
 
     const ts = parsed.getTime();
     expect(ts, `0.1.0 date ${y}-${mo}-${d} is before 2026-05-01`).toBeGreaterThanOrEqual(lower);
@@ -142,6 +143,7 @@ describe("changelog-entry AC-2: 0.1.0 entry references US-1..US-12 grouped by ph
 
     if (body === null || matchedSource === null) {
       expect.fail(`expected a 0.1.0 section in one of: ${sources.join(", ")}`);
+      return;
     }
 
     for (let i = 1; i <= 12; i += 1) {
@@ -193,6 +195,7 @@ describe("changelog-entry AC-3: 0.1.0 entry follows Keep-a-Changelog section con
 
     if (body === null || matchedSource === null) {
       expect.fail(`expected a 0.1.0 section in one of: ${sources.join(", ")}`);
+      return;
     }
 
     for (const section of REQUIRED_KAC_SECTIONS) {
