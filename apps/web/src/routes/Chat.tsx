@@ -359,7 +359,7 @@ export function Chat(): React.JSX.Element {
         <form
           className="composer"
           onSubmit={onSend}
-          aria-describedby={showCounter ? "composer-counter" : undefined}
+          aria-describedby={showCounter && !overCap ? "composer-counter" : undefined}
         >
           <textarea
             ref={composerRef}
@@ -393,7 +393,7 @@ export function Chat(): React.JSX.Element {
                   ? "composer__counter composer__counter--error"
                   : "composer__counter composer__counter--warn"
               }
-              role={overCap ? "alert" : "status"}
+              role="status"
               data-testid="composer-counter"
             >
               {draftBytes} / {MAX_BODY_BYTES} bytes
