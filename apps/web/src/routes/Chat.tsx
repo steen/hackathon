@@ -70,9 +70,28 @@ export function Chat(): React.JSX.Element {
     }
   }, [activeChannel, channelsState.channels]);
 
+  // Auto-scroll only when the user is already pinned to the bottom. If they
+  // scrolled up to read history, a new live message must not yank them back —
+  // mid-thread reading is the common mobile case (#633, parent #156). The
+  // 8px tolerance absorbs subpixel rounding from zoom and high-DPI panels;
+  // tighter values flicker on iOS Safari, looser values miss true near-bottom
+  // positions. `scrollHeight` is read *before* the next paint, so the check
+  // races the layout that adds the new row — but the previous render already
+  // pinned `scrollTop` to the prior bottom whenever the user was there, so
+  // the comparison is correct against the pre-update geometry.
+  const wasAtBottomRef = useRef(true);
+  const onListScroll = useCallback((): void => {
+    const el = listRef.current;
+    if (el === null) return;
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    wasAtBottomRef.current = distanceFromBottom <= 8;
+  }, []);
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el === null) return;
+    if (wasAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messagesState.messages]);
 
   // Mount-time focus delivery: composer when a channel is active, else the
@@ -271,6 +290,7 @@ export function Chat(): React.JSX.Element {
           aria-atomic="false"
           aria-label="conversation"
           tabIndex={-1}
+          onScroll={onListScroll}
         >
           {messagesState.error !== null ? (
             <p role="alert" className="error">

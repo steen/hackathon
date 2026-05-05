@@ -1617,3 +1617,102 @@ describe("test_web_chat_does_not_flash_empty_channel_hint_before_history_resolve
     expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
   });
 });
+
+describe("test_web_message_list_respects_user_scroll_when_live_message_arrives", () => {
+  it("does not auto-scroll to bottom when the user has scrolled up", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+    expect(sock).toBeDefined();
+
+    const list = screen.getByTestId("message-list");
+    // jsdom doesn't lay out, so scrollHeight/clientHeight are 0 and the
+    // is-at-bottom check would always be true. Stub the geometry to model
+    // a viewport that's been scrolled well above the bottom (distance =
+    // scrollHeight - (scrollTop + clientHeight) = 500, far past the 8px
+    // tolerance). scrollTop is writable in jsdom; the others are getter
+    // properties redefined here.
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M2",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live arrival while reading history",
+            created_at: "2026-01-01T00:00:01Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("live arrival while reading history")).toBeInTheDocument();
+    // The auto-scroll effect must not have fired — scrollTop stays at the
+    // user's position, not jumped to scrollHeight (1000).
+    expect(list.scrollTop).toBe(100);
+  });
+
+  it("auto-scrolls to bottom when the user is pinned at the bottom", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+
+    const list = screen.getByTestId("message-list");
+    // Geometry: user is pinned at bottom (distance = 0 ≤ 8px tolerance).
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 600;
+    fireEvent.scroll(list);
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M2",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live arrival at bottom",
+            created_at: "2026-01-01T00:00:01Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("live arrival at bottom")).toBeInTheDocument();
+    // The effect ran and pinned scrollTop to scrollHeight.
+    expect(list.scrollTop).toBe(1000);
+  });
+});
