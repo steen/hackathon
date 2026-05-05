@@ -1,0 +1,1 @@
+- chatd CLI: usage errors from `history`, `send`, `register`, and `watch` now append a `(run 'chatd <subcommand> -h' for full flags)` hint, so a botched invocation points users at the per-subcommand flag list instead of dead-ending. (#604)

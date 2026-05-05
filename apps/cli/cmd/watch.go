@@ -31,7 +31,7 @@ func Watch(ctx context.Context, env *Env, args []string) error {
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: chatd watch <channel>")
+		return fmt.Errorf("usage: chatd watch <channel>\n(run 'chatd watch -h' for full flags)")
 	}
 	channel := rest[0]
 

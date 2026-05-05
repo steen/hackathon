@@ -63,6 +63,10 @@ func TestHandlerDoesNotRebroadcastInboundFrames(t *testing.T) {
 	const sentinel = "server-emitted-sentinel"
 	// Give the server a brief moment to read the forged frame so any
 	// (mistaken) rebroadcast would land before our sentinel.
+	// 50ms is the floor: it lets the server's frame-read loop consume
+	// the forged frame before the sentinel arrives, so a regression
+	// that rebroadcasts raw client frames cannot hide behind ordering
+	// luck. Shorter waits race the sentinel and risk false greens.
 	time.Sleep(50 * time.Millisecond)
 	h.Broadcast("#general", []byte(sentinel))
 
@@ -247,6 +251,9 @@ func waitForSubscribers(h *hub.Hub, channel string, want int, timeout time.Durat
 		if time.Now().After(deadline) {
 			return fmt.Errorf("waiting for %d subscribers on %s: got %d", want, channel, got)
 		}
+		// Poll: hub subscriber registration races the WS handshake, and
+		// there is no synchronous signal exposed for "subscribed" — keep
+		// the wait short so flaky CI still reaches the deadline branch.
 		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -51,10 +51,12 @@ Environment:
   CHAT_SERVER          Base URL fallback when --server is unset.
   CHAT_PASSWORD        Password fallback for register / login.
   CHAT_INVITE_CODE     Invite-code fallback for register.
+  CHATD_CONFIG_DIR     Override the directory holding config.json.
 
 Per-command flags: pass -h or --help to any subcommand
 (e.g. ` + "`chatd send -h`" + `) to see its flag set.
 
-Config: tokens are persisted under $XDG_CONFIG_HOME/chatd/config.json
-(falls back to ~/.config/chatd/config.json).
+Config: tokens are persisted under $CHATD_CONFIG_DIR/config.json, or
+$XDG_CONFIG_HOME/chatd/config.json, or ~/.config/chatd/config.json
+(default).
 `

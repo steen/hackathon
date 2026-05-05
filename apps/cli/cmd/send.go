@@ -19,7 +19,7 @@ func Send(ctx context.Context, env *Env, args []string) error {
 	}
 	rest := fs.Args()
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: chatd send <channel> <message|->")
+		return fmt.Errorf("usage: chatd send <channel> <message|->\n(run 'chatd send -h' for full flags)")
 	}
 	channel := rest[0]
 	body := strings.Join(rest[1:], " ")
