@@ -24,8 +24,13 @@ jobs:
       - name: Build
         run: go build ./...
       - name: Test
-        run: go test ./...
+        timeout-minutes: 10
+        # Explicit -timeout=8m makes the per-package cap visible in the
+        # workflow rather than relying on `go test`'s 10m default. Step
+        # timeout-minutes is a belt-and-braces outer bound. See #651.
+        run: go test -timeout=8m ./...
       - name: Smoke test
+        timeout-minutes: 5
         run: bash scripts/smoke.sh
 
   pnpm:
@@ -40,10 +45,13 @@ jobs:
           node-version: 20
           cache: pnpm
       - name: Install
+        timeout-minutes: 5
         run: pnpm install --frozen-lockfile
       - name: Build
+        timeout-minutes: 5
         run: pnpm -r --if-present build
       - name: Test
+        timeout-minutes: 5
         run: pnpm -r --if-present test
 
   lint:
@@ -57,6 +65,7 @@ jobs:
           cache: true
 
       - name: golangci-lint
+        timeout-minutes: 8
         uses: golangci/golangci-lint-action@v8
         with:
           # Pinned to v2.12.x — the v2 line is the schema this .golangci.yml
@@ -75,6 +84,7 @@ jobs:
           cache: pnpm
 
       - name: Install JS deps
+        timeout-minutes: 5
         run: pnpm install --frozen-lockfile
 
       # Invariant: in-repo TS packages must lint-resolve from source.
@@ -84,14 +94,17 @@ jobs:
       # after the fact, as in PR #84). This check fails the lint job
       # before ESLint runs, naming the offending package.
       - name: Check workspace exports resolve from source
+        timeout-minutes: 2
         run: pnpm run check:workspace-exports
 
       # `pnpm run lint` is `eslint . --max-warnings 0`. Any error- or
       # warning-level violation fails the job.
       - name: ESLint
+        timeout-minutes: 5
         run: pnpm run lint
 
       - name: Prettier check
+        timeout-minutes: 5
         run: pnpm run format:check
 
   e2e:
@@ -115,10 +128,13 @@ jobs:
           cache: pnpm
 
       - name: Install JS deps
+        timeout-minutes: 5
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright browsers
+        timeout-minutes: 5
         run: pnpm --filter web exec playwright install --with-deps chromium webkit
 
       - name: e2e (CLI + web)
+        timeout-minutes: 8
         run: pnpm e2e

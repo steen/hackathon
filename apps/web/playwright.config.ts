@@ -20,8 +20,15 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   fullyParallel: false,
   workers: 1,
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  // Per-test cap: worker-reported median is ~1.6s/test, so 30s gives ~18x
+  // headroom while killing genuinely stuck waits in single-digit seconds
+  // rather than the previous 60s. See #651.
+  timeout: 30_000,
+  expect: { timeout: 5_000 },
+  // Whole-suite cap so a runaway can never hold a CI runner past 5 min;
+  // the step-level `timeout-minutes: 8` in ci.yml is a belt-and-braces
+  // outer bound covering Playwright launch + browser install fallout.
+  globalTimeout: 5 * 60_000,
   reporter: process.env.CI ? [["list"]] : [["list"]],
 
   globalSetup: resolve(e2eDir, "playwright", "globalSetup.ts"),
