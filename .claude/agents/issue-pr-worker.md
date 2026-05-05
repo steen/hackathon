@@ -26,6 +26,12 @@ If anything is unclear, ask one specific question.
 
 ### 0. Worktree preflight — first tool call, before anything else
 
+#### RULE 0 — every Edit / Write path starts with `$WORKTREE/`
+
+**Every `Edit` and `Write` tool call MUST pass a `file_path` that starts with `$WORKTREE/`** (the absolute path of this agent's worktree, captured below). Never pass a parent-rooted path like `/Users/<...>/Hackathon/<file>` — `isolation: "worktree"` does NOT chroot the Edit/Write tools, so a parent-rooted path lands the change in the parent checkout where it races every other agent. This is the most common operational failure in this project (observed 4+ times on 2026-05-05 alone). If you find yourself typing a path that doesn't start with `$WORKTREE/`, STOP — that's the bug.
+
+Capture the paths up front:
+
 ```bash
 WORKTREE="$(pwd)"
 TOPLEVEL="$(rtk git rev-parse --show-toplevel)"
@@ -37,7 +43,23 @@ echo "PARENT=$PARENT"
 
 `$WORKTREE` and `$TOPLEVEL` must be equal AND must contain `/.claude/worktrees/agent-`. `$PARENT` resolves to the parent repo's working tree (a different path) — capture it for the status-check guard below. If `$WORKTREE != $TOPLEVEL` or the path doesn't include `/.claude/worktrees/agent-`, STOP and report — the harness has been observed to leak Edit/Write into the parent.
 
-For every Edit/Write, use the absolute worktree-rooted path (i.e. starting with `$WORKTREE`, e.g. `Write(file_path="$WORKTREE/...")`). Never relative paths.
+For every Edit/Write, use the absolute worktree-rooted path (i.e. starting with `$WORKTREE`, e.g. `Write(file_path="$WORKTREE/...")`). Never relative paths. Never parent-rooted paths.
+
+#### Mid-flight leak self-check
+
+After every batch of edits (e.g. when transitioning between footprint sections, or after every ~5 Edit/Write calls), run the parent-status guard. If the parent has any of your changes, you've leaked — stop and report so the supervisor can run the recovery procedure (`feedback_subagent_path_leakage.md`):
+
+```bash
+PARENT_STATUS="$(rtk git -C "$PARENT" status --short)"
+if [ -n "$PARENT_STATUS" ]; then
+  echo "LEAK DETECTED in parent (\$PARENT=$PARENT):"
+  echo "$PARENT_STATUS"
+  echo "Stopping — supervisor must run recovery."
+  exit 1
+fi
+```
+
+Catching a leak after 3 edits is cheaper than catching one after 30.
 
 Before every commit, both must be true:
 - `rtk git -C "$WORKTREE" status --short` lists every change you intend.
