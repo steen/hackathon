@@ -9,6 +9,7 @@
     "test": "bash scripts/smoke.sh && pnpm -r --if-present run test",
     "lint": "eslint . --max-warnings 0",
     "check:workspace-exports": "node scripts/check-workspace-exports.mjs",
+    "format": "prettier --write .",
     "format:check": "prettier --check .",
     "e2e:cli": "pnpm --filter @hackathon/e2e run e2e:cli",
     "e2e:web": "pnpm --filter web run e2e:web",
