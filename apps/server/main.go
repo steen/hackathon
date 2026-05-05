@@ -43,8 +43,8 @@ func run() error {
 	for _, ch := range checks {
 		log.Printf("config check ok: %s", ch.Name)
 	}
-	if cfg.AllowPublicBind {
-		log.Printf("WARN: %s=1 without a trusted-proxy parser; if you are behind a reverse proxy, IP rate limits will key on the proxy IP (see PRD §9, %s)", config.EnvAllowPublicBind, config.EnvTrustedProxy)
+	if cfg.AllowPublicBind && !cfg.TrustedProxy {
+		log.Printf("WARN: %s=1 with %s unset; if you are behind a reverse proxy, IP rate limits will key on the proxy IP. Set %s=1 to honor X-Forwarded-For (see PRD §9).", config.EnvAllowPublicBind, config.EnvTrustedProxy, config.EnvTrustedProxy)
 	}
 
 	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
