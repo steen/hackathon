@@ -29,47 +29,40 @@
 package presence_e2e_test
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 func TestPresenceAC4_ChatdWatchStaysSilentOnPeerJoinAndLeave(t *testing.T) {
 	srv := startServer(t)
 
-	aliceName := randomCLIUsername(t)
-	alicePass := randomCLIPassword(t)
-	bobName := randomCLIUsername(t)
-	bobPass := randomCLIPassword(t)
+	aliceName := clihelp.RandomUsername(t)
+	alicePass := clihelp.RandomPassword(t)
+	bobName := clihelp.RandomUsername(t)
+	bobPass := clihelp.RandomPassword(t)
 
 	aliceID, aliceToken := register(t, srv, aliceName, alicePass)
 	_, bobToken := register(t, srv, bobName, bobPass)
 
 	xdg := t.TempDir()
-	chatdLoginAlice(t, srv, xdg, aliceName, alicePass)
+	clihelp.LoginViaFlags(t, srv.httpURL, xdg, aliceName, alicePass)
 
 	// Create a per-test channel so other tests' #general traffic and
 	// presence state cannot interfere with the assertions below. The
 	// channel ID is what the WS handler resolves; chatd watch and the
 	// raw WS dial both pass that ID through ?channel=<id>.
-	channelID := createChannel(t, srv, aliceToken, randomCLIChannelName(t))
+	channelID := createChannel(t, srv, aliceToken, clihelp.RandomChannelName(t))
 
-	w := startChatdWatch(t, srv, xdg, channelID)
+	w := clihelp.StartWatch(t, srv.httpURL, xdg, channelID)
 	defer w.Stop()
 
 	// Wait for chatd's WS subscription to land before doing anything
@@ -222,216 +215,4 @@ func dialAuthenticatedWSChannel(t *testing.T, srv *runningServer, bearer, channe
 		t.Fatalf("dial /ws: status=%v want 101", resp)
 	}
 	return c
-}
-
-// chatd subprocess plumbing — kept local to this file so a future
-// change to harness_test.go for an unrelated AC doesn't ripple.
-
-type chatdWatchProc struct {
-	cmd     *exec.Cmd
-	cancel  context.CancelFunc
-	stdoutR io.ReadCloser
-	stderrR io.ReadCloser
-
-	mu       sync.Mutex
-	stdout   strings.Builder
-	stderr   strings.Builder
-	waitOnce sync.Once
-	done     chan struct{}
-	exited   bool
-}
-
-func startChatdWatch(t *testing.T, srv *runningServer, xdg, channelArg string) *chatdWatchProc {
-	t.Helper()
-	bin := buildChatd(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, bin, "--server", srv.httpURL, "watch", channelArg)
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+xdg,
-		"HOME="+xdg,
-		"CHATD_CONFIG_DIR=",
-	)
-
-	stdoutR, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		t.Fatalf("startChatdWatch stdout pipe: %v", err)
-	}
-	stderrR, err := cmd.StderrPipe()
-	if err != nil {
-		cancel()
-		t.Fatalf("startChatdWatch stderr pipe: %v", err)
-	}
-	if err := cmd.Start(); err != nil {
-		cancel()
-		t.Fatalf("startChatdWatch: %v", err)
-	}
-
-	w := &chatdWatchProc{
-		cmd:     cmd,
-		cancel:  cancel,
-		stdoutR: stdoutR,
-		stderrR: stderrR,
-		done:    make(chan struct{}),
-	}
-
-	go w.scan(stdoutR, &w.stdout)
-	go w.scan(stderrR, &w.stderr)
-	go func() {
-		_ = cmd.Wait()
-		w.mu.Lock()
-		w.exited = true
-		w.mu.Unlock()
-		close(w.done)
-	}()
-	return w
-}
-
-func (w *chatdWatchProc) scan(r io.Reader, into *strings.Builder) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 256*1024)
-	for scanner.Scan() {
-		w.mu.Lock()
-		into.WriteString(scanner.Text())
-		into.WriteByte('\n')
-		w.mu.Unlock()
-	}
-}
-
-func (w *chatdWatchProc) StdoutSnapshot() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.stdout.String()
-}
-
-func (w *chatdWatchProc) StderrSnapshot() string {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.stderr.String()
-}
-
-func (w *chatdWatchProc) HasExited() bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.exited
-}
-
-func (w *chatdWatchProc) Stop() {
-	w.waitOnce.Do(func() {
-		w.cancel()
-		select {
-		case <-w.done:
-		case <-time.After(2 * time.Second):
-		}
-	})
-}
-
-// buildChatd builds apps/cli once per test process and caches the
-// path. Mirrors the cli-full-commands harness pattern so failures
-// surface the same way (build output dumped on first call).
-var (
-	chatdBuildOnce sync.Once
-	chatdBuildPath string
-	chatdBuildErr  error
-)
-
-func buildChatd(t *testing.T) string {
-	t.Helper()
-	chatdBuildOnce.Do(func() {
-		root := repoRoot(t)
-		// chatdBuildOnce gates this once per test process, so the
-		// build directory must outlive any single test's t.TempDir.
-		// Use os.TempDir + a random suffix and let the OS reap it.
-		stable := filepath.Join(os.TempDir(), "presence-ac4-chatd-"+randHex(t, 8))
-		if err := os.MkdirAll(stable, 0o755); err != nil {
-			chatdBuildErr = fmt.Errorf("mkdir chatd build dir: %w", err)
-			return
-		}
-		out := filepath.Join(stable, "chatd")
-		build := exec.Command("go", "build", "-o", out, "./apps/cli")
-		build.Dir = root
-		if combined, err := build.CombinedOutput(); err != nil {
-			chatdBuildErr = fmt.Errorf("go build ./apps/cli: %w\n%s", err, combined)
-			return
-		}
-		chatdBuildPath = out
-	})
-	if chatdBuildErr != nil {
-		t.Fatalf("%v", chatdBuildErr)
-	}
-	return chatdBuildPath
-}
-
-func randHex(t *testing.T, n int) string {
-	t.Helper()
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	return fmt.Sprintf("%x", b)
-}
-
-func chatdLoginAlice(t *testing.T, srv *runningServer, xdg, username, password string) {
-	t.Helper()
-	bin := buildChatd(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "--server", srv.httpURL,
-		"login", "--username", username, "--password", password)
-	cmd.Env = append(os.Environ(),
-		"XDG_CONFIG_HOME="+xdg,
-		"HOME="+xdg,
-		"CHATD_CONFIG_DIR=",
-	)
-	var out, errOut bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			t.Fatalf("chatd login: exit=%d stderr=%q", exitErr.ExitCode(), errOut.String())
-		}
-		t.Fatalf("chatd login: %v stderr=%q", err, errOut.String())
-	}
-}
-
-// randomCLIUsername / Password / ChannelName are scoped to this file
-// to avoid colliding with the harness's existing helpers if any
-// future PR adds them there. The character classes match the
-// server-side regexes.
-
-func randomCLIUsername(t *testing.T) string {
-	t.Helper()
-	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	for i := range b {
-		b[i] = alphabet[int(b[i])%len(alphabet)]
-	}
-	return "u" + string(b[:11])
-}
-
-func randomCLIPassword(t *testing.T) string {
-	t.Helper()
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	return fmt.Sprintf("%x", b)
-}
-
-func randomCLIChannelName(t *testing.T) string {
-	t.Helper()
-	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 10)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	for i := range b {
-		b[i] = alphabet[int(b[i])%len(alphabet)]
-	}
-	return "c" + string(b[:9])
 }
