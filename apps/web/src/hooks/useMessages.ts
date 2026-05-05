@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
 import { getClient } from "../api.js";
-import { bannerMessage } from "../lib/userFacingError.js";
+import { bannerMessage, userFacingMessage } from "../lib/userFacingError.js";
 
 export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "reconnecting";
 
@@ -9,6 +9,11 @@ export type MessageStatus = "pending" | "failed";
 
 export interface MessageView extends Message {
   status?: MessageStatus;
+  // Curated reason for a `failed` status, derived via classifyError() from
+  // the underlying postMessage rejection. Absent for pending/sent rows; also
+  // absent for failures classified before this field existed (graceful
+  // fallback to the badge label alone).
+  failureReason?: string;
 }
 
 interface PendingMeta {
@@ -220,11 +225,17 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       // Success path: do nothing here. The reconciliation in the WS
       // "message" handler swaps the pending entry for the persisted one
       // when the server's frame arrives.
-    } catch {
+    } catch (err) {
       // Keep the entry but mark it failed so the user can retry. Channel-
       // level `error` stays reserved for history/socket failures; the per-
-      // entry `failed` status is what surfaces to the user.
-      setMessages((prev) => prev.map((p) => (p.id === id ? { ...p, status: "failed" } : p)));
+      // entry `failed` status is what surfaces to the user. The curated
+      // reason rides on the row so the badge can describe the failure
+      // ("Could not reach the server", "session no longer valid", etc.)
+      // instead of just "Failed to send".
+      const reason = userFacingMessage("Failed to send message", err);
+      setMessages((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, status: "failed", failureReason: reason } : p)),
+      );
     }
   }, []);
 
@@ -263,7 +274,10 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         prev.map((p) => {
           if (p.id !== pendingId) return p;
           found.body = p.body;
-          return { ...p, status: "pending" };
+          // Drop a stale failureReason when the user retries — otherwise a
+          // retry that succeeds (and only the status flips back) would leak
+          // the previous attempt's reason into a sent row.
+          return { ...p, status: "pending", failureReason: undefined };
         }),
       );
       if (found.body === undefined) return;

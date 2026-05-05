@@ -807,6 +807,52 @@ describe("test_web_composer_failed_message_badge_renders_on_post_failure", () =>
   });
 });
 
+describe("test_web_failed_message_badge_uses_role_alert", () => {
+  it("the failed-send badge announces assertively (role=alert), not politely", async () => {
+    const ta = await renderWithChannel();
+    postMessageMock.mockRejectedValue(new Error("boom"));
+
+    fireEvent.change(ta, { target: { value: "doomed" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    // role="alert" implies aria-live="assertive" — the right level for an
+    // actionable, time-sensitive send failure. role="status" (the previous
+    // value) implies polite, which buries the announcement behind whatever
+    // the SR is already speaking.
+    const badge = await screen.findByTestId("msg-failed-badge");
+    expect(badge).toHaveAttribute("role", "alert");
+    expect(badge).not.toHaveAttribute("role", "status");
+  });
+});
+
+describe("test_web_failed_message_badge_surfaces_curated_failure_reason", () => {
+  it("the failed badge points at a sibling reason via aria-describedby", async () => {
+    const ta = await renderWithChannel();
+    // Plain Error → REASON_GENERIC ("Something went wrong.") via classifyError.
+    postMessageMock.mockRejectedValue(new Error("boom"));
+
+    fireEvent.change(ta, { target: { value: "doomed" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    const badge = await screen.findByTestId("msg-failed-badge");
+    const describedBy = badge.getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+    expect(describedBy ?? "").toMatch(/^msg-failed-reason-/);
+
+    const reasonEl = describedBy === null ? null : document.getElementById(describedBy);
+    expect(reasonEl).not.toBeNull();
+    expect(reasonEl?.textContent).toBe("Something went wrong.");
+    // The raw err.message must not leak into the visible reason.
+    expect(reasonEl?.textContent ?? "").not.toContain("boom");
+  });
+});
+
 describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () => {
   it("posts a message and asserts the pending row carries the badge, italic body, and no inline style", async () => {
     happyPath();

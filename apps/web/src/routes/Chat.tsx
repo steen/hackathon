@@ -302,11 +302,25 @@ export function Chat(): React.JSX.Element {
                     <>
                       <span
                         className="msg__badge msg__badge--error"
-                        role="status"
+                        role="alert"
                         data-testid="msg-failed-badge"
+                        aria-describedby={
+                          m.failureReason !== undefined && m.failureReason.length > 0
+                            ? `msg-failed-reason-${m.id}`
+                            : undefined
+                        }
                       >
                         Failed to send
                       </span>
+                      {m.failureReason !== undefined && m.failureReason.length > 0 ? (
+                        <span
+                          id={`msg-failed-reason-${m.id}`}
+                          className="msg__failure-reason"
+                          data-testid="msg-failed-reason"
+                        >
+                          {m.failureReason}
+                        </span>
+                      ) : null}
                       <button
                         type="button"
                         className="msg__retry"
