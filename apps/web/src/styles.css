@@ -371,6 +371,23 @@ button.linklike {
   .messages {
     min-height: 0;
   }
+
+  /* At ≤767px the header would otherwise place the channel title and the
+     stable-width connection badge on one flex row; long channel names push
+     the badge past the viewport and clip the trailing "...connecting" copy.
+     Wrap to two rows: title on row 1 (claims full width), badge below.
+     `gap` keeps a visible separation when wrapped. The badge keeps its
+     `min-width: 7rem` from the desktop rule so the no-layout-shift
+     guarantee from #145 still holds. */
+  .messages__header {
+    flex-wrap: wrap;
+    gap: 0.25rem 0.5rem;
+  }
+
+  .messages__header h2 {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
 }
 
 :focus:not(:focus-visible) {
