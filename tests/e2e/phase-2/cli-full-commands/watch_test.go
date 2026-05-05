@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-5: `chatd watch <channel>` streams new messages to stdout, with
@@ -30,12 +32,12 @@ func TestAC5_Watch_StreamsNewMessages(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channel := randomChannelName(t)
+	channel := clihelp.RandomChannelName(t)
 	channelID := createChannelViaREST(t, srv, token, channel)
 
 	w := startWatch(t, srv, xdg, channelID)
@@ -64,12 +66,12 @@ func TestAC5_Watch_ReconnectsAfterServerRestart(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	token, _ := registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
-	channel := randomChannelName(t)
+	channel := clihelp.RandomChannelName(t)
 	channelID := createChannelViaREST(t, srv, token, channel)
 
 	w := startWatch(t, srv, xdg, channelID)
@@ -126,7 +128,7 @@ type watchProc struct {
 
 func startWatch(t *testing.T, srv *runningServer, xdg, channelID string) *watchProc {
 	t.Helper()
-	bin := chatdBinary(t)
+	bin := clihelp.BuildChatd(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, bin, "--server", srv.url, "watch", channelID)

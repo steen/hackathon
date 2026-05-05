@@ -149,15 +149,6 @@ func serverBinary(t *testing.T) string {
 	return serverBuildPath
 }
 
-// chatdBinary delegates to clihelp.BuildChatd so the chatd binary is
-// built once per test process across this package and the presence
-// package. The local function is kept as a thin wrapper so existing
-// call sites (chatdRun) stay readable.
-func chatdBinary(t *testing.T) string {
-	t.Helper()
-	return clihelp.BuildChatd(t)
-}
-
 // chatdResult bundles stdout/stderr/exit-code of one chatd run so test
 // assertions can keep noise off the call site.
 type chatdResult struct {
@@ -178,7 +169,7 @@ type chatdResult struct {
 // non-zero exit codes are reported via exitCode.
 func chatdRun(t *testing.T, xdgDir string, stdin string, extraEnv []string, args ...string) chatdResult {
 	t.Helper()
-	bin := chatdBinary(t)
+	bin := clihelp.BuildChatd(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -401,32 +392,10 @@ func readConfigFile(t *testing.T, xdgDir string) (*configFile, error) {
 	return &cf, nil
 }
 
-// randomPassword / randomUsername / randomChannelName delegate to
-// clihelp so the alphabet + length contract is defined once across
-// every phase-2 chatd-spawning test package.
-func randomPassword(t *testing.T) string {
-	t.Helper()
-	return clihelp.RandomPassword(t)
-}
-
-func randomUsername(t *testing.T) string {
-	t.Helper()
-	return clihelp.RandomUsername(t)
-}
-
-// chatdLoginViaFlags drives `chatd login` using --username / --password
-// flags so the test never hits the readSecret prompt path. Used by
-// every test except the dedicated AC-2 prompt-path test, so a
-// regression in the prompt handler stays scoped to that one failing
-// test instead of fanning out into every setup.
-func chatdLoginViaFlags(t *testing.T, srv *runningServer, xdg, username, password string) {
-	t.Helper()
-	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
-}
-
 // chatdRegisterViaFlags drives `chatd register` using --password /
 // --invite-code so setup paths skip the prompt path. Mirrors the
-// flag-based setup the in-package cmd tests use.
+// flag-based setup the in-package cmd tests use. Stays here rather
+// than in clihelp because it wraps chatdRun, which is package-local.
 func chatdRegisterViaFlags(t *testing.T, srv *runningServer, xdg, username, password string) {
 	t.Helper()
 	res := chatdRun(t, xdg, "", nil,
@@ -438,11 +407,6 @@ func chatdRegisterViaFlags(t *testing.T, srv *runningServer, xdg, username, pass
 	if res.exitCode != 0 {
 		t.Fatalf("chatdRegisterViaFlags: exit=%d stderr=%q", res.exitCode, res.stderr)
 	}
-}
-
-func randomChannelName(t *testing.T) string {
-	t.Helper()
-	return clihelp.RandomChannelName(t)
 }
 
 // randomSecret returns a hex string sized for the SEC-1 minimum.

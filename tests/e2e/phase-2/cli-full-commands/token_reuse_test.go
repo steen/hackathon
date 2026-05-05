@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-9: All commands authenticate via the stored token and re-use the
@@ -24,8 +26,8 @@ func TestAC9_TokenReuse_AndGoClientDependency(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 
 	// Register via chatd (flag path) so the config file gets written
 	// exactly the way a flag-driven user would create it.

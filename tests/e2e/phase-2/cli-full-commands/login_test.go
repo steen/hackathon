@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-2: `chatd login` prompts for username and password, stores token
@@ -21,8 +23,8 @@ func TestAC2_Login_PersistsTokenViaFlagsUnderXDG(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
 
 	res := chatdRun(t, xdg, "", nil,
@@ -70,8 +72,8 @@ func TestAC2_Login_PromptsForUsernameAndPassword(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
 
 	stdin := username + "\n" + password + "\n"
@@ -88,8 +90,8 @@ func TestAC2_Login_WrongPasswordDoesNotPersist(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
 
 	res := chatdRun(t, xdg, "", nil,

@@ -3,6 +3,8 @@ package cli_full_commands_e2e_test
 import (
 	"strings"
 	"testing"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // AC-10: `--server` flag and `CHAT_SERVER` env var override the
@@ -18,10 +20,10 @@ func TestAC10_ServerOverride_FlagWorks(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
 	res := chatdRun(t, xdg, "", nil, "--server", srv.url, "channels")
 	if res.exitCode != 0 {
@@ -33,10 +35,10 @@ func TestAC10_ServerOverride_EnvVarWorks(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
 	// Strip the --server flag; rely on CHAT_SERVER env.
 	res := chatdRun(t, xdg, "", []string{"CHAT_SERVER=" + srv.url}, "channels")
@@ -52,10 +54,10 @@ func TestAC10_ServerOverride_FlagWinsOverEnv(t *testing.T) {
 	srv := startServer(t)
 	xdg := t.TempDir()
 
-	username := randomUsername(t)
-	password := randomPassword(t)
+	username := clihelp.RandomUsername(t)
+	password := clihelp.RandomPassword(t)
 	_, _ = registerViaREST(t, srv, username, password)
-	chatdLoginViaFlags(t, srv, xdg, username, password)
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 
 	bogus := "http://127.0.0.1:1" // port 1 is reserved → connection refused
 	res := chatdRun(t, xdg, "", []string{"CHAT_SERVER=" + srv.url}, "--server", bogus, "channels")
