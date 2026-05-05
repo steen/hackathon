@@ -23,3 +23,10 @@ func EnsureFile(path string) error {
 	}
 	return nil
 }
+
+// WarnDirMode is a no-op on Windows: NTFS does not have POSIX mode bits,
+// so the "0700 recommended" check from PRD §9 does not apply. The symbol
+// exists so callers do not need a build tag at the call site.
+func WarnDirMode(path string) {
+	_ = path
+}
