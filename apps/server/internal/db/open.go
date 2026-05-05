@@ -29,6 +29,10 @@ func Open(path string) (*sql.DB, error) {
 	if err := EnsureFile(path); err != nil {
 		return nil, fmt.Errorf("db.Open: %w", err)
 	}
+	// PRD §9: parent directory should be 0700. MkdirAll above sets that
+	// mode only when it creates the directory; an existing wider dir is
+	// left as-is. Soft warning, not a hard failure.
+	WarnDirMode(filepath.Dir(path))
 
 	// _pragma options: WAL is friendlier to concurrent readers + a single
 	// writer (the only shape we have); foreign_keys=ON enforces our REFERENCES.
