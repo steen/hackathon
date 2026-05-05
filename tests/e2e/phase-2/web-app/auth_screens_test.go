@@ -112,18 +112,19 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 	t.Run("chat_page_renders_channel_list_message_stream_and_input", func(t *testing.T) {
 		body := mustReadFile(t, filepath.Join(srcDir, "routes", "Chat.tsx"))
 
-		// AC names three pieces. Each maps to a load-bearing piece of the
-		// Chat layout:
-		//   - channel list: the sidebar <h2>Channels</h2> + a <ul> of
-		//     channels driven by useChannels.
-		//   - message stream: the messages region rendered into the
-		//     [data-testid="message-list"] container the vitest suite
-		//     already pins (Chat.test.tsx).
-		//   - input: the composer <input aria-label="message"> below the
-		//     message list.
-		if !strings.Contains(body, "useChannels") {
-			t.Errorf("Chat.tsx: expected useChannels hook (channel list source) to be wired")
-		}
+		// AC names three pieces. Each maps to an anchor in the AC's own
+		// vocabulary rather than an implementation detail (testid string,
+		// CSS class, hook name) that a refactor could rename without
+		// regressing AC-2:
+		//   - channel list: the sidebar <h2>Channels</h2> heading — the AC
+		//     literally names "channel list", and the heading text is the
+		//     observable surface a user sees.
+		//   - message stream: an element with role="log", which is the
+		//     ARIA role for "a chat-style live message region" — the
+		//     vocabulary AC-2 calls "message stream".
+		//   - input: the composer <textarea aria-label="message"> below
+		//     the message list — aria-label is the screen-reader
+		//     vocabulary AC-2 calls "input".
 		if !regexp.MustCompile(`<h2>\s*Channels\s*</h2>`).MatchString(body) {
 			t.Errorf("Chat.tsx: expected a `<h2>Channels</h2>` heading for the channel list")
 		}
@@ -134,8 +135,8 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 		if !strings.Contains(body, "useMessages") {
 			t.Errorf("Chat.tsx: expected useMessages hook (message stream source) to be wired")
 		}
-		if !regexp.MustCompile(`data-testid="message-list"`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `data-testid=\"message-list\"` container for the message stream")
+		if !regexp.MustCompile(`role="log"`).MatchString(body) {
+			t.Errorf("Chat.tsx: expected an element with `role=\"log\"` for the message stream")
 		}
 		if !regexp.MustCompile(`messagesState\.messages\.map`).MatchString(body) {
 			t.Errorf("Chat.tsx: expected `messagesState.messages.map(...)` rendering the message stream")
@@ -150,9 +151,6 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 		// send), so the alternation tolerates both element names.
 		if !regexp.MustCompile(`(?s)<(?:input|textarea)\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(body) {
 			t.Errorf("Chat.tsx: expected a `<input>` or `<textarea>` composer with `aria-label=\"message\"`")
-		}
-		if !regexp.MustCompile(`(?s)<form\b[^<]*?className="composer"`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `<form className=\"composer\">` wrapping the composer")
 		}
 	})
 
