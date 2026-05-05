@@ -6,9 +6,20 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/coder/websocket"
 )
+
+// DefaultWatchReadIdleTimeout bounds how long Watch will wait between
+// inbound frames before treating the connection as stale and tearing it
+// down. The server has no explicit ping/heartbeat in this phase, so the
+// value is purely a stall-detection ceiling — tune it down if your
+// caller expects steadier traffic. coder/websocket has no SetReadDeadline
+// on *Conn; bounding is achieved by passing a per-iteration ctx with
+// timeout to Read, which the library converts into a connection-close
+// via context.AfterFunc on cancellation (see conn.go:setupReadTimeout).
+const DefaultWatchReadIdleTimeout = 75 * time.Second
 
 // EventTypeMessage is the `type` field of the {type:"message",data:<Message>}
 // envelope the server emits for new chat messages. Mirrors
@@ -31,8 +42,15 @@ type Event struct {
 // `?channel=<id>` query parameter on the upgrade — the server uses it
 // to pick which hub topic the connection subscribes to. When empty,
 // the server falls back to its `#general` default.
+//
+// ReadIdleTimeout bounds the time between inbound frames before the
+// connection is treated as stale. Zero means use
+// DefaultWatchReadIdleTimeout; a negative value disables the bound
+// entirely (caller takes full responsibility for stall detection via
+// ctx).
 type WatchOptions struct {
-	ChannelID string
+	ChannelID       string
+	ReadIdleTimeout time.Duration
 }
 
 // Watch opens a WebSocket subscription and returns a receive-only
@@ -66,6 +84,11 @@ func (c *Client) Watch(ctx context.Context, opts WatchOptions) (<-chan Event, er
 	// only buffer attacker-controlled bytes.
 	conn.SetReadLimit(64 * 1024)
 
+	idle := opts.ReadIdleTimeout
+	if idle == 0 {
+		idle = DefaultWatchReadIdleTimeout
+	}
+
 	out := make(chan Event, 16)
 	go func() {
 		defer close(out)
@@ -74,7 +97,7 @@ func (c *Client) Watch(ctx context.Context, opts WatchOptions) (<-chan Event, er
 		// way (caller cancelled ctx or the server already closed).
 		defer func() { _ = conn.CloseNow() }()
 		for {
-			_, data, readErr := conn.Read(ctx)
+			data, readErr := readOne(ctx, conn, idle)
 			if readErr != nil {
 				return
 			}
@@ -87,6 +110,31 @@ func (c *Client) Watch(ctx context.Context, opts WatchOptions) (<-chan Event, er
 		}
 	}()
 	return out, nil
+}
+
+// readOne reads a single frame, optionally bounding the wait by idle.
+// idle <= 0 means no bound (caller ctx is the only deadline). When idle
+// elapses with no frame, the underlying connection is closed by the
+// library and the next call returns net.ErrClosed; readOne surfaces the
+// originating ctx error so the caller can distinguish stall from a
+// caller-driven cancel.
+func readOne(ctx context.Context, conn *websocket.Conn, idle time.Duration) ([]byte, error) {
+	if idle <= 0 {
+		_, data, err := conn.Read(ctx)
+		return data, err
+	}
+	readCtx, cancel := context.WithTimeout(ctx, idle)
+	defer cancel()
+	_, data, err := conn.Read(readCtx)
+	if err != nil {
+		// Caller cancellation takes precedence in the surfaced error;
+		// otherwise the readCtx deadline (idle stall) wins.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, err
+	}
+	return data, nil
 }
 
 // decodeEvent parses one inbound WS frame. When the bytes match the

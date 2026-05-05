@@ -23,7 +23,7 @@ func Register(ctx context.Context, env *Env, args []string) error {
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: chatd register <username>")
+		return fmt.Errorf("usage: chatd register <username>\n(run 'chatd register -h' for full flags)")
 	}
 	username := rest[0]
 

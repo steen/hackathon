@@ -2,11 +2,10 @@
 //
 // Source: specs/plans/phase-1/feature-file-perms-and-headers.md.
 //
-// AC-2 (security_headers_test.go) already pins the four SEC-10 headers on
-// 200/401/404. AC-3 layers failure-mode coverage on top: the contract is
-// that the SecurityHeaders middleware is the outermost wrap, so even when
-// inner middleware (BodyCap, ServeMux's MethodNotAllowed branch, or a
-// handler returning a 4xx envelope) writes the response, the outer wrap
+// AC-3 layers failure-mode coverage on the SEC-10 header set: the contract
+// is that the SecurityHeaders middleware is the outermost wrap, so even
+// when inner middleware (BodyCap, ServeMux's MethodNotAllowed branch, or
+// a handler returning a 4xx envelope) writes the response, the outer wrap
 // has already populated the headers.
 //
 // The error-class matrix below picks one route per status class so we hit

@@ -116,6 +116,107 @@ func TestWatchPropagatesTicketError(t *testing.T) {
 	}
 }
 
+// TestWatchClosesOnReadIdleTimeout stands up a server that accepts the
+// upgrade and then sits silent. With ReadIdleTimeout set tight, Watch
+// must tear down and close its events channel inside that bound — the
+// stale-connection blindness Phase 4 audit (#601) called out.
+func TestWatchClosesOnReadIdleTimeout(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(envelopeJSON(`{"ticket":"t","expires_at":"2099-01-01T00:00:00Z"}`)))
+	})
+	serverDone := make(chan struct{})
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		// Hold the connection open without writing anything until the
+		// client tears it down or the test ends.
+		<-r.Context().Done()
+		close(serverDone)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("u"))
+	// Outer ctx is generous; the idle timeout is what should fire.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	idle := 200 * time.Millisecond
+	events, err := c.Watch(ctx, goclient.WatchOptions{ReadIdleTimeout: idle})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+
+	start := time.Now()
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatalf("expected no frame; got one")
+		}
+		// Channel closed — that is the success path.
+	case <-time.After(2 * time.Second):
+		t.Fatalf("events channel still open after 2s with idle=%s", idle)
+	}
+	elapsed := time.Since(start)
+	if elapsed < idle {
+		t.Fatalf("Watch returned too early: %s < idle=%s", elapsed, idle)
+	}
+	// 1.5s gives the server-side r.Context() time to fire after the
+	// client closes; without it the goroutine would otherwise be visible
+	// as a leak in -race.
+	select {
+	case <-serverDone:
+	case <-time.After(1500 * time.Millisecond):
+	}
+}
+
+// TestWatchClosesOnContextCancel verifies the issue's secondary concern:
+// cancelling the caller-supplied ctx must drive the read goroutine to
+// exit. The coder/websocket library implements ctx-cancel by calling
+// c.close() via context.AfterFunc (conn.go), which unblocks Read.
+func TestWatchClosesOnContextCancel(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(envelopeJSON(`{"ticket":"t","expires_at":"2099-01-01T00:00:00Z"}`)))
+	})
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		<-r.Context().Done()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("u"))
+	ctx, cancel := context.WithCancel(context.Background())
+	// Disable the idle bound so only the ctx cancel can drive the exit.
+	events, err := c.Watch(ctx, goclient.WatchOptions{ReadIdleTimeout: -1})
+	if err != nil {
+		cancel()
+		t.Fatalf("Watch: %v", err)
+	}
+
+	// Give the read goroutine a moment to enter conn.Read.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+
+	select {
+	case _, ok := <-events:
+		if ok {
+			t.Fatalf("expected no frame; got one")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("events channel still open 2s after ctx cancel")
+	}
+}
+
 func TestWatchUnknownFrameSurfacesAsRaw(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {
