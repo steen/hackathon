@@ -106,6 +106,17 @@ func TestAC1_WSFrameOver64KiBClosesConnection(t *testing.T) {
 			t.Fatalf("write at-limit frame: %v", err)
 		}
 
+		// The server emits a typed PRD §10 error frame before the close
+		// when the body-cap path fires. Drain that text frame first; the
+		// close arrives on the next Read.
+		mt, _, err := conn.Read(ctx)
+		if err != nil {
+			t.Fatalf("at-limit frame: expected error frame before close, got err=%v", err)
+		}
+		if mt != websocket.MessageText {
+			t.Fatalf("at-limit frame: pre-close frame type = %v, want MessageText", mt)
+		}
+
 		_, _, err = conn.Read(ctx)
 		if err == nil {
 			t.Fatalf("at-limit frame: Read returned no error; expected close from body-cap path")
