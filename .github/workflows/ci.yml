@@ -131,8 +131,36 @@ jobs:
         timeout-minutes: 5
         run: pnpm install --frozen-lockfile
 
+      # Resolve the pinned Playwright version from apps/web/package.json so
+      # cache keys below invalidate on a bump but stay stable otherwise.
+      # GitHub Actions doesn't run shell inside `key:` values, so we expose
+      # the version via a step output.
+      - name: Resolve Playwright version
+        id: pw
+        run: |
+          version=$(jq -r '.devDependencies."@playwright/test"' apps/web/package.json)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache APT packages (Playwright runtime deps)
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt/archives/*.deb
+            /var/lib/apt/lists
+          key: apt-${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+          restore-keys: |
+            apt-${{ runner.os }}-playwright-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
       - name: Install Playwright browsers
-        timeout-minutes: 5
+        timeout-minutes: 8
         run: pnpm --filter web exec playwright install --with-deps chromium webkit
 
       - name: e2e (CLI + web)
