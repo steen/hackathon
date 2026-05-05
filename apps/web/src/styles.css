@@ -99,7 +99,8 @@ button.linklike {
 .chat-layout {
   display: grid;
   grid-template-columns: 240px 1fr;
-  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
 }
 
 .sidebar {

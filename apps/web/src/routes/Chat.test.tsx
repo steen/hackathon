@@ -1413,6 +1413,135 @@ describe("test_web_chat_load_older_button_visible_only_after_full_page", () => {
   });
 });
 
+describe("test_web_chat_load_older_button_loading_affordance", () => {
+  it("flips disabled + aria-busy + label to 'Loading older messages…' while a fetch is in flight", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const initial = Array.from({ length: 50 }, (_, i) => ({
+      id: `M${String(50 - i).padStart(3, "0")}`,
+      channel_id: "C1",
+      sender_user_id: "U2",
+      body: `body-${String(50 - i)}`,
+      created_at: "2026-01-01T00:00:00Z",
+    }));
+    listMessagesMock.mockResolvedValueOnce(initial);
+    let resolveOlder: ((rows: unknown[]) => void) | undefined;
+    listMessagesMock.mockImplementationOnce(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveOlder = resolve;
+        }),
+    );
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const trigger = await screen.findByTestId("load-older-button");
+    expect(trigger).not.toBeDisabled();
+    expect(trigger).not.toHaveAttribute("aria-busy");
+    expect(trigger.textContent).toBe("Load older messages");
+
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+
+    // Mid-fetch: button is disabled, announces busy, and the label flips.
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute("aria-busy", "true");
+    expect(trigger.textContent).toBe("Loading older messages…");
+
+    // A second click while busy must not fire a second request — the
+    // disabled flip prevents the click; loadingOlderRef belt-and-braces it.
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+    expect(listMessagesMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveOlder?.([
+        {
+          id: "M000",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "older",
+          created_at: "2025-12-31T00:00:00Z",
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    // Settled: short older page → trigger hides entirely.
+    await waitFor(() => {
+      expect(screen.queryByTestId("load-older-button")).toBeNull();
+    });
+  });
+});
+
+describe("test_web_chat_load_older_failure_renders_inline_not_in_channel_banner", () => {
+  it("loadOlder failure renders inline below the trigger and does not mount the channel-level alert", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const initial = Array.from({ length: 50 }, (_, i) => ({
+      id: `M${String(50 - i).padStart(3, "0")}`,
+      channel_id: "C1",
+      sender_user_id: "U2",
+      body: `body-${String(50 - i)}`,
+      created_at: "2026-01-01T00:00:00Z",
+    }));
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockRejectedValueOnce(new Error("network down"));
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const trigger = await screen.findByTestId("load-older-button");
+
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+
+    // Inline error sits next to the trigger, role=alert so SR users hear it.
+    const inline = await screen.findByTestId("load-older-error");
+    expect(inline).toHaveAttribute("role", "alert");
+    expect(inline.textContent).toBe("Failed to load older messages: Something went wrong.");
+    // Raw err.message must not leak into the visible copy.
+    expect(inline.textContent).not.toContain("network down");
+
+    // Channel-level <p role="alert" class="error"> for history/WS faults
+    // must not have mounted — the per-trigger error is on its own slot.
+    // The inline element shares the `error` class but carries the
+    // distinguishing `messages__load-older-error` class.
+    const list = screen.getByTestId("message-list");
+    const channelBanners = Array.from(list.querySelectorAll<HTMLElement>("p.error")).filter(
+      (el) => !el.classList.contains("messages__load-older-error"),
+    );
+    expect(channelBanners).toHaveLength(0);
+
+    // Trigger remains visible (canLoadOlder did not flip) so the user
+    // can retry.
+    expect(screen.getByTestId("load-older-button")).toBeInTheDocument();
+    consoleErrorSpy.mockRestore();
+  });
+});
+
 describe("test_web_chat_empty_messages_in_selected_channel_renders_start_of_channel_hint", () => {
   it("populated channels with an empty messages list renders the 'start of #general' hint", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });
