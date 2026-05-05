@@ -103,4 +103,6 @@ pnpm run lint
 pnpm run format:check
 ```
 
+To fix formatting locally before CI, run `pnpm run format` (writes `prettier --write .` across the tree).
+
 CI runs the same blocks (`.github/workflows/ci.yml`). Working agreements live in [`CLAUDE.md`](CLAUDE.md).

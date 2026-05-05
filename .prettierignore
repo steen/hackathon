@@ -12,7 +12,6 @@ migrations
 .claude
 .rtk
 .agents
-**/*.md
 CHANGELOG.md
 CLAUDE.md
 README.md
