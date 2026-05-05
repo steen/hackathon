@@ -18,9 +18,9 @@
 // CI under budget. If WebKit coverage is needed it should be filed as a
 // follow-up sub-issue under #448.
 
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
 
-const TEST_PASSWORD = "e2e-fake-pw-1234567890";
+import { createChannelViaApi, loginInBrowser, registerViaApi, uniqueUsername } from "./helpers";
 
 // 44px is the iOS HIG / WCAG 2.5.5 minimum tap target. Mirrors the
 // `min-height: 44px` rule the @media (max-width: 767px) block applies to
@@ -29,73 +29,6 @@ const MIN_TAP_TARGET_PX = 44;
 
 const PHONE = { width: 375, height: 667 } as const; // iPhone SE class
 const TABLET = { width: 768, height: 1024 } as const; // iPad class
-
-function uniqueUsername(prefix: string): string {
-  const r = Math.floor(Math.random() * 36 ** 6)
-    .toString(36)
-    .padStart(6, "0");
-  const t = Date.now().toString(36).slice(-6);
-  const head = prefix.slice(0, 18);
-  return `${head}-${t}-${r}`;
-}
-
-function baseUrl(): string {
-  const v = process.env.E2E_BASE_URL;
-  if (!v) throw new Error("E2E_BASE_URL not set — globalSetup did not export it");
-  return v;
-}
-
-function inviteCode(): string {
-  const v = process.env.E2E_INVITE_CODE;
-  if (!v) throw new Error("E2E_INVITE_CODE not set — globalSetup did not export it");
-  return v;
-}
-
-interface Envelope<T> {
-  ok: boolean;
-  data?: T;
-  error?: { code: string; message: string };
-}
-
-interface RegisterResponse {
-  token: string;
-  user: { id: string; username: string };
-}
-
-interface ChannelRow {
-  id: string;
-  name: string;
-}
-
-async function registerViaApi(username: string): Promise<RegisterResponse> {
-  const res = await fetch(baseUrl() + "/api/auth/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password: TEST_PASSWORD, invite_code: inviteCode() }),
-  });
-  const env = (await res.json()) as Envelope<RegisterResponse>;
-  if (!env.ok || !env.data) throw new Error(`register failed: ${JSON.stringify(env)}`);
-  return env.data;
-}
-
-async function createChannelViaApi(token: string, name: string): Promise<ChannelRow> {
-  const res = await fetch(baseUrl() + "/api/channels", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name }),
-  });
-  const env = (await res.json()) as Envelope<ChannelRow>;
-  if (!env.ok || !env.data) throw new Error(`create channel failed: ${JSON.stringify(env)}`);
-  return env.data;
-}
-
-async function loginInBrowser(page: Page, username: string): Promise<void> {
-  await page.goto("/#/login");
-  await page.getByLabel("Username").fill(username);
-  await page.getByLabel("Password").fill(TEST_PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await expect(page.locator(".sidebar strong")).toContainText(username, { timeout: 10_000 });
-}
 
 test.describe("Web mobile/tablet viewport regression (#634)", () => {
   test("AC: phone 375x667 — login → channel → send echoes back; layout single-column", async ({
