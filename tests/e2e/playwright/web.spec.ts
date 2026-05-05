@@ -119,7 +119,10 @@ test.describe("Web e2e (real browser via Playwright)", () => {
     // Assert the transient disconnect via the api-client transition log
     // (recorded by main.tsx into window.__chatd.wsTransitions) instead of
     // polling the DOM badge — the badge can be flipped back to "Connected"
-    // before Playwright re-reads it on a fast reconnect (#110).
+    // before Playwright re-reads it on a fast reconnect (#110). 5 s ceiling
+    // matches PRD §11 ("Web auto-reconnects within 5 s after a server
+    // restart"); a regression in the api-client backoff schedule must trip
+    // this assertion (#666).
     await expect
       .poll(
         () =>
@@ -130,11 +133,10 @@ test.describe("Web e2e (real browser via Playwright)", () => {
               ) ?? [],
             beforeLen,
           ),
-        { timeout: 10_000, message: "expected closed→connecting→open after WS drop" },
+        { timeout: 5_000, message: "expected closed→connecting→open after WS drop" },
       )
       .toEqual(expect.arrayContaining(["closed", "connecting", "open"]));
 
-    await expect(status).toHaveText(/^connected$/i, { timeout: 5_000 });
     expect(serverSides.length).toBeGreaterThan(beforeDrop);
 
     // Post from a different user AFTER reconnect; the renewed subscription
