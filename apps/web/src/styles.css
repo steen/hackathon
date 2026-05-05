@@ -322,6 +322,32 @@ button.linklike {
   font-size: 0.8rem;
 }
 
+/* Phone-width baseline. Above 768px the existing two-column desktop
+   layout is unchanged. The drawer toggle + iOS keyboard handling land
+   in their own follow-ups; this baseline only collapses to a single
+   column, stacks the sidebar above messages, and bumps tap targets to
+   the 44px iOS HIG / WCAG 2.5.5 minimum. */
+@media (max-width: 767px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar li button {
+    min-height: 44px;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .messages {
+    min-height: 0;
+  }
+}
+
 :focus:not(:focus-visible) {
   outline: none;
 }
