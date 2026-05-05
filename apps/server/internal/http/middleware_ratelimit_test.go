@@ -45,8 +45,8 @@ func newRateLimitFixture(t *testing.T, loginCfg, registerCfg ratelimit.IPLimiter
 		Now:         time.Now,
 		UserLimiter: ul,
 	})
-	loginRL := IPRateLimit(ratelimit.NewIPLimiter(loginCfg), 5*time.Minute, h.AuditSink())
-	registerRL := IPRateLimit(ratelimit.NewIPLimiter(registerCfg), 15*time.Minute, h.AuditSink())
+	loginRL := IPRateLimit(ratelimit.NewIPLimiter(loginCfg), 5*time.Minute, h.AuditSink(), false)
+	registerRL := IPRateLimit(ratelimit.NewIPLimiter(registerCfg), 15*time.Minute, h.AuditSink(), false)
 	mux := stdhttp.NewServeMux()
 	mux.Handle("/api/auth/register", registerRL(stdhttp.HandlerFunc(h.Register)))
 	mux.Handle("/api/auth/login", loginRL(stdhttp.HandlerFunc(h.Login)))
@@ -227,5 +227,105 @@ func TestRateLimitRejectionLoggedToAuthEvents(t *testing.T) {
 	}
 	if n < 1 {
 		t.Fatalf("auth_events rate_limited rows: got %d want ≥1", n)
+	}
+}
+
+// PRD §9 / §11: with trustedProxy=true, the per-IP rate-limit bucket
+// keys on the leftmost X-Forwarded-For entry — without this the bucket
+// collapses to a single key behind a reverse proxy. We mount a Burst=2
+// limiter behind one constant proxy RemoteAddr but vary the XFF
+// leftmost across two values, and assert each key gets its own bucket.
+func TestIPRateLimitKeysOnXFFWhenTrustedProxyTrue(t *testing.T) {
+	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+	rl := IPRateLimit(limiter, time.Minute, nil, true)
+	mux := stdhttp.NewServeMux()
+	mux.Handle("/x", rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		w.WriteHeader(stdhttp.StatusOK)
+	})))
+
+	send := func(xff string) int {
+		req := httptest.NewRequest(stdhttp.MethodGet, "/x", nil)
+		req.RemoteAddr = "10.0.0.1:1234" // single proxy
+		req.Header.Set("X-Forwarded-For", xff)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	// Two distinct XFF leftmosts each get a fresh bucket of 1 → both 200.
+	if got := send("1.2.3.4"); got != stdhttp.StatusOK {
+		t.Fatalf("first hit from 1.2.3.4: got %d want 200", got)
+	}
+	if got := send("5.6.7.8"); got != stdhttp.StatusOK {
+		t.Fatalf("first hit from 5.6.7.8: got %d want 200", got)
+	}
+	// Second hit from 1.2.3.4 exhausts that bucket → 429.
+	if got := send("1.2.3.4"); got != stdhttp.StatusTooManyRequests {
+		t.Fatalf("second hit from 1.2.3.4: got %d want 429", got)
+	}
+	// 5.6.7.8 still has its own (now-exhausted) bucket too.
+	if got := send("5.6.7.8"); got != stdhttp.StatusTooManyRequests {
+		t.Fatalf("second hit from 5.6.7.8: got %d want 429", got)
+	}
+}
+
+// Symmetric to the above: with trustedProxy=false the bucket keys on
+// RemoteAddr, so two distinct XFF leftmosts behind one proxy share a
+// single bucket and the second hit 429s. This nails down the safe
+// default — XFF is ignored when the flag is unset.
+func TestIPRateLimitIgnoresXFFWhenTrustedProxyFalse(t *testing.T) {
+	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+	rl := IPRateLimit(limiter, time.Minute, nil, false)
+	mux := stdhttp.NewServeMux()
+	mux.Handle("/x", rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		w.WriteHeader(stdhttp.StatusOK)
+	})))
+
+	send := func(xff string) int {
+		req := httptest.NewRequest(stdhttp.MethodGet, "/x", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		req.Header.Set("X-Forwarded-For", xff)
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	if got := send("1.2.3.4"); got != stdhttp.StatusOK {
+		t.Fatalf("first hit: got %d want 200", got)
+	}
+	// Same proxy RemoteAddr, different XFF → still the same bucket.
+	if got := send("5.6.7.8"); got != stdhttp.StatusTooManyRequests {
+		t.Fatalf("second hit (XFF must be ignored): got %d want 429", got)
+	}
+}
+
+// clientIP is the helper IPRateLimit + the audit log share. Pin its
+// branch table directly: the wiring above exercises the integration,
+// these table-driven cases lock in each branch's intent.
+func TestClientIPHonorsTrustedProxyFlag(t *testing.T) {
+	cases := []struct {
+		name         string
+		remote       string
+		xff          string
+		trustedProxy bool
+		want         string
+	}{
+		{name: "default: trust RemoteAddr", remote: "1.2.3.4:5678", xff: "9.9.9.9", trustedProxy: false, want: "1.2.3.4"},
+		{name: "trusted: leftmost XFF wins", remote: "10.0.0.1:5678", xff: "1.2.3.4, 5.6.7.8", trustedProxy: true, want: "1.2.3.4"},
+		{name: "trusted: garbage XFF falls back", remote: "10.0.0.1:5678", xff: "garbage", trustedProxy: true, want: "10.0.0.1"},
+		{name: "trusted: empty XFF falls back", remote: "10.0.0.1:5678", xff: "", trustedProxy: true, want: "10.0.0.1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(stdhttp.MethodGet, "/x", nil)
+			req.RemoteAddr = tc.remote
+			if tc.xff != "" {
+				req.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			if got := clientIP(req, tc.trustedProxy); got != tc.want {
+				t.Fatalf("clientIP(remote=%q, xff=%q, trusted=%v): got %q, want %q",
+					tc.remote, tc.xff, tc.trustedProxy, got, tc.want)
+			}
+		})
 	}
 }

@@ -24,13 +24,18 @@ const AuthEventRateLimited = "rate_limited"
 // user-safe envelope and (when sink is non-nil) appends one row to the
 // audit log so the rejected attempt is observable per the spec ACs.
 //
+// trustedProxy plumbs through to clientIP so that, when set, the per-IP
+// rate-limit bucket keys on the leftmost X-Forwarded-For entry rather
+// than the proxy's RemoteAddr — without this the bucket collapses to a
+// single key behind a reverse proxy (PRD §9 / §11).
+//
 // The audit sink intentionally takes plain strings rather than the
 // concrete authStore — that keeps the middleware reusable from tests
 // and from main without dragging in a *sql.DB.
-func IPRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration, sink RateLimitAuditSink) func(stdhttp.Handler) stdhttp.Handler {
+func IPRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration, sink RateLimitAuditSink, trustedProxy bool) func(stdhttp.Handler) stdhttp.Handler {
 	return func(next stdhttp.Handler) stdhttp.Handler {
 		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-			ip := clientIP(r)
+			ip := clientIP(r, trustedProxy)
 			if !limiter.Allow(ip) {
 				if sink != nil {
 					sink.LogRateLimited(r, "", ip)
