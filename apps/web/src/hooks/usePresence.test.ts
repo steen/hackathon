@@ -156,12 +156,67 @@ describe("usePresence", () => {
     expect(result.current.users).toEqual([]);
   });
 
-  it("surfaces an error when the seed request fails", async () => {
-    requestMock.mockRejectedValue(new Error("seed boom"));
+  it("keeps the usernames reference stable across join/leave frames", async () => {
+    requestMock.mockResolvedValue({
+      users: [
+        { id: "U1", username: "alice" },
+        { id: "U2", username: "bob" },
+      ],
+    });
     const { result } = renderHook(() => usePresence(true));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
-    expect(result.current.error).toBe("seed boom");
+    const seeded = result.current.usernames;
+    expect(seeded.size).toBe(2);
+
+    const sock = FakeSocket.instances[0];
+    sock?.open();
+
+    await deliver(sock, { type: "presence", data: { kind: "join", user_id: "U3" } });
+    await waitFor(() => {
+      expect(result.current.users.map((u) => u.id)).toContain("U3");
+    });
+    expect(result.current.usernames).toBe(seeded);
+
+    await deliver(sock, { type: "presence", data: { kind: "leave", user_id: "U1" } });
+    await waitFor(() => {
+      expect(result.current.users.map((u) => u.id)).not.toContain("U1");
+    });
+    expect(result.current.usernames).toBe(seeded);
+  });
+
+  it("preserves the usernames reference when a remount seeds an identical empty directory", async () => {
+    requestMock.mockResolvedValue({ users: [] });
+    const { result, rerender } = renderHook(({ on }: { on: boolean }) => usePresence(on), {
+      initialProps: { on: true },
+    });
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    const first = result.current.usernames;
+    expect(first.size).toBe(0);
+
+    rerender({ on: false });
+    await waitFor(() => {
+      expect(result.current.users).toEqual([]);
+    });
+    expect(result.current.usernames).toBe(first);
+  });
+
+  it("surfaces a curated error when the seed request fails without echoing the raw err.message", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const raw = new Error("seed boom internal-trace-xyz");
+    requestMock.mockRejectedValue(raw);
+    const { result } = renderHook(() => usePresence(true));
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    // Curated copy carries the prefix; the raw err.message must not surface.
+    expect(result.current.error).toBe("Failed to load presence: Something went wrong.");
+    expect(result.current.error).not.toContain("seed boom");
+    expect(result.current.error).not.toContain("internal-trace-xyz");
+    expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to load presence", raw);
+    consoleErrorSpy.mockRestore();
   });
 });

@@ -54,6 +54,14 @@ func TestReservedPrefixesCoverWiringMux(t *testing.T) {
 				return true
 			}
 			ident, ok := sel.X.(*ast.Ident)
+			// The wiring contract pins the receiver name "mux": every
+			// register<Feature> function in this package takes its
+			// *http.ServeMux as a parameter named "mux" (see web.go,
+			// auth.go, channels.go, presence.go, ws.go, panicprobe.go).
+			// Matching by identifier name — not by resolved type via
+			// go/types — is intentional and cheap; if a future wiring
+			// file renames the parameter, the convention break is the
+			// signal to either rename it back or broaden this visitor.
 			if !ok || ident.Name != "mux" {
 				return true
 			}
@@ -77,6 +85,18 @@ func TestReservedPrefixesCoverWiringMux(t *testing.T) {
 				return true
 			}
 
+			// A pattern missing the leading "/" (after optional METHOD
+			// verb) would be reported below as a missing-from-reserved
+			// prefix, hiding the real fault — net/http would itself
+			// reject it at registration. Flag it as malformed here so
+			// the failure points at the mux call, not the reserved list.
+			if !patternHasLeadingSlash(pattern) {
+				pos := fset.Position(lit.Pos())
+				t.Errorf("%s:%d: mux pattern %q is malformed: path must start with %q after optional METHOD verb",
+					pos.Filename, pos.Line, pattern, "/")
+				return true
+			}
+
 			prefix := topLevelPrefix(pattern)
 			if prefix == "/" {
 				// The SPA catch-all itself.
@@ -89,6 +109,38 @@ func TestReservedPrefixesCoverWiringMux(t *testing.T) {
 			return true
 		})
 	}
+}
+
+func TestPatternHasLeadingSlash(t *testing.T) {
+	cases := []struct {
+		pattern string
+		want    bool
+	}{
+		{"/", true},
+		{"/ws", true},
+		{"/api/presence", true},
+		{"GET /api/presence", true},
+		{"POST /api/login", true},
+		{"badpattern", false},
+		{"GET badpattern", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := patternHasLeadingSlash(tc.pattern); got != tc.want {
+			t.Errorf("patternHasLeadingSlash(%q) = %v, want %v", tc.pattern, got, tc.want)
+		}
+	}
+}
+
+// patternHasLeadingSlash reports whether a Go 1.22 mux pattern's path
+// part (after stripping an optional "METHOD " verb) begins with "/".
+// Callers of topLevelPrefix rely on this precondition; net/http itself
+// rejects non-slash patterns at mux.Handle registration time.
+func patternHasLeadingSlash(pattern string) bool {
+	if i := strings.Index(pattern, " "); i >= 0 {
+		pattern = pattern[i+1:]
+	}
+	return strings.HasPrefix(pattern, "/")
 }
 
 // topLevelPrefix returns the leading "/segment" of a Go 1.22 mux

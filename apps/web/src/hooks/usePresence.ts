@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { WebSocketClient, type Event as WsEvent } from "@hackathon/api-client";
 import { getClient } from "../api.js";
+import { bannerMessage } from "../lib/userFacingError.js";
 
 export interface PresenceUser {
   id: string;
@@ -49,6 +50,20 @@ interface CancelToken {
   cancelled: boolean;
 }
 
+// Reference-stability helper for the exposed username directory. Consumers
+// (Chat's resolveSender) wrap the map in `useCallback` keyed on its identity;
+// re-creating the map on every seed/reseed when the (id → username) pairs
+// haven't changed would defeat that memoization. Compare entry-by-entry so we
+// can keep the previous reference when content is unchanged. #566.
+function sameUsernames(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    if (b.get(k) !== v) return false;
+  }
+  return true;
+}
+
 function sortUsers(users: PresenceUser[]): PresenceUser[] {
   // Server `presence` WS frames omit username, so a user added from a
   // live join carries an empty string until the next page load reseeds
@@ -75,13 +90,16 @@ export function usePresence(enabled: boolean): UsePresence {
 
   useEffect(() => {
     if (!enabled) {
-      setState({
+      setState((s) => ({
         users: [],
-        usernames: new Map<string, string>(),
+        // Preserve the existing reference when the directory is already
+        // empty so a disabled→disabled remount doesn't churn consumer
+        // memoization. #566.
+        usernames: s.usernames.size === 0 ? s.usernames : new Map<string, string>(),
         loading: false,
         error: null,
         lastEvent: null,
-      });
+      }));
       return;
     }
 
@@ -119,20 +137,33 @@ export function usePresence(enabled: boolean): UsePresence {
         for (const u of seed.users) {
           if (u.username.length > 0) knownUsernames.set(u.id, u.username);
         }
-        setState((s) => ({
-          ...s,
-          users: sortUsers(seed.users),
+        setState((s) => {
           // Snapshot the directory into state so consumers (Chat message
           // rows) re-render once the seed lands. Cloning here keeps the
           // closure-local map mutable without forcing every read through
-          // a setState call.
-          usernames: new Map(knownUsernames),
-          loading: false,
-          error: null,
-        }));
+          // a setState call. Reuse the prior reference when the (id →
+          // username) pairs are unchanged so consumers that depend on
+          // `usernames` identity (e.g. resolveSender's useCallback) skip
+          // re-creation. #566.
+          //
+          // `s.usernames` here is the React state value, which lives above
+          // this effect and survives effect cleanup. A disabled→enabled→
+          // disabled→enabled cycle that re-seeds an identical directory
+          // therefore preserves the reference — a property of state
+          // placement, not a deliberate cache. #570.
+          const next = new Map(knownUsernames);
+          const usernames = sameUsernames(s.usernames, next) ? s.usernames : next;
+          return {
+            ...s,
+            users: sortUsers(seed.users),
+            usernames,
+            loading: false,
+            error: null,
+          };
+        });
       } catch (err) {
         if (tok.cancelled) return;
-        const msg = err instanceof Error ? err.message : "failed to load presence";
+        const msg = bannerMessage("Failed to load presence", err);
         setState((s) => ({ ...s, loading: false, error: msg }));
       }
 
@@ -200,7 +231,7 @@ export function usePresence(enabled: boolean): UsePresence {
         await ws.connect();
       } catch (err) {
         if (tok.cancelled) return;
-        const msg = err instanceof Error ? err.message : "presence websocket failed";
+        const msg = bannerMessage("Presence connection failed", err);
         setState((s) => ({ ...s, error: msg }));
       }
     })();

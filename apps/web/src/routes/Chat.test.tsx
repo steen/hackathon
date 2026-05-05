@@ -151,7 +151,7 @@ describe("test_web_chat_page_renders_history_then_appends_live_messages", () => 
 });
 
 describe("test_web_messages_list_has_aria_live_log_region", () => {
-  it("messages list carries role=log + aria-live=polite so SR users hear new arrivals", async () => {
+  it("messages list carries role=log (implicit aria-live=polite) so SR users hear new arrivals", async () => {
     happyPath();
     render(
       <AuthProvider>
@@ -161,7 +161,10 @@ describe("test_web_messages_list_has_aria_live_log_region", () => {
 
     const list = await screen.findByTestId("message-list");
     expect(list).toHaveAttribute("role", "log");
-    expect(list).toHaveAttribute("aria-live", "polite");
+    // No explicit aria-live: role="log" implies aria-live="polite" per
+    // ARIA 1.2; one source of truth so the role and attribute can't
+    // drift if a future change flips the announcement behavior.
+    expect(list).not.toHaveAttribute("aria-live");
     expect(list).toHaveAttribute("aria-relevant", "additions");
     // aria-atomic="false" so SR announces only the newly added <article>,
     // not the full transcript every time a message arrives.
@@ -536,6 +539,126 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
       expect(live.textContent).toBe("a new user joined");
     });
   });
+
+  it("announces 'a user left' when the leaving id is not in the seeded directory", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => !s.url.includes("channel="))).toBe(true);
+    });
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U-stranger" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("a user left");
+    });
+  });
+});
+
+describe("test_web_presence_live_region_rebroadcasts_join_when_already_present", () => {
+  it("re-fires the live-region announcement on a repeat join for a user already in the list (seq-bumped state forces re-eval)", async () => {
+    happyPath();
+    httpRequestMock.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({
+          users: [
+            { id: "U1", username: "alice" },
+            { id: "U2", username: "bob" },
+          ],
+        });
+      }
+      return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
+    });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const live = await screen.findByTestId("presence-live-region");
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
+    });
+
+    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    expect(presenceSock).toBeDefined();
+
+    // First join for U1, who is already seeded into the list. Without the
+    // `seq` field on PresenceEvent the lastEvent object would be referentially
+    // equal to its predecessor (kind+id+username unchanged) and the
+    // useMemo announcement would not re-evaluate.
+    await act(async () => {
+      presenceSock?.open();
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("alice joined");
+    });
+
+    // Intervening event flips the announcement to a different string so the
+    // next U1 join is observable as a text *change*, not a no-op re-render.
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "leave", user_id: "U2" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("bob left");
+    });
+    expect(screen.getByTestId("presence-user-U1")).toBeInTheDocument();
+
+    // Second join for U1 while still in the list. The `seq` bump produces a
+    // fresh lastEvent object, the useMemo re-fires, and the live region
+    // flips back to "alice joined" — the path the existing tests miss.
+    await act(async () => {
+      presenceSock?.onmessage?.({
+        data: JSON.stringify({
+          type: "presence",
+          data: { kind: "join", user_id: "U1" },
+        }),
+      });
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(live.textContent).toBe("alice joined");
+    });
+  });
 });
 
 async function renderWithChannel(): Promise<HTMLTextAreaElement> {
@@ -684,6 +807,52 @@ describe("test_web_composer_failed_message_badge_renders_on_post_failure", () =>
   });
 });
 
+describe("test_web_failed_message_badge_uses_role_alert", () => {
+  it("the failed-send badge announces assertively (role=alert), not politely", async () => {
+    const ta = await renderWithChannel();
+    postMessageMock.mockRejectedValue(new Error("boom"));
+
+    fireEvent.change(ta, { target: { value: "doomed" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    // role="alert" implies aria-live="assertive" — the right level for an
+    // actionable, time-sensitive send failure. role="status" (the previous
+    // value) implies polite, which buries the announcement behind whatever
+    // the SR is already speaking.
+    const badge = await screen.findByTestId("msg-failed-badge");
+    expect(badge).toHaveAttribute("role", "alert");
+    expect(badge).not.toHaveAttribute("role", "status");
+  });
+});
+
+describe("test_web_failed_message_badge_surfaces_curated_failure_reason", () => {
+  it("the failed badge points at a sibling reason via aria-describedby", async () => {
+    const ta = await renderWithChannel();
+    // Plain Error → REASON_GENERIC ("Something went wrong.") via classifyError.
+    postMessageMock.mockRejectedValue(new Error("boom"));
+
+    fireEvent.change(ta, { target: { value: "doomed" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    const badge = await screen.findByTestId("msg-failed-badge");
+    const describedBy = badge.getAttribute("aria-describedby");
+    expect(describedBy).not.toBeNull();
+    expect(describedBy ?? "").toMatch(/^msg-failed-reason-/);
+
+    const reasonEl = describedBy === null ? null : document.getElementById(describedBy);
+    expect(reasonEl).not.toBeNull();
+    expect(reasonEl?.textContent).toBe("Something went wrong.");
+    // The raw err.message must not leak into the visible reason.
+    expect(reasonEl?.textContent ?? "").not.toContain("boom");
+  });
+});
+
 describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () => {
   it("posts a message and asserts the pending row carries the badge, italic body, and no inline style", async () => {
     happyPath();
@@ -760,6 +929,81 @@ describe("test_web_pending_message_renders_sending_badge_italic_no_opacity", () 
     // promise. The pending entry stays pending — no WS echo is delivered
     // in this test — but the network call no longer dangles.
     for (const r of resolvers) r();
+  });
+});
+
+describe("test_web_self_authored_optimistic_message_is_aria_hidden_for_sr", () => {
+  it("self-authored optimistic-send <article> carries aria-hidden=true while data-status=pending so the polite log region does not read the user's own message back to them", async () => {
+    happyPath();
+    // Hold postMessage open so the optimistic entry stays pending across
+    // the assertions. Resolvers drained after the test prevents leaked
+    // promises.
+    const resolvers: (() => void)[] = [];
+    postMessageMock.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolvers.push(() => {
+            resolve();
+          });
+        }),
+    );
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(ta).not.toBeDisabled();
+    });
+
+    fireEvent.change(ta, { target: { value: "my own message" } });
+    await act(async () => {
+      fireEvent.keyDown(ta, { key: "Enter" });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(postMessageMock).toHaveBeenCalledWith("C1", "my own message");
+    });
+
+    const list = screen.getByTestId("message-list");
+    const pendingArticle = await waitFor(() => {
+      const a = list.querySelector<HTMLElement>('article[data-status="pending"]');
+      expect(a).not.toBeNull();
+      return a;
+    });
+    expect(pendingArticle?.getAttribute("aria-hidden")).toBe("true");
+
+    for (const r of resolvers) r();
+  });
+});
+
+describe("test_web_other_authored_message_is_not_aria_hidden", () => {
+  it("a message whose sender is another user is not aria-hidden — SR users still hear inbound traffic", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    // History fixture in happyPath includes M1 from sender U2 (not self U1).
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const articles = list.querySelectorAll<HTMLElement>('article[data-testid="msg"]');
+    expect(articles.length).toBeGreaterThan(0);
+    for (const a of articles) {
+      // History row is from U2, so no article should be aria-hidden here —
+      // belt-and-suspenders against a future regression that aria-hides
+      // the wrong rows.
+      expect(a.getAttribute("aria-hidden")).toBeNull();
+    }
   });
 });
 
@@ -960,5 +1204,67 @@ describe("test_web_chat_focus_management_mount_no_channels_focuses_heading", () 
       expect(document.activeElement).toBe(heading);
     });
     expect(heading.getAttribute("tabindex")).toBe("-1");
+  });
+});
+
+describe("test_web_chat_focus_management_mount_with_channel_focuses_composer", () => {
+  it("focuses the composer once a channel becomes active (composer branch wins over heading)", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(composer).not.toBeDisabled();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
+  });
+});
+
+describe("test_web_chat_landmarks_have_accessible_names", () => {
+  it("aside, main, and sidebar lists each expose an accessible name", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+
+    // <aside> resolves to role="complementary" with the explicit aria-label.
+    expect(screen.getByRole("complementary", { name: "Chat sidebar" })).toBeInTheDocument();
+
+    // <main> takes the active channel name as its label so SR landmark
+    // navigation announces "general, main" rather than an unnamed region.
+    expect(screen.getByRole("main", { name: "general" })).toBeInTheDocument();
+
+    // Each sidebar <ul> is named so SR landmark / list navigation has a
+    // label distinct from the heading text alone.
+    expect(screen.getByRole("list", { name: "Channels" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Online users" })).toBeInTheDocument();
+  });
+
+  it("main landmark falls back to 'Messages' when no channel is active", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([]);
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    expect(await screen.findByRole("main", { name: "Messages" })).toBeInTheDocument();
   });
 });
