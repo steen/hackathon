@@ -24,6 +24,12 @@ interface UseMessages {
   messages: MessageView[];
   connection: ConnectionState;
   error: string | null;
+  // True from mount (and from each channel switch) until the initial
+  // listMessages fetch settles — success or error. Lets the view gate
+  // empty-state copy that would otherwise flash for the duration of the
+  // fetch (the connection state machine stays at "connecting" through
+  // both history and the WS handshake, so it can't carry this signal).
+  historyLoading: boolean;
   send: (body: string) => Promise<void>;
   retry: (pendingId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
@@ -64,6 +70,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [canLoadOlder, setCanLoadOlder] = useState<boolean>(false);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const loadingOlderRef = useRef<boolean>(false);
   const messagesRef = useRef<MessageView[]>([]);
   const wsRef = useRef<WebSocketClient | null>(null);
@@ -84,6 +91,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       setMessages([]);
       setConnection("idle");
       setCanLoadOlder(false);
+      setHistoryLoading(false);
       pendingMetaRef.current.clear();
       return;
     }
@@ -92,6 +100,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     setError(null);
     setConnection("connecting");
     setCanLoadOlder(false);
+    setHistoryLoading(true);
     loadingOlderRef.current = false;
     pendingMetaRef.current.clear();
 
@@ -140,6 +149,8 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         const msg = bannerMessage("Failed to load message history", err);
         setError(msg);
         reportAppError(msg);
+      } finally {
+        if (!tok.cancelled) setHistoryLoading(false);
       }
 
       if (tok.cancelled) return;
@@ -346,7 +357,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     }
   }, []);
 
-  return { messages, connection, error, send, retry, loadOlder, canLoadOlder };
+  return { messages, connection, error, historyLoading, send, retry, loadOlder, canLoadOlder };
 }
 
 export { BACKOFF_MS };

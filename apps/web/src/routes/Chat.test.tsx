@@ -1435,3 +1435,56 @@ describe("test_web_chat_empty_messages_in_selected_channel_renders_start_of_chan
     expect(screen.queryByTestId("empty-state-no-channels")).toBeNull();
   });
 });
+
+describe("test_web_chat_does_not_flash_empty_channel_hint_before_history_resolves", () => {
+  it("populated channel does not render the start-of-channel hint while listMessages is in flight", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Hold listMessages open until after we have asserted that the hint
+    // is absent. The state at this point — connecting WS, empty messages,
+    // null error — is the exact race the historyLoading gate covers.
+    let resolveHistory: ((rows: unknown[]) => void) | undefined;
+    listMessagesMock.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    // The channel heading reflecting the active channel is the earliest
+    // signal that activeChannel has been set; from this point onward the
+    // race window in Chat.tsx (connecting + empty messages + null error)
+    // is open until listMessages settles.
+    await screen.findByRole("heading", { name: /^general$/ });
+    expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
+
+    await act(async () => {
+      resolveHistory?.([
+        {
+          id: "M1",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "hello",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    // Once history lands with rows, the hint stays absent (messages>0)
+    // and at least one article renders.
+    const articles = await screen.findAllByRole("article");
+    expect(articles.length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
+  });
+});
