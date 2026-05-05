@@ -17,7 +17,6 @@ package web_app_e2e_test
 
 import (
 	"regexp"
-	"strings"
 	"testing"
 )
 
@@ -33,7 +32,6 @@ func TestStripCommentsAndStrings_TemplateInterpolationKeepsCallsVisible(t *testi
 		name             string
 		in               string
 		wantFetchVisible bool
-		wantContains     []string // optional extra substrings the stripped output must retain
 	}{
 		{
 			name:             "interpolation_pop_back_keeps_fetch_call_visible",
@@ -72,7 +70,6 @@ func TestStripCommentsAndStrings_TemplateInterpolationKeepsCallsVisible(t *testi
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := stripCommentsAndStrings(tc.in)
 			if len(got) != len(tc.in) {
@@ -83,12 +80,6 @@ func TestStripCommentsAndStrings_TemplateInterpolationKeepsCallsVisible(t *testi
 			if matched != tc.wantFetchVisible {
 				t.Errorf("fetch( visibility: got %v, want %v\n  in:      %q\n  stripped: %q",
 					matched, tc.wantFetchVisible, tc.in, got)
-			}
-			for _, sub := range tc.wantContains {
-				if !strings.Contains(got, sub) {
-					t.Errorf("stripped output missing %q\n  in:      %q\n  stripped: %q",
-						sub, tc.in, got)
-				}
 			}
 		})
 	}
@@ -111,7 +102,6 @@ func TestStripCommentsAndStrings_NonTemplateInputsStillStripCleanly(t *testing.T
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := stripCommentsAndStrings(tc.in)
 			if len(got) != len(tc.in) {

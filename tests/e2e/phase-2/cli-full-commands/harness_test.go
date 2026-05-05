@@ -32,6 +32,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"hackathon/tests/e2e/internal/clihelp"
 )
 
 // runningServer is the handle startServer returns. URL is the http://
@@ -103,16 +105,14 @@ func startServer(t *testing.T) *runningServer {
 	}
 }
 
-// Build apps/server and apps/cli once per test binary so the per-test
-// startServer / chatdRun calls are subprocess-launches, not compiles.
-// 30s × 10 ACs of cold builds dwarfs the actual assertions.
+// Build apps/server once per test binary so the per-test startServer
+// calls are subprocess-launches, not compiles. The chatd binary is
+// built and cached by clihelp.BuildChatd so the presence package and
+// this one share a single compile per `go test ./...` run.
 var (
 	serverBuildOnce  sync.Once
 	serverBuildPath  string
 	serverBuildErr   error
-	chatdBuildOnce   sync.Once
-	chatdBuildPath   string
-	chatdBuildErr    error
 	binBuildBaseDir  string
 	binBuildBaseOnce sync.Once
 )
@@ -149,23 +149,13 @@ func serverBinary(t *testing.T) string {
 	return serverBuildPath
 }
 
+// chatdBinary delegates to clihelp.BuildChatd so the chatd binary is
+// built once per test process across this package and the presence
+// package. The local function is kept as a thin wrapper so existing
+// call sites (chatdRun) stay readable.
 func chatdBinary(t *testing.T) string {
 	t.Helper()
-	chatdBuildOnce.Do(func() {
-		root := repoRoot(t)
-		out := filepath.Join(binBuildBase(t), "chatd")
-		build := exec.Command("go", "build", "-o", out, "./apps/cli")
-		build.Dir = root
-		if combined, err := build.CombinedOutput(); err != nil {
-			chatdBuildErr = fmt.Errorf("go build ./apps/cli: %w\n%s", err, combined)
-			return
-		}
-		chatdBuildPath = out
-	})
-	if chatdBuildErr != nil {
-		t.Fatalf("%v", chatdBuildErr)
-	}
-	return chatdBuildPath
+	return clihelp.BuildChatd(t)
 }
 
 // chatdResult bundles stdout/stderr/exit-code of one chatd run so test
@@ -411,28 +401,17 @@ func readConfigFile(t *testing.T, xdgDir string) (*configFile, error) {
 	return &cf, nil
 }
 
-// randomPassword returns a 32-char hex password — comfortably above the
-// server's 10-char minimum, generated per-test from crypto/rand.
+// randomPassword / randomUsername / randomChannelName delegate to
+// clihelp so the alphabet + length contract is defined once across
+// every phase-2 chatd-spawning test package.
 func randomPassword(t *testing.T) string {
 	t.Helper()
-	return randomSecret(t, 16)
+	return clihelp.RandomPassword(t)
 }
 
-// randomUsername generates a 12-char ASCII username matching the
-// server's `^[A-Za-z0-9_-]{3,32}$` regex. Per-test so concurrent runs
-// in `go test -count=N` do not collide on the unique-username
-// constraint.
 func randomUsername(t *testing.T) string {
 	t.Helper()
-	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	for i := range b {
-		b[i] = alphabet[int(b[i])%len(alphabet)]
-	}
-	return "u" + string(b[:11])
+	return clihelp.RandomUsername(t)
 }
 
 // chatdLoginViaFlags drives `chatd login` using --username / --password
@@ -442,14 +421,7 @@ func randomUsername(t *testing.T) string {
 // test instead of fanning out into every setup.
 func chatdLoginViaFlags(t *testing.T, srv *runningServer, xdg, username, password string) {
 	t.Helper()
-	res := chatdRun(t, xdg, "", nil,
-		"--server", srv.url, "login",
-		"--username", username,
-		"--password", password,
-	)
-	if res.exitCode != 0 {
-		t.Fatalf("chatdLoginViaFlags: exit=%d stderr=%q", res.exitCode, res.stderr)
-	}
+	clihelp.LoginViaFlags(t, srv.url, xdg, username, password)
 }
 
 // chatdRegisterViaFlags drives `chatd register` using --password /
@@ -468,19 +440,9 @@ func chatdRegisterViaFlags(t *testing.T, srv *runningServer, xdg, username, pass
 	}
 }
 
-// randomChannelName returns a name matching the server's
-// `^[a-z0-9][a-z0-9-]{0,39}$` regex.
 func randomChannelName(t *testing.T) string {
 	t.Helper()
-	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 10)
-	if _, err := rand.Read(b); err != nil {
-		t.Fatalf("rand.Read: %v", err)
-	}
-	for i := range b {
-		b[i] = alphabet[int(b[i])%len(alphabet)]
-	}
-	return "c" + string(b[:9])
+	return clihelp.RandomChannelName(t)
 }
 
 // randomSecret returns a hex string sized for the SEC-1 minimum.
