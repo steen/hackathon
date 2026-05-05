@@ -1,0 +1,1 @@
+- fix(web): the failed-send badge now uses `role="alert"` (assertive) instead of `role="status"`, and surfaces a curated failure reason (via `classifyError`) next to the badge through `aria-describedby` so screen-reader users hear *why* the send failed (#147).
