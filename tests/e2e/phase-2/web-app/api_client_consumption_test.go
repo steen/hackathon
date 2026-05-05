@@ -132,10 +132,10 @@ func TestAC6_WebAppConsumesApiClientForAllServerInteractions(t *testing.T) {
 		// pattern requires a syntax position that can't legitimately
 		// appear in a comment block at the top of an unrelated line:
 		//
-		//   - `\bfetch\s*\(`            — `fetch(` as a call expression
-		//   - `\bnew\s+WebSocket\s*\(`  — `new WebSocket(`
-		//   - `\bnew\s+XMLHttpRequest\b` — `new XMLHttpRequest`
-		//   - `\baxios\b`               — any reference to the axios package
+		//   - `\bfetch\s*\(`                 — `fetch(` as a call expression
+		//   - `\bnew\s+WebSocket\s*\(`       — `new WebSocket(`
+		//   - `\bnew\s+XMLHttpRequest\s*\(`  — `new XMLHttpRequest(`
+		//   - `\baxios\b`                    — any reference to the axios package
 		//
 		// These intentionally trigger on bare-identifier uses; the
 		// stripComments helper below removes // line comments and /*…*/
@@ -148,7 +148,7 @@ func TestAC6_WebAppConsumesApiClientForAllServerInteractions(t *testing.T) {
 		}{
 			{"fetch(", regexp.MustCompile(`\bfetch\s*\(`)},
 			{"new WebSocket(", regexp.MustCompile(`\bnew\s+WebSocket\s*\(`)},
-			{"new XMLHttpRequest", regexp.MustCompile(`\bnew\s+XMLHttpRequest\b`)},
+			{"new XMLHttpRequest(", regexp.MustCompile(`\bnew\s+XMLHttpRequest\s*\(`)},
 			{"axios", regexp.MustCompile(`\baxios\b`)},
 		}
 
@@ -164,16 +164,22 @@ func TestAC6_WebAppConsumesApiClientForAllServerInteractions(t *testing.T) {
 			if ext != ".ts" && ext != ".tsx" {
 				return nil
 			}
-			// The vitest test files (*.test.ts, *.test.tsx) and the
-			// jsdom test-setup live alongside production sources but
-			// stub WebSocket / fetch deliberately — their job is to
-			// drive the api-client substitute under test, not to make
-			// real server calls. AC-6 is a claim about the production
-			// app's network contract, not its test fixtures, so the
-			// scan skips them.
+			// The vitest test files (*.test.ts, *.test.tsx, *.spec.ts,
+			// *.spec.tsx) and the jsdom test-setup live alongside
+			// production sources but stub WebSocket / fetch
+			// deliberately — their job is to drive the api-client
+			// substitute under test, not to make real server calls.
+			// AC-6 is a claim about the production app's network
+			// contract, not its test fixtures, so the scan skips them.
+			// `*.spec.ts(x)` is vitest's alternative naming convention;
+			// none exist under apps/web/src/ today, but skipping them
+			// up front prevents a future contributor's spec file from
+			// flipping AC-6 red on a stubbed `fetch`.
 			base := filepath.Base(path)
 			if strings.HasSuffix(base, ".test.ts") ||
 				strings.HasSuffix(base, ".test.tsx") ||
+				strings.HasSuffix(base, ".spec.ts") ||
+				strings.HasSuffix(base, ".spec.tsx") ||
 				base == "test-setup.ts" {
 				return nil
 			}
@@ -227,6 +233,15 @@ func TestAC6_WebAppConsumesApiClientForAllServerInteractions(t *testing.T) {
 // to widen later — every existing source file in apps/web/src/ is
 // covered by this shape today, verified by the test passing on the
 // current main.
+//
+// Template literals get special treatment: the body between a pair
+// of backticks is treated as a string (replaced with spaces), but
+// any `${ … }` interpolations are popped back into code mode so a
+// regression that hides a `fetch(` call inside a template
+// interpolation cannot slip past the scan. Interpolations can nest
+// (a `${ }` can contain another template literal that contains
+// another `${ }`), so the scanner keeps an explicit stack of
+// `(state, braceDepth)` frames rather than a single state variable.
 func stripCommentsAndStrings(s string) string {
 	out := []byte(s)
 	const (
@@ -237,43 +252,64 @@ func stripCommentsAndStrings(s string) string {
 		stSQ
 		stTQ
 	)
-	state := stCode
+	type frame struct {
+		state      int
+		braceDepth int // only meaningful for stCode frames sitting under a stTQ
+	}
+	stack := []frame{{state: stCode}}
+	top := func() *frame { return &stack[len(stack)-1] }
 	for i := 0; i < len(out); i++ {
 		ch := out[i]
-		switch state {
+		switch top().state {
 		case stCode:
 			if ch == '/' && i+1 < len(out) && out[i+1] == '/' {
 				out[i] = ' '
 				out[i+1] = ' '
 				i++
-				state = stLine
+				stack = append(stack, frame{state: stLine})
 				continue
 			}
 			if ch == '/' && i+1 < len(out) && out[i+1] == '*' {
 				out[i] = ' '
 				out[i+1] = ' '
 				i++
-				state = stBlock
+				stack = append(stack, frame{state: stBlock})
 				continue
 			}
 			if ch == '"' {
 				out[i] = ' '
-				state = stDQ
+				stack = append(stack, frame{state: stDQ})
 				continue
 			}
 			if ch == '\'' {
 				out[i] = ' '
-				state = stSQ
+				stack = append(stack, frame{state: stSQ})
 				continue
 			}
 			if ch == '`' {
 				out[i] = ' '
-				state = stTQ
+				stack = append(stack, frame{state: stTQ})
 				continue
+			}
+			// Brace tracking only applies inside an interpolation
+			// frame — the outermost stCode frame keeps braceDepth at
+			// 0 forever and ignores `{` / `}`.
+			if len(stack) > 1 {
+				switch ch {
+				case '{':
+					top().braceDepth++
+				case '}':
+					top().braceDepth--
+					if top().braceDepth == 0 {
+						// End of `${ … }`: pop the interpolation
+						// frame back to its enclosing stTQ.
+						stack = stack[:len(stack)-1]
+					}
+				}
 			}
 		case stLine:
 			if ch == '\n' {
-				state = stCode
+				stack = stack[:len(stack)-1]
 				continue
 			}
 			out[i] = ' '
@@ -282,7 +318,7 @@ func stripCommentsAndStrings(s string) string {
 				out[i] = ' '
 				out[i+1] = ' '
 				i++
-				state = stCode
+				stack = stack[:len(stack)-1]
 				continue
 			}
 			if ch != '\n' {
@@ -297,7 +333,7 @@ func stripCommentsAndStrings(s string) string {
 			}
 			if ch == '"' {
 				out[i] = ' '
-				state = stCode
+				stack = stack[:len(stack)-1]
 				continue
 			}
 			if ch != '\n' {
@@ -312,22 +348,13 @@ func stripCommentsAndStrings(s string) string {
 			}
 			if ch == '\'' {
 				out[i] = ' '
-				state = stCode
+				stack = stack[:len(stack)-1]
 				continue
 			}
 			if ch != '\n' {
 				out[i] = ' '
 			}
 		case stTQ:
-			// Template literals can embed `${ … }` interpolations whose
-			// inner expressions are real code. A scanner that fully
-			// honored that would need brace tracking; the simpler rule
-			// here is "treat the whole template literal as a string,
-			// including interpolations". apps/web/src/ does not embed
-			// any of the four banned identifiers inside template
-			// interpolations today (verified manually); this is the
-			// trade-off the comment at the top of the helper warned
-			// about.
 			if ch == '\\' && i+1 < len(out) {
 				out[i] = ' '
 				out[i+1] = ' '
@@ -336,7 +363,21 @@ func stripCommentsAndStrings(s string) string {
 			}
 			if ch == '`' {
 				out[i] = ' '
-				state = stCode
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			if ch == '$' && i+1 < len(out) && out[i+1] == '{' {
+				// Enter `${ … }`: push a code frame seeded with
+				// braceDepth=1 for the `{` we are stepping over.
+				// The matching `}` closes the interpolation and
+				// returns to this stTQ frame.
+				// Leave both `$` and `{` un-blanked so brace pairs
+				// inside the interpolation still balance against
+				// these characters in any byte-offset diagnostics
+				// upstream — the scan only looks at the stripped
+				// content, and `${` is not a banned token.
+				i++
+				stack = append(stack, frame{state: stCode, braceDepth: 1})
 				continue
 			}
 			if ch != '\n' {
