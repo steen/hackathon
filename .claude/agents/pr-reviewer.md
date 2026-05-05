@@ -60,6 +60,20 @@ Before any commit, both must hold:
 - `git -C "$WORKTREE" status --short` lists every change you intend.
 - `git -C "$PARENT" status --short` is empty of your changes.
 
+#### Harness path-shape rule for build/test/git/pnpm
+
+Bare `rtk go build`, `rtk go test`, `rtk pnpm install`, and `rtk git merge` have been observed killed mid-call by the harness. The verified-working form is `rtk <tool> -C "$WORKTREE" <args>` (Go has supported `-C` since 1.20; git and pnpm both support it). Use this form for every build/test/git/pnpm invocation:
+
+```bash
+rtk git -C "$WORKTREE" merge origin/main --no-ff -m "..."
+rtk go -C "$WORKTREE" build ./...
+rtk go -C "$WORKTREE" test ./...
+rtk pnpm -C "$WORKTREE" install --frozen-lockfile
+rtk pnpm -C "$WORKTREE" -r --if-present test
+```
+
+If the `-C` form is also denied, set `BLOCKED:` with the exact denial text and stop — do NOT cd-and-retry.
+
 ### 1. Check out the PR's head branch INSIDE your worktree
 
 The harness gave you a fresh worktree off `origin/main`. Refresh ALL refs (so §2's reconcile compares against current main, not whatever main was at worktree-creation time), then switch to the PR's head:
@@ -174,7 +188,7 @@ NEW_ID=$(rtk gh api repos/steen/Hackathon/issues/$NEW --jq .id)
 rtk gh api -X POST repos/steen/Hackathon/issues/<epic>/sub_issues -F sub_issue_id=$NEW_ID
 ```
 
-**If the attach call returns HTTP 422 `Parent cannot have more than 100 sub-issues`**, the parent epic is at GitHub's hard cap. Fall back to **#448** (the "Phase 3.5: Follow-up overflow" epic) as the native parent — `rtk gh api -X POST repos/steen/Hackathon/issues/448/sub_issues -F sub_issue_id=$NEW_ID`. The new issue's body already has the `Parent: #<original>` line; add a `Refs #<original>` comment too so the original epic's textual referrer list still finds it. The supervisor will re-home overflow back to the natural parent if capacity opens up later.
+If the attach returns HTTP 422 `Parent cannot have more than 100 sub-issues`, fall back to **#448** as native parent and add `Refs #<original>` to the body.
 
 Body shape:
 ```
@@ -215,7 +229,7 @@ Never use `--squash` — repo settings forbid it and the call always fails. `--m
 
 Set `MERGED: yes` and surface the URL of the merged PR in §8.
 
-If both methods are rejected by repo settings (`Merge/Rebase merges are not allowed on this repository`), set `MERGED: no` and `BLOCKED: repo disallows all merge methods` — that's a repo-config issue the user must resolve. If the harness itself denies the `gh pr merge` call citing a memory-rule reason, that's a bug in the harness honoring `feedback_no_pr_merging.md` clause 2 — surface in `BLOCKED:` and stop, do not retry.
+If both methods are rejected by repo settings, set `MERGED: no` + `BLOCKED: repo disallows all merge methods`. If the harness denies `gh pr merge` citing `feedback_no_pr_merging.md`, surface in `BLOCKED:` and stop — do not retry.
 
 ### 8. Report back
 

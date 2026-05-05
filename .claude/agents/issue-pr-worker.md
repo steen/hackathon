@@ -67,6 +67,20 @@ Before every commit, both must be true:
 
 If the parent shows leakage: copy your changes into the worktree, `git -C "$PARENT" checkout --` tracked files, `rm` untracked-from-you, re-run the local CI mirror, then push.
 
+#### Harness path-shape rule for build/test/git/pnpm
+
+Bare `rtk go build`, `rtk go test`, `rtk pnpm install`, and `rtk git merge` have been observed killed mid-call by the harness. The verified-working form is `rtk <tool> -C "$WORKTREE" <args>` (Go has supported `-C` since 1.20; git and pnpm both support it). Use this form for every build/test/git/pnpm invocation:
+
+```bash
+rtk git -C "$WORKTREE" merge origin/main --no-ff -m "..."
+rtk go -C "$WORKTREE" build ./...
+rtk go -C "$WORKTREE" test ./...
+rtk pnpm -C "$WORKTREE" install --frozen-lockfile
+rtk pnpm -C "$WORKTREE" -r --if-present test
+```
+
+If the `-C` form is also denied, set `BLOCKED:` (or `SKIPPED:`) with the exact denial text and stop — do NOT cd-and-retry.
+
 ### 1. Read the rules
 
 - `CLAUDE.md` end-to-end. Note per `## <heading>` how it applies (or `n/a — <why>`).
@@ -162,11 +176,7 @@ How:
    ```
    The `-F` (capital F) is required — the API rejects string IDs. Verify the link with `rtk gh api repos/steen/Hackathon/issues/<epic>/sub_issues --jq '.[].number'`.
 
-   **If the attach call returns HTTP 422 `Parent cannot have more than 100 sub-issues`**, the parent epic is at GitHub's hard cap. Fall back to **#448** (the "Phase 3.5: Follow-up overflow" epic) as the native parent:
-   ```bash
-   rtk gh api -X POST repos/steen/Hackathon/issues/448/sub_issues -F sub_issue_id=$NEW_ID
-   ```
-   Add `Refs #<original-parent>` as a comment line in the new issue's body so the original epic's textual referrer list still finds it. The supervisor periodically re-homes overflow back to the natural parent if/when capacity opens up.
+   If the attach returns HTTP 422 `Parent cannot have more than 100 sub-issues`, fall back to **#448** as native parent and add `Refs #<original-parent>` to the body.
 4. Replace the matching `SKIPPED` line in your report with `SKIPPED → filed as #<n>: <reason>`.
 
 When in doubt, file. A redundant issue is cheap; a lost defect rots.

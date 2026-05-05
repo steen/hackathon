@@ -1,6 +1,6 @@
 ---
 name: pr-review-loop
-description: One tick of the PR review loop. Picks open PRs without `in-review`, dispatches a `pr-reviewer` subagent (in its own git worktree) per PR up to a parallel cap, then exits. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup at 270s). Idle ticks emit a banner and exit cleanly.
+description: One tick of the PR review loop. Picks open PRs without `in-review`, dispatches a `pr-reviewer` subagent (in its own git worktree) per PR up to a parallel cap, then exits. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup at 270s).
 ---
 
 # pr-review-loop
@@ -42,20 +42,17 @@ rtk gh pr list --state open --json number,title,headRefName,labels,mergeable,isD
 rtk git worktree list
 ```
 
-Self-review is allowed. The pr-reviewer subagent is a *different agent* from whatever opened the PR (issue-pr-worker, supervisor itself, or human), even when both ran under the same GitHub login. Don't filter by author. The structural protection that matters is "never have two reviewers on the same PR" — enforced by the `in-review` label, not by author identity.
-
 ### 3. Filter eligible PRs
 
 A PR is eligible iff all are true:
 
 1. `state == "open"` and not draft.
-2. **No `in-review` label** — STRICT. The label is a cross-process lock that another reviewer (this loop on a different machine, a human reviewer, a different agent) may hold. **Never strip an `in-review` label you didn't set in this same tick.** If the label is on, assume someone else is reviewing it; skip and move on.
+2. **No `in-review` label** — STRICT. The label is a cross-process lock that another reviewer may hold. **Never strip an `in-review` label you didn't set in this same tick.** If the label is on, assume someone else is reviewing it; skip and move on.
 3. `mergeable` is `"MERGEABLE"` or `"UNKNOWN"` (skip `"CONFLICTING"` until the author resolves).
-4. Not currently the head of any in-flight `pr-reviewer` subagent that THIS supervisor dispatched (cross-reference active task list).
 
-If empty, **idle** — emit `references/idle-banner.md` (small, varied, mood-appropriate) and skip to step 9.
+If empty, **idle** — skip to step 9.
 
-**Stale-label paranoia.** If you suspect a PR's `in-review` label is stale (no activity in >24h, or you can prove a sibling tick set it but crashed), DO NOT strip it autonomously — surface to the user with the PR number and the evidence, and let them decide. Stripping silently risks two reviewers stepping on each other across machines.
+If you suspect a PR's `in-review` label is stale (no activity in >24h, or you can prove a sibling tick set it but crashed), surface to the user with the evidence — do not strip it autonomously.
 
 ### 4. Plan the batch
 
@@ -118,4 +115,3 @@ Without `auto`, exit cleanly.
 ## References
 
 - `references/reviewer-prompt-template.md` — dispatch scaffold.
-- `references/idle-banner.md` — pr-review-loop's own idle banner spec (smaller + different mood register from phase-loop's; see that file).

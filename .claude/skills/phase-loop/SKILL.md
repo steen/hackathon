@@ -1,6 +1,6 @@
 ---
 name: phase-loop
-description: One tick of the Hackathon repo's phased delivery loop. Picks the lowest-phase open epic (parsed from `Phase X[.Y]` in the title), scans its sub-issues for parallel-eligibility against the open-PR conflict surface, and dispatches eligible work to `issue-pr-worker` subagents in isolated worktrees. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup). Idle ticks emit a banner and exit cleanly.
+description: One tick of the Hackathon repo's phased delivery loop. Picks the lowest-phase open epic (parsed from `Phase X[.Y]` in the title), scans its sub-issues for parallel-eligibility against the open-PR conflict surface, and dispatches eligible work to `issue-pr-worker` subagents in isolated worktrees. Modes — `single-tick` (one pass, exit) and `auto` (re-fire on PR-merge events + safety wakeup).
 ---
 
 # phase-loop
@@ -52,8 +52,6 @@ rtk gh issue list --state open --label epic --json number,title --limit 20
 
 **Sort by parsed phase number from the title**, regex `Phase (\d+(?:\.\d+)?)` (anchored near the start). `Phase 2.5` < `Phase 3` < `Phase 10`. Epics with no parseable `Phase X[.Y]` prefix sort last, by issue number ascending. Ties on phase number → lowest issue number wins. Take the first epic in this order (or `phase-override`).
 
-Rationale: phase numbers reflect product ordering (2 → 2.5 → 3), but GitHub issue numbers are creation-order. A late-created `Phase 2.5` epic should still beat an earlier-created `Phase 3` epic when the loop picks work.
-
 Sub-issue priority within the chosen epic is read from the GitHub native sub-issue link in §5; do not parse the epic body's textual `## Sub-issues` section.
 
 ### 4. Filter sub-issues for eligibility
@@ -67,9 +65,9 @@ A sub-issue is eligible iff all are true:
 5. Doesn't need to edit a conflict-magnet file (`apps/server/main.go`, `CHANGELOG.md`) that another open PR also touches.
 6. Branchable off `origin/main` without cherry-picks (no stacking).
 
-If empty, **idle** — emit `references/idle-banner.md` and skip to step 12.
+If empty, **idle** — skip to step 12.
 
-**Stale-label paranoia.** If you suspect a sub-issue's `in-progress` label is stale (no commits or activity in >24h, or you can prove a sibling tick set it but crashed), DO NOT strip it autonomously — surface to the user with the issue number and the evidence, and let them decide. Stripping silently risks two workers stepping on each other across machines.
+If you suspect a sub-issue's `in-progress` label is stale (no activity in >24h, or you can prove a sibling tick set it but crashed), surface to the user with the evidence — do not strip it autonomously.
 
 ### 5. Plan the batch
 
@@ -134,7 +132,7 @@ rtk git -C .claude/worktrees/agent-<id> log --oneline origin/main..HEAD
 
 Then either commit + push the WIP as a draft, leave the worktree in place for user inspection, or (only if explicitly disposable) remove. When in doubt, defer cleanup. Drop the `in-progress` label on the sub-issue so the next tick can retry: `rtk gh issue edit <N> --remove-label in-progress`.
 
-**Stale-issue pushback** (worker reported "AC is already covered, no PR opened"): close the sub-issue per the existing pattern (#206 / #213 closing comments). The close auto-removes the label.
+**Stale-issue pushback** (worker reported "AC is already covered, no PR opened"): close the sub-issue with a brief comment explaining the closure. The close auto-removes the label.
 
 After any merge: `rtk git fetch --all --prune` so local tracking refs match.
 
@@ -151,10 +149,8 @@ Without `auto`, exit cleanly.
 - Never spawn two subagents with overlapping footprints.
 - Never pick the same sub-issue twice across simultaneous ticks.
 - Never fall through to the next epic until the current has zero eligible sub-issues AND zero in-flight PRs.
-- Never strip the `in-progress` label on a successful dispatch — a separate agent owns the post-PR label lifecycle. The only exceptions are (a) when claim+dispatch itself fails before the worker starts (step 7), and (b) when reclaiming a stalled worker after WIP recovery (step 11). On a sub-issue close, the label is auto-removed by GitHub; do not pre-empt it.
 
 ## References
 
 - `references/worker-prompt-template.md` — dispatch scaffold.
 - `references/eligibility-examples.md` — conflict-surface examples.
-- `references/idle-banner.md` — the idle banner spec.
