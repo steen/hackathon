@@ -344,6 +344,18 @@ button.linklike {
     padding: 0.6rem 0.75rem;
   }
 
+  .sidebar header button {
+    min-height: 44px;
+  }
+
+  .messages__load-older {
+    min-height: 44px;
+  }
+
+  .msg__retry {
+    min-height: 44px;
+  }
+
   .composer textarea {
     min-height: 44px;
   }
