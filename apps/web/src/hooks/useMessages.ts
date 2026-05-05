@@ -266,10 +266,30 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
   const submitPending = useCallback(async (id: string, ch: string, body: string): Promise<void> => {
     pendingMetaRef.current.set(id, { submittedAt: Date.now() });
     try {
-      await getClient().postMessage(ch, body);
-      // Success path: do nothing here. The reconciliation in the WS
-      // "message" handler swaps the pending entry for the persisted one
-      // when the server's frame arrives.
+      const persisted = (await getClient().postMessage(ch, body)) as Message | undefined;
+      // Reconcile from the REST response, not the WS echo. The POST
+      // returns the persisted Message (with its server ULID and
+      // created_at), so we can swap the pending row in place
+      // immediately. The subsequent WS broadcast carries the same id
+      // and is dropped by the `prev.some((p) => p.id === m.id)`
+      // early-return in the "message" handler — which kept the
+      // sender's own optimistic row from reconciling and produced two
+      // visible rows in the 2026-05-05 demo (#677). The WS-side body+
+      // sender+timestamp heuristic stays as a fallback for the rare
+      // case where a WS frame outruns the REST response.
+      //
+      // `persisted` may be undefined under test fixtures that mock
+      // `postMessage` returning void; treat that as "no useful body,
+      // leave the optimistic row to reconcile via the WS echo".
+      if (persisted !== undefined) {
+        pendingMetaRef.current.delete(id);
+        setMessages((prev) => {
+          if (prev.some((p) => p.id === persisted.id)) {
+            return prev.filter((p) => p.id !== id);
+          }
+          return prev.map((p) => (p.id === id ? persisted : p));
+        });
+      }
     } catch (err) {
       // Keep the entry but mark it failed so the user can retry. Channel-
       // level `error` stays reserved for history/socket failures; the per-
