@@ -104,21 +104,36 @@ func (s *authStore) IncrementTokenVersion(ctx context.Context, userID string) (i
 // without importing the concrete store. Errors are swallowed for the
 // same reason LogAuthEvent's callers ignore its error: an audit-log
 // failure must not turn a 429 into a 500.
+//
+// The username is left empty here: the rate-limit middleware fires
+// before the request body is decoded, so no attempted username is in
+// scope. Per-username rate-limit rejections from the auth handlers
+// pass through LogAuthEvent directly with the username they have.
 func (s *authStore) LogRateLimited(r *stdhttp.Request, userID, ip string) {
-	_ = s.LogAuthEvent(r.Context(), userID, AuthEventRateLimited, ip, r.UserAgent())
+	_ = s.LogAuthEvent(r.Context(), userID, "", AuthEventRateLimited, ip, r.UserAgent())
 }
 
 // LogAuthEvent appends one auth_events row. Per the migration's column
-// set: (user_id NULLABLE, kind, ip, ua, at). userID may be empty for a
-// failed login against an unknown username.
-func (s *authStore) LogAuthEvent(ctx context.Context, userID, kind, ip, ua string) error {
-	var u interface{}
-	if userID != "" {
-		u = userID
-	}
+// set: (user_id NULLABLE, username NULLABLE, kind, ip, ua, at). Either
+// userID or username (or both) may be empty — empty strings are stored
+// as SQL NULL so queries can distinguish "no value" from "empty
+// string". A failed login against an unknown username carries
+// username != "" with userID == "", which is the whole point of the
+// 0004 migration.
+func (s *authStore) LogAuthEvent(ctx context.Context, userID, username, kind, ip, ua string) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO auth_events(user_id, kind, ip, ua, at) VALUES (?, ?, ?, ?, ?)`,
-		u, kind, ip, ua, time.Now().UTC(),
+		`INSERT INTO auth_events(user_id, username, kind, ip, ua, at) VALUES (?, ?, ?, ?, ?, ?)`,
+		nullableText(userID), nullableText(username), kind, ip, ua, time.Now().UTC(),
 	)
 	return err
+}
+
+// nullableText returns nil for an empty string so the driver writes
+// SQL NULL rather than an empty TEXT value. Keeps NULL-checks in
+// audit queries meaningful.
+func nullableText(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }

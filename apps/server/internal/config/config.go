@@ -22,11 +22,23 @@ const (
 	// var. Anchored as a constant so the startup warn in main.go and any
 	// future parser implementation refer to the same name.
 	EnvTrustedProxy = "CHAT_TRUSTED_PROXY"
+	EnvLogLevel     = "CHAT_LOG_LEVEL"
 
 	DefaultListenAddr = "127.0.0.1:8080"
+	DefaultLogLevel   = "info"
 
 	MinJWTSecretBytes = 32
 )
+
+// validLogLevels is the closed set PRD §9 lists for CHAT_LOG_LEVEL.
+// Anything outside this set falls back to DefaultLogLevel at Load time
+// (no error — startup must not fail on a typo in a soft setting).
+var validLogLevels = map[string]struct{}{
+	"debug": {},
+	"info":  {},
+	"warn":  {},
+	"error": {},
+}
 
 // jwtSecretDenylist holds the obvious dev defaults the PRD §9 starter set
 // forbids. Stored lower-cased; comparison is case-insensitive so
@@ -65,6 +77,16 @@ type Config struct {
 	// other value (unset, "0", "true", "yes") leaves the safe default
 	// in place: ignore X-Forwarded-For and trust only RemoteAddr.
 	TrustedProxy bool
+	// LogLevel is the parsed CHAT_LOG_LEVEL (PRD §9): one of
+	// "debug" | "info" | "warn" | "error". Load() forces unrecognized
+	// values back to DefaultLogLevel so the field is always one of
+	// the four canonical strings.
+	LogLevel string
+	// LogLevelInvalid records the raw env value when Load() rejected it
+	// and fell back to DefaultLogLevel. Empty when the env var was unset
+	// or already valid. Bootstrap reads this to emit a single warn line
+	// naming the bad value before slog.Default is replaced.
+	LogLevelInvalid string
 }
 
 // Load reads configuration from the environment. It applies defaults
@@ -74,13 +96,33 @@ func Load() Config {
 	if addr == "" {
 		addr = DefaultListenAddr
 	}
+	level, invalid := parseLogLevel(os.Getenv(EnvLogLevel))
 	return Config{
 		JWTSecret:       os.Getenv(EnvJWTSecret),
 		InviteCode:      os.Getenv(EnvInviteCode),
 		ListenAddr:      addr,
 		AllowPublicBind: os.Getenv(EnvAllowPublicBind) == "1",
 		TrustedProxy:    os.Getenv(EnvTrustedProxy) == "1",
+		LogLevel:        level,
+		LogLevelInvalid: invalid,
 	}
+}
+
+// parseLogLevel normalizes the raw CHAT_LOG_LEVEL env value. Empty or
+// whitespace-only input returns DefaultLogLevel with no invalid mark.
+// Unrecognized values (e.g. "verbose", "trace") return DefaultLogLevel
+// AND surface the raw input via the second return so bootstrap can warn
+// once. Comparison is case-insensitive; canonical lower-case is returned.
+func parseLogLevel(raw string) (level, invalid string) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return DefaultLogLevel, ""
+	}
+	lower := strings.ToLower(trimmed)
+	if _, ok := validLogLevels[lower]; ok {
+		return lower, ""
+	}
+	return DefaultLogLevel, trimmed
 }
 
 // LoadTrustedProxy returns the parsed CHAT_TRUSTED_PROXY flag without
