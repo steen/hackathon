@@ -778,6 +778,49 @@ describe("test_web_composer_over_cap_disables_send_and_shows_error_state", () =>
   });
 });
 
+describe("test_web_composer_over_cap_drops_aria_describedby_keeps_aria_errormessage", () => {
+  it("warn state uses aria-describedby; over-cap drops describedby and keeps errormessage so SRs do not double-announce the same id", async () => {
+    const ta = await renderWithChannel();
+    const form = ta.closest("form");
+    expect(form).not.toBeNull();
+    if (form === null) return;
+
+    // Below warn threshold: no pointer at the counter from either attribute.
+    expect(form.getAttribute("aria-describedby")).toBeNull();
+    expect(ta.getAttribute("aria-errormessage")).toBeNull();
+
+    // Warn band (>=80%, <=cap): describedby points at the counter; no errormessage yet.
+    fireEvent.change(ta, { target: { value: "x".repeat(3277) } });
+    await screen.findByTestId("composer-counter");
+    expect(form.getAttribute("aria-describedby")).toBe("composer-counter");
+    expect(ta.getAttribute("aria-errormessage")).toBeNull();
+
+    // Over-cap: only errormessage points at the counter; describedby is dropped
+    // so SR does not announce the same element via two relations.
+    fireEvent.change(ta, { target: { value: "x".repeat(4097) } });
+    expect(ta.getAttribute("aria-errormessage")).toBe("composer-counter");
+    expect(form.getAttribute("aria-describedby")).toBeNull();
+  });
+});
+
+describe("test_web_composer_over_cap_counter_stays_role_status_not_alert", () => {
+  it("counter keeps role=status (polite) once over-cap so each keystroke past the cap is not re-announced as a fresh alert", async () => {
+    const ta = await renderWithChannel();
+    fireEvent.change(ta, { target: { value: "x".repeat(4097) } });
+
+    const counter = await screen.findByTestId("composer-counter");
+    expect(counter).toHaveAttribute("role", "status");
+    expect(counter).not.toHaveAttribute("role", "alert");
+
+    // Mutating the draft past the cap (additional keystrokes) must not flip
+    // the role to alert — the error mode is already conveyed by the
+    // textarea's aria-errormessage and the visible --error class.
+    fireEvent.change(ta, { target: { value: "x".repeat(4200) } });
+    expect(counter).toHaveAttribute("role", "status");
+    expect(counter).toHaveClass("composer__counter--error");
+  });
+});
+
 describe("test_web_composer_byte_counter_uses_utf8_byte_length_not_char_count", () => {
   it("multibyte chars count by encoded bytes (4 bytes per emoji)", async () => {
     const ta = await renderWithChannel();
