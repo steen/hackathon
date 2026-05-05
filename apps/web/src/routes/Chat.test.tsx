@@ -1269,6 +1269,79 @@ describe("test_web_chat_focus_management_mount_with_channel_focuses_composer", (
   });
 });
 
+describe("test_web_chat_focus_promotes_to_composer_when_channels_resolve_after_paint", () => {
+  it("first paint focuses the heading (channels still loading), then promotes focus to the composer once useChannels resolves", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    // Hold listChannels open across the initial paint so the channel list
+    // is empty long enough for the heading branch to win first; then
+    // resolve and assert the focus effect re-runs and lands on the composer.
+    let resolveChannels: ((rows: unknown[]) => void) | undefined;
+    listChannelsMock.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveChannels = resolve;
+        }),
+    );
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: /select a channel/i });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(heading);
+    });
+
+    await act(async () => {
+      resolveChannels?.([{ id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" }]);
+      await Promise.resolve();
+    });
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(composer).not.toBeDisabled();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
+  });
+});
+
+describe("test_web_chat_focus_does_not_steal_back_to_composer_after_user_moves_away", () => {
+  it("does not pull focus back to the composer when state changes after the user has tabbed elsewhere", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
+
+    // Simulate the user moving focus to the Sign out button.
+    const signOut = screen.getByRole("button", { name: /sign out/i });
+    act(() => {
+      signOut.focus();
+    });
+    expect(document.activeElement).toBe(signOut);
+
+    // A subsequent state change (typing in the composer) updates Chat
+    // state. The focus effect must not re-run and steal focus back.
+    act(() => {
+      fireEvent.change(composer, { target: { value: "hi" } });
+    });
+    expect(document.activeElement).toBe(signOut);
+  });
+});
+
 describe("test_web_chat_landmarks_have_accessible_names", () => {
   it("aside, main, and sidebar lists each expose an accessible name", async () => {
     happyPath();
