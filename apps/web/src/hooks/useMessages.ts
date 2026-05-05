@@ -145,6 +145,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     };
 
     /* eslint-disable @typescript-eslint/no-unnecessary-condition --
+       Rule: @typescript-eslint/no-unnecessary-condition.
        tok.cancelled is mutated by the effect cleanup closure; eslint's
        flow analysis can't see the cross-closure write, so flags every
        check as "always falsy". */

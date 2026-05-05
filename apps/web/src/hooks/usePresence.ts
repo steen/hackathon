@@ -136,6 +136,7 @@ export function usePresence(enabled: boolean): UsePresence {
     setState((s) => ({ ...s, loading: true, error: null }));
 
     /* eslint-disable @typescript-eslint/no-unnecessary-condition --
+       Rule: @typescript-eslint/no-unnecessary-condition.
        tok.cancelled is mutated by the cleanup closure; eslint's flow
        analysis cannot see the cross-closure write so flags every check
        as always-falsy. */
