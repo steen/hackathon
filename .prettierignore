@@ -1,3 +1,7 @@
+# Categories of files intentionally excluded from prettier:
+# - Content directories: specs/, diary/, linkedin-posts/, migrations/
+# - AI tooling: .claude/, .rtk, .agents
+# - Top-level prose: CHANGELOG.md, CLAUDE.md, README.md
 node_modules
 dist
 build
