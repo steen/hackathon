@@ -1788,4 +1788,98 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     // The effect ran and pinned scrollTop to scrollHeight.
     expect(list.scrollTop).toBe(1000);
   });
+
+  it("auto-scrolls when distance from bottom is exactly 8px (boundary inclusive)", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+
+    const list = screen.getByTestId("message-list");
+    // Boundary case: distance = scrollHeight - (scrollTop + clientHeight)
+    // = 1000 - (592 + 400) = 8. The `<= 8` check in Chat.tsx must treat
+    // this as still-at-bottom and fire the auto-scroll. If a refactor
+    // tightens the comparison to `< 8`, this case regresses.
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 592;
+    fireEvent.scroll(list);
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M2",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live arrival at 8px boundary",
+            created_at: "2026-01-01T00:00:01Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("live arrival at 8px boundary")).toBeInTheDocument();
+    expect(list.scrollTop).toBe(1000);
+  });
+
+  it("does not auto-scroll when distance from bottom is 9px (boundary exclusive)", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+
+    const list = screen.getByTestId("message-list");
+    // Boundary case: distance = 1000 - (591 + 400) = 9, just past the
+    // 8px tolerance. The user counts as scrolled-up; auto-scroll must
+    // not fire. If a refactor loosens the comparison to `<= 9` or
+    // `<= 16`, this case regresses.
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 591;
+    fireEvent.scroll(list);
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M2",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live arrival at 9px past boundary",
+            created_at: "2026-01-01T00:00:01Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("live arrival at 9px past boundary")).toBeInTheDocument();
+    expect(list.scrollTop).toBe(591);
+  });
 });
