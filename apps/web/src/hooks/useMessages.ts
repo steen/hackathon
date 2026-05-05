@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
 import { getClient } from "../api.js";
-import { bannerMessage, userFacingMessage } from "../lib/userFacingError.js";
+import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
 
 export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "reconnecting";
 
@@ -139,6 +139,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         if (tok.cancelled) return;
         const msg = bannerMessage("Failed to load message history", err);
         setError(msg);
+        reportAppError(msg);
       }
 
       if (tok.cancelled) return;
@@ -217,6 +218,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         if (tok.cancelled) return;
         const msg = bannerMessage("Message connection failed", err);
         setError(msg);
+        reportAppError(msg);
         setConnection("reconnecting");
       }
     })();
@@ -338,6 +340,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     } catch (err) {
       const msg = bannerMessage("Failed to load older messages", err);
       setError(msg);
+      reportAppError(msg);
     } finally {
       loadingOlderRef.current = false;
     }

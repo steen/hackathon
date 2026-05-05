@@ -41,10 +41,12 @@ vi.mock("../api.js", () => ({
 }));
 
 import { usePresence } from "./usePresence.js";
+import { _resetAppErrorSinkForTests, useAppError } from "../lib/userFacingError.js";
 
 beforeEach(() => {
   (globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket;
   wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+  _resetAppErrorSinkForTests();
 });
 
 afterEach(() => {
@@ -53,6 +55,7 @@ afterEach(() => {
   delete (globalThis as { WebSocket?: unknown }).WebSocket;
   wsTicketMock.mockReset();
   requestMock.mockReset();
+  _resetAppErrorSinkForTests();
 });
 
 async function deliver(sock: FakeSocket | undefined, payload: unknown): Promise<void> {
@@ -284,6 +287,21 @@ describe("usePresence", () => {
       expect(result.current.lastEvent?.id).toBe("U_GONE");
     });
     expect(result.current.lastEvent?.username).toBe("Dora Departed");
+  });
+
+  it("dispatches the curated seed error into the shared app-error sink", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const raw = new Error("seed boom");
+    requestMock.mockRejectedValue(raw);
+    const { result: hook } = renderHook(() => usePresence(true));
+    await waitFor(() => {
+      expect(hook.current.loading).toBe(false);
+    });
+    const { result: sink } = renderHook(() => useAppError());
+    await waitFor(() => {
+      expect(sink.current).toBe("Failed to load presence: Something went wrong.");
+    });
+    consoleErrorSpy.mockRestore();
   });
 
   it("surfaces a curated error when the seed request fails without echoing the raw err.message", async () => {
