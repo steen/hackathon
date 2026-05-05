@@ -3,6 +3,7 @@ package wsapi_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,40 @@ import (
 	"hackathon/apps/server/internal/wsapi"
 	"hackathon/apps/server/wsproto"
 )
+
+// readErrorFrame reads a single text frame and decodes it as the
+// PRD §10 {type:"error", data:{code,message}} envelope. The decoded
+// shape lives in the test package so production code does not export
+// the wire struct.
+type wsErrorFrame struct {
+	Type string `json:"type"`
+	Data struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"data"`
+}
+
+func readErrorFrame(ctx context.Context, t *testing.T, conn *websocket.Conn) wsErrorFrame {
+	t.Helper()
+	mt, payload, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read error frame: %v", err)
+	}
+	if mt != websocket.MessageText {
+		t.Fatalf("error frame message type: got %v want MessageText", mt)
+	}
+	var f wsErrorFrame
+	if err := json.Unmarshal(payload, &f); err != nil {
+		t.Fatalf("decode error frame %q: %v", payload, err)
+	}
+	if f.Type != "error" {
+		t.Fatalf("error frame type: got %q want %q", f.Type, "error")
+	}
+	if f.Data.Message == "" {
+		t.Fatalf("error frame message empty: %+v", f)
+	}
+	return f
+}
 
 func dialServer(ctx context.Context, t *testing.T) (*websocket.Conn, *hub.Hub, func()) {
 	t.Helper()
@@ -79,6 +114,11 @@ func TestWSRejectsMessageBodyOver4KiB(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
+	frame := readErrorFrame(ctx, t, conn)
+	if frame.Data.Code != wsapi.ErrCodeBodyTooLarge {
+		t.Fatalf("error frame code: got %q want %q", frame.Data.Code, wsapi.ErrCodeBodyTooLarge)
+	}
+
 	_, _, err := conn.Read(ctx)
 	if err == nil {
 		t.Fatalf("expected close error after over-4KiB body")
@@ -115,10 +155,17 @@ func TestWSSendRateLimitClosesPolicyViolation(t *testing.T) {
 		}
 	}
 
+	// The server emits a typed error frame before the close (PRD §10),
+	// so the first inbound frame is text and the close arrives on the
+	// subsequent Read. Both are observed inside the same deadline.
+	var sawErrorFrame bool
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		_, _, err := conn.Read(ctx)
+		mt, payload, err := conn.Read(ctx)
 		if err != nil {
+			if !sawErrorFrame {
+				t.Fatalf("close arrived before error frame: %v", err)
+			}
 			if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
 				t.Fatalf("close code: got %d want %d (StatusPolicyViolation); err=%v",
 					websocket.CloseStatus(err), websocket.StatusPolicyViolation, err)
@@ -128,8 +175,18 @@ func TestWSSendRateLimitClosesPolicyViolation(t *testing.T) {
 			}
 			return
 		}
+		if mt == websocket.MessageText {
+			var frame wsErrorFrame
+			if jerr := json.Unmarshal(payload, &frame); jerr == nil &&
+				frame.Type == "error" && frame.Data.Code == wsapi.ErrCodeRateLimited {
+				if frame.Data.Message == "" {
+					t.Fatalf("rate-limit error frame message empty: %+v", frame)
+				}
+				sawErrorFrame = true
+			}
+		}
 		if time.Now().After(deadline) {
-			t.Fatalf("server never closed after burst flood")
+			t.Fatalf("server never closed after burst flood (sawErrorFrame=%v)", sawErrorFrame)
 		}
 	}
 }

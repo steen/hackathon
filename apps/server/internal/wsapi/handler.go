@@ -249,10 +249,15 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 			return
 		}
 		if len(data) > MessageBodyLimit {
+			// PRD §10/SEC-8: emit a typed error frame before the close so
+			// the client can surface a code-specific message instead of a
+			// bare 1009.
+			writeErrorFrame(ctx, conn, ErrCodeBodyTooLarge, wsproto.MessageBodyLimitCloseReason)
 			_ = conn.Close(websocket.StatusMessageTooBig, wsproto.MessageBodyLimitCloseReason)
 			return
 		}
 		if !bucket.allow() {
+			writeErrorFrame(ctx, conn, ErrCodeRateLimited, "send rate limit exceeded")
 			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
 			return
 		}
