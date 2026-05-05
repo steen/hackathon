@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 
 	"hackathon/apps/server/internal/config"
 	"hackathon/apps/server/internal/hub"
+	"hackathon/apps/server/internal/logging"
 	"hackathon/apps/server/internal/wiring"
 )
 
@@ -40,11 +42,32 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+
+	logger := logging.New(cfg.LogLevel)
+	slog.SetDefault(logger)
+	// slog.SetDefault re-routes log.Default()'s output through the slog
+	// handler. The access-log middleware (apps/server/internal/http) still
+	// writes via stdlib log.Printf and emits a self-describing line; we
+	// don't want it wrapped in slog's `time=… level=INFO msg="…"` envelope.
+	// Restore the stdlib log destination so middleware lines stay raw.
+	log.SetOutput(os.Stderr)
+
+	if cfg.LogLevelInvalid != "" {
+		slog.Warn("ignoring unrecognized log level; falling back to default",
+			"env", config.EnvLogLevel,
+			"got", cfg.LogLevelInvalid,
+			"using", cfg.LogLevel,
+		)
+	}
 	for _, ch := range checks {
-		log.Printf("config check ok: %s", ch.Name)
+		slog.Info("config check ok", "name", ch.Name)
 	}
 	if cfg.AllowPublicBind && !cfg.TrustedProxy {
-		log.Printf("WARN: %s=1 with %s unset; if you are behind a reverse proxy, IP rate limits will key on the proxy IP. Set %s=1 to honor X-Forwarded-For (see PRD §9).", config.EnvAllowPublicBind, config.EnvTrustedProxy, config.EnvTrustedProxy)
+		slog.Warn("public bind without trusted-proxy may key rate limits on the proxy IP",
+			"env_public_bind", config.EnvAllowPublicBind,
+			"env_trusted_proxy", config.EnvTrustedProxy,
+			"hint", "set "+config.EnvTrustedProxy+"=1 to honor X-Forwarded-For (PRD §9)",
+		)
 	}
 
 	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
@@ -56,7 +79,11 @@ func run() error {
 		Hub:            hub.New(),
 		AllowedOrigins: parseAllowedOrigins(os.Getenv(allowedOriginsEnv)),
 	}
-	log.Printf("config check ok: %s parsed %d origin pattern(s)", allowedOriginsEnv, len(deps.AllowedOrigins))
+	slog.Info("config check ok",
+		"name", "allowed_origins_parsed",
+		"env", allowedOriginsEnv,
+		"count", len(deps.AllowedOrigins),
+	)
 
 	sqlDB, repository, err := openAndMigrate(os.Getenv(dbPathEnv))
 	if err != nil {
@@ -71,7 +98,7 @@ func run() error {
 		deps.Repo = repository
 		deps.JWTSecret = jwtSecret
 		deps.InviteCode = os.Getenv(inviteCodeEnv)
-		log.Printf("db ready at %q", os.Getenv(dbPathEnv))
+		slog.Info("db ready", "path", os.Getenv(dbPathEnv))
 	}
 
 	srv := &http.Server{
@@ -86,7 +113,7 @@ func run() error {
 	defer stop()
 
 	go func() {
-		log.Printf("chat server listening on %s", listenAddr)
+		slog.Info("chat server listening", "addr", listenAddr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen: %v", err)
 		}
@@ -96,7 +123,7 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("shutdown: %v", err)
+		slog.Error("shutdown", "err", err.Error())
 	}
 	return nil
 }
