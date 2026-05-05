@@ -17,7 +17,7 @@ func Whoami(ctx context.Context, env *Env, args []string) error {
 	}
 	client, _, err := newClient(env, true)
 	if err != nil {
-		return err
+		return wrapNotLoggedIn("whoami", err)
 	}
 	user, err := client.Me(ctx)
 	if err != nil {

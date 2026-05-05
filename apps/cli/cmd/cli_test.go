@@ -283,6 +283,46 @@ func TestCLIWhoamiWhenNotLoggedIn(t *testing.T) {
 	if !errors.Is(err, ErrNotLoggedIn) {
 		t.Errorf("err = %v, want ErrNotLoggedIn", err)
 	}
+	if !strings.HasPrefix(err.Error(), "whoami: ") {
+		t.Errorf("err = %q, want command-prefixed message starting with %q", err.Error(), "whoami: ")
+	}
+}
+
+// TestCLINotLoggedInWrappedPerCommand asserts every command that
+// requires a token surfaces its own name when the token is missing
+// while keeping errors.Is(err, ErrNotLoggedIn) true. Issue #606.
+func TestCLINotLoggedInWrappedPerCommand(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		run  func(ctx context.Context, env *Env, args []string) error
+	}{
+		{name: "whoami", args: nil, run: Whoami},
+		{name: "channels", args: nil, run: Channels},
+		{name: "history", args: []string{"chan-1"}, run: History},
+		{name: "send", args: []string{"chan-1", "hi"}, run: Send},
+		{name: "watch", args: []string{"--once", "chan-1"}, run: Watch},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newFakeServer(t)
+			rig := newRig(t, fs)
+
+			ctx, cancel := mustCtx()
+			defer cancel()
+			err := tc.run(ctx, rig.env, tc.args)
+			if err == nil {
+				t.Fatalf("%s without token returned nil; want error", tc.name)
+			}
+			if !errors.Is(err, ErrNotLoggedIn) {
+				t.Errorf("err = %v, want errors.Is ErrNotLoggedIn", err)
+			}
+			want := tc.name + ": "
+			if !strings.HasPrefix(err.Error(), want) {
+				t.Errorf("err = %q, want prefix %q", err.Error(), want)
+			}
+		})
+	}
 }
 
 func TestCLILogoutClearsLocalConfig(t *testing.T) {

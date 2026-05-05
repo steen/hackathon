@@ -33,7 +33,7 @@ func History(ctx context.Context, env *Env, args []string) error {
 	channel := positional[0]
 	client, _, err := newClient(env, true)
 	if err != nil {
-		return err
+		return wrapNotLoggedIn("history", err)
 	}
 	msgs, err := client.ListMessages(ctx, channel, goclient.ListMessagesOptions{
 		Limit:  *limit,

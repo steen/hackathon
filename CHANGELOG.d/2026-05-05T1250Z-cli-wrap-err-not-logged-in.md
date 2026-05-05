@@ -1,0 +1,1 @@
+- chatd CLI: when a command needs a stored token and none is set, the error now names the command — e.g. `history: not logged in (run chatd login or chatd register)` instead of an unprefixed sentinel — so scripts and pipelines can tell which step failed. Applies to `whoami`, `channels`, `history`, `send`, and `watch`; `errors.Is(err, cmd.ErrNotLoggedIn)` still matches. (#606)

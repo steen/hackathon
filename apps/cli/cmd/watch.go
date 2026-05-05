@@ -37,7 +37,7 @@ func Watch(ctx context.Context, env *Env, args []string) error {
 
 	client, _, err := newClient(env, true)
 	if err != nil {
-		return err
+		return wrapNotLoggedIn("watch", err)
 	}
 
 	backoff := initialWatchBackoff
