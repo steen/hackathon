@@ -55,10 +55,15 @@ export default defineConfig({
     // iOS Safari is the production target for mobile users, so we
     // pay the cost only for the spec that asserts mobile-specific
     // layout. See #643.
+    //
+    // `iPhone 13` (vs `Desktop Safari`) gives a real iOS profile:
+    // mobile UA, dpr=3, isMobile=true, hasTouch=true. The spec calls
+    // page.setViewportSize() per-AC (375x667 phone, 768x1024 tablet),
+    // which overrides the device's 390x664 default. See #647.
     {
       name: "webkit",
       testMatch: /web-mobile\.spec\.ts$/,
-      use: { ...devices["Desktop Safari"] },
+      use: { ...devices["iPhone 13"] },
     },
   ],
 });
