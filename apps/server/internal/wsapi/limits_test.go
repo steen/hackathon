@@ -13,6 +13,7 @@ import (
 
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/wsapi"
+	"hackathon/apps/server/wsproto"
 )
 
 func dialServer(ctx context.Context, t *testing.T) (*websocket.Conn, *hub.Hub, func()) {
@@ -91,8 +92,8 @@ func TestWSRejectsMessageBodyOver4KiB(t *testing.T) {
 	if !errors.As(err, &ce) {
 		t.Fatalf("expected *websocket.CloseError, got %T: %v", err, err)
 	}
-	if ce.Reason != wsapi.MessageBodyLimitCloseReason {
-		t.Fatalf("close reason: got %q want %q", ce.Reason, wsapi.MessageBodyLimitCloseReason)
+	if ce.Reason != wsproto.MessageBodyLimitCloseReason {
+		t.Fatalf("close reason: got %q want %q", ce.Reason, wsproto.MessageBodyLimitCloseReason)
 	}
 }
 
