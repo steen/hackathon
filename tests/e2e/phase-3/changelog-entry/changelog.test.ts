@@ -195,6 +195,7 @@ describe("changelog-entry AC-3: 0.1.0 entry follows Keep-a-Changelog section con
 
     if (body === null || matchedSource === null) {
       expect.fail(`expected a 0.1.0 section in one of: ${sources.join(", ")}`);
+      return;
     }
 
     for (const section of REQUIRED_KAC_SECTIONS) {
