@@ -1,0 +1,1 @@
+- chatd CLI: top-level help now documents `$CHATD_CONFIG_DIR`. The Environment section lists it alongside the other env vars, and the Config line shows the full three-step fallback (`$CHATD_CONFIG_DIR`, then `$XDG_CONFIG_HOME/chatd`, then `~/.config/chatd`). (#605)

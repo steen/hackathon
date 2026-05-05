@@ -24,6 +24,7 @@ var expectedHelpTokens = []string{
 	"CHAT_SERVER",
 	"CHAT_PASSWORD",
 	"CHAT_INVITE_CODE",
+	"CHATD_CONFIG_DIR",
 }
 
 func TestWriteHelpListsEveryCommandAndEnvVar(t *testing.T) {
