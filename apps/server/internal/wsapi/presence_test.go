@@ -250,8 +250,9 @@ func TestPresenceDoesNotFireWithoutAuth(t *testing.T) {
 type presenceEvent struct {
 	Type string `json:"type"`
 	Data struct {
-		Kind   string `json:"kind"`
-		UserID string `json:"user_id"`
+		Kind     string `json:"kind"`
+		UserID   string `json:"user_id"`
+		Username string `json:"username"`
 	} `json:"data"`
 }
 
@@ -279,4 +280,135 @@ type decodeErr struct{ got string }
 
 func (e *decodeErr) Error() string {
 	return "expected presence frame, got type=" + e.got
+}
+
+// TestPresenceFrameCarriesUsernameWhenLookupRegistered asserts that join
+// and leave frames embed `username` when the package-level resolver hook
+// is set. The hook is unset on test exit so it does not leak into other
+// tests in this package (#490).
+func TestPresenceFrameCarriesUsernameWhenLookupRegistered(t *testing.T) {
+	directory := map[string]string{
+		"observer": "Olivia Observer",
+		"alice":    "Alice Example",
+	}
+	SetPresenceUsernameLookup(func(userID string) string {
+		return directory[userID]
+	})
+	t.Cleanup(func() { SetPresenceUsernameLookup(nil) })
+
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	srv := httptest.NewServer(Handler(h, ts, Config{}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	observerTok, _ := ts.Issue("observer")
+	observer, _, err := websocket.Dial(ctx, wsURL+"?ticket="+observerTok, nil)
+	if err != nil {
+		t.Fatalf("observer dial: %v", err)
+	}
+	defer observer.CloseNow()
+
+	// Self-join carries the observer's username.
+	selfJoin, err := readPresenceEvent(ctx, observer)
+	if err != nil {
+		t.Fatalf("observer self-join: %v", err)
+	}
+	if selfJoin.Data.Kind != "join" || selfJoin.Data.UserID != "observer" {
+		t.Fatalf("observer self-join: got kind=%s id=%s", selfJoin.Data.Kind, selfJoin.Data.UserID)
+	}
+	if selfJoin.Data.Username != "Olivia Observer" {
+		t.Fatalf("observer self-join username: got %q want %q", selfJoin.Data.Username, "Olivia Observer")
+	}
+
+	// Alice joins → frame carries alice's username.
+	aliceTok, _ := ts.Issue("alice")
+	alice, _, err := websocket.Dial(ctx, wsURL+"?ticket="+aliceTok, nil)
+	if err != nil {
+		t.Fatalf("alice dial: %v", err)
+	}
+	defer alice.CloseNow()
+
+	join, err := readPresenceEvent(ctx, observer)
+	if err != nil {
+		t.Fatalf("observer read alice's join: %v", err)
+	}
+	if join.Data.Kind != "join" || join.Data.UserID != "alice" {
+		t.Fatalf("alice join: got kind=%s id=%s", join.Data.Kind, join.Data.UserID)
+	}
+	if join.Data.Username != "Alice Example" {
+		t.Fatalf("alice join username: got %q want %q", join.Data.Username, "Alice Example")
+	}
+
+	// Alice leaves → leave frame also carries the username.
+	_ = alice.Close(websocket.StatusNormalClosure, "")
+
+	leave, err := readPresenceEvent(ctx, observer)
+	if err != nil {
+		t.Fatalf("observer read alice's leave: %v", err)
+	}
+	if leave.Data.Kind != "leave" || leave.Data.UserID != "alice" {
+		t.Fatalf("alice leave: got kind=%s id=%s", leave.Data.Kind, leave.Data.UserID)
+	}
+	if leave.Data.Username != "Alice Example" {
+		t.Fatalf("alice leave username: got %q want %q", leave.Data.Username, "Alice Example")
+	}
+}
+
+// TestPresenceFrameOmitsUsernameWhenLookupUnset asserts that without a
+// resolver hook the frame's JSON has no `username` key — the wire shape
+// stays byte-compatible with the pre-#490 contract so a partial rollout
+// does not break old decoders.
+func TestPresenceFrameOmitsUsernameWhenLookupUnset(t *testing.T) {
+	SetPresenceUsernameLookup(nil)
+
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	srv := httptest.NewServer(Handler(h, ts, Config{}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	tok, _ := ts.Issue("solo")
+	c, _, err := websocket.Dial(ctx, wsURL+"?ticket="+tok, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	readCtx, cancelRead := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelRead()
+	_, raw, err := c.Read(readCtx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(raw), `"username"`) {
+		t.Fatalf("frame contains username key with no lookup registered: %s", string(raw))
+	}
+}
+
+// readPresenceEvent reads a single frame and decodes it as a presence
+// envelope (type + kind + user_id + optional username). Used by tests
+// that need to assert on the username field, which the older
+// readPresence helper hides behind a narrow return tuple.
+func readPresenceEvent(ctx context.Context, c *websocket.Conn) (presenceEvent, error) {
+	var ev presenceEvent
+	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, data, err := c.Read(readCtx)
+	if err != nil {
+		return ev, err
+	}
+	if err := json.Unmarshal(data, &ev); err != nil {
+		return ev, err
+	}
+	if ev.Type != PresenceEvent {
+		return ev, &decodeErr{got: ev.Type}
+	}
+	return ev, nil
 }
