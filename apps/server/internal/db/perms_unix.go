@@ -3,7 +3,9 @@
 package db
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"syscall"
 )
@@ -33,4 +35,28 @@ func EnsureFile(path string) error {
 		return fmt.Errorf("db: chmod %q: %w", path, err)
 	}
 	return nil
+}
+
+// WarnDirMode logs a soft warning if path is a directory with bits set for
+// group or other (mode & 0077 != 0). Per PRD §9 the SQLite parent directory
+// should be 0700; os.MkdirAll only honors that mode on directories it
+// creates, so a pre-existing wider directory survives EnsureFile silently.
+//
+// The warning is informational only: the server keeps running. A missing
+// directory is not an error here either — Open's MkdirAll fields that case.
+func WarnDirMode(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		log.Printf("WARN: stat SQLite parent directory %q: %v", path, err)
+		return
+	}
+	if !info.IsDir() {
+		return
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		log.Printf("WARN: SQLite parent directory %q has loose mode %#o; recommended 0700", path, info.Mode().Perm())
+	}
 }

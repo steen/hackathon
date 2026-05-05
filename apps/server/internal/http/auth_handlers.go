@@ -105,25 +105,32 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
 	}
+	// Capture the attempted username up-front so every register_failed
+	// row carries it, even when the request is rejected before the
+	// regex check passes. We TrimSpace so a trailing newline doesn't
+	// produce a different audit row from the stored user name. The
+	// regex-miss branch still records whatever the caller sent (sans
+	// trim) so probes against the username space remain visible.
+	attempted := strings.TrimSpace(req.Username)
 	if h.deps.InviteCode == "" {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "registration is disabled")
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(req.InviteCode), []byte(h.deps.InviteCode)) != 1 {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "invalid invite code")
 		return
 	}
-	username := strings.TrimSpace(req.Username)
+	username := attempted
 	if !usernameRe.MatchString(username) {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
 			"username must be 3-32 chars: letters, digits, dash, underscore")
 		return
 	}
 	if err := auth.EnforcePolicy(req.Password); err != nil {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		switch {
 		case errors.Is(err, auth.ErrPasswordTooShort):
 			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
@@ -138,13 +145,13 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}
 	hash, err := auth.Hash(req.Password)
 	if err != nil {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not hash password")
 		return
 	}
 	id := ids.NewULID()
 	if err := h.store.CreateUser(r.Context(), id, username, hash, h.deps.Now()); err != nil {
-		h.logEvent(r.Context(), "", AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		if errors.Is(err, ErrUsernameTaken) {
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "username already taken")
 			return
@@ -152,7 +159,7 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create user")
 		return
 	}
-	h.logEvent(r.Context(), id, AuthEventRegister, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+	h.logEvent(r.Context(), id, username, AuthEventRegister, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	tok, err := auth.Issue(h.deps.SigningKey, id, 0, h.deps.Now())
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not issue token")
@@ -193,7 +200,12 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	username := strings.TrimSpace(req.Username)
 	if h.deps.UserLimiter != nil {
 		if ok, retry := h.deps.UserLimiter.Allow(username); !ok {
-			h.store.LogRateLimited(r, "", clientIP(r, h.deps.TrustedProxy))
+			// Per-username rate-limit rejection: route through
+			// LogAuthEvent directly so the username we have in
+			// scope makes it into the audit row. The middleware-
+			// owned LogRateLimited path passes username="" because
+			// it fires before the body is decoded.
+			h.logEvent(r.Context(), "", username, AuthEventRateLimited, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 			writeRateLimited(w, retry)
 			return
 		}
@@ -205,7 +217,11 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		if h.deps.UserLimiter != nil {
 			h.deps.UserLimiter.RegisterFailure(username)
 		}
-		h.logEvent(r.Context(), "", AuthEventLoginFailure, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+		// Record the attempted username so unknown-user probes are
+		// attributable. user_id stays NULL — auth.AuthenticateLogin
+		// collapses both failure arms into the same error so we
+		// cannot tell unknown-user from wrong-password here.
+		h.logEvent(r.Context(), "", username, AuthEventLoginFailure, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, auth.LoginErrorMessage)
 		return
 	}
@@ -217,7 +233,7 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not issue token")
 		return
 	}
-	h.logEvent(r.Context(), user.ID, AuthEventLoginSuccess, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+	h.logEvent(r.Context(), user.ID, username, AuthEventLoginSuccess, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	if u, ok := h.lookupUsername(r, user.ID); ok {
 		username = u
 	}
@@ -269,7 +285,8 @@ func (h *AuthHandlers) Logout(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not invalidate token")
 		return
 	}
-	h.logEvent(r.Context(), uid, AuthEventLogout, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+	uname, _ := h.lookupUsername(r, uid)
+	h.logEvent(r.Context(), uid, uname, AuthEventLogout, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{"ok": true})
 }
 
@@ -288,7 +305,8 @@ func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	tok, exp := h.deps.Tickets.Issue(uid)
-	h.logEvent(r.Context(), uid, AuthEventTicketIssued, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
+	uname, _ := h.lookupUsername(r, uid)
+	h.logEvent(r.Context(), uid, uname, AuthEventTicketIssued, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"ticket":     tok,
 		"expires_at": exp.UTC().Format(time.RFC3339Nano),
@@ -297,8 +315,11 @@ func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 
 // logEvent writes one auth_events row best-effort but surfaces a write
 // failure to the operator log so SEC-13 audit gaps are observable.
-func (h *AuthHandlers) logEvent(ctx context.Context, userID, kind, ip, ua string) {
-	if err := h.store.LogAuthEvent(ctx, userID, kind, ip, ua); err != nil {
+// username is the attempted-or-resolved username — pass "" when none
+// is in scope (e.g. early validation rejections that never read the
+// body successfully). The store maps "" to SQL NULL.
+func (h *AuthHandlers) logEvent(ctx context.Context, userID, username, kind, ip, ua string) {
+	if err := h.store.LogAuthEvent(ctx, userID, username, kind, ip, ua); err != nil {
 		log.Printf("auth_events insert failed kind=%s: %v", kind, err)
 	}
 }
