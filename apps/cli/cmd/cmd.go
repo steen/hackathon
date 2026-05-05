@@ -88,3 +88,14 @@ func newClient(env *Env, requireToken bool) (*goclient.Client, *config.File, err
 
 // ErrNotLoggedIn is returned by commands that require a stored token.
 var ErrNotLoggedIn = errors.New("not logged in (run `chatd login` or `chatd register`)")
+
+// wrapNotLoggedIn tags err with the command name when err is
+// ErrNotLoggedIn so users see which command demanded a token, while
+// errors.Is(err, ErrNotLoggedIn) keeps working. Non-matching errors
+// pass through unchanged.
+func wrapNotLoggedIn(cmd string, err error) error {
+	if errors.Is(err, ErrNotLoggedIn) {
+		return fmt.Errorf("%s: %w", cmd, ErrNotLoggedIn)
+	}
+	return err
+}

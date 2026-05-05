@@ -37,7 +37,7 @@ func Send(ctx context.Context, env *Env, args []string) error {
 
 	client, _, err := newClient(env, true)
 	if err != nil {
-		return err
+		return wrapNotLoggedIn("send", err)
 	}
 	msg, err := client.PostMessage(ctx, channel, body)
 	if err != nil {
