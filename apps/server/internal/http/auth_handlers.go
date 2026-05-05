@@ -108,9 +108,10 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	// Capture the attempted username up-front so every register_failed
 	// row carries it, even when the request is rejected before the
 	// regex check passes. We TrimSpace so a trailing newline doesn't
-	// produce a different audit row from the stored user name. The
-	// regex-miss branch still records whatever the caller sent (sans
-	// trim) so probes against the username space remain visible.
+	// produce a different audit row from the stored user name; every
+	// register_failed branch (including regex-miss) records the
+	// trimmed value, which groups retries that differ only by trailing
+	// whitespace.
 	attempted := strings.TrimSpace(req.Username)
 	if h.deps.InviteCode == "" {
 		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
