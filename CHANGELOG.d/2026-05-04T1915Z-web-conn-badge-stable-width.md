@@ -1,2 +1,3 @@
 ### Fixed
+
 - Web: connection badge in the chat header (`Connected`/`Connecting...`/`Reconnecting...`/`Disconnected`/`Idle`) now reserves a stable `min-width: 7rem` slot with centered text, so the channel title no longer reflows on each WS state transition. Bumped `--ok` (#15803d→#166534) and `--warn` (#b45309→#92400e) so the open/connecting/reconnecting tints all clear WCAG AA at the badge's 0.75rem font-size with margin (≥6.29:1, ≥6.37:1). Both vars are scoped — only `.conn--*` consumes them. Fixes #145.
