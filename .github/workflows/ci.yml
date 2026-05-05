@@ -52,6 +52,12 @@ jobs:
         run: pnpm -r --if-present build
       - name: Test
         timeout-minutes: 5
+        # RUN_PROD_BUNDLE_HYGIENE=1 enables the slow apps/web prod-bundle
+        # regression guard (apps/web/src/__tests__/prod-bundle-hygiene.test.ts)
+        # which builds the web app and asserts no `__chatd` test hook leaks
+        # into dist/assets/*.js. Skipped by default in dev runs. See #699.
+        env:
+          RUN_PROD_BUNDLE_HYGIENE: "1"
         run: pnpm -r --if-present test
 
   lint:
