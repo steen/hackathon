@@ -112,47 +112,37 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 	t.Run("chat_page_renders_channel_list_message_stream_and_input", func(t *testing.T) {
 		body := mustReadFile(t, filepath.Join(srcDir, "routes", "Chat.tsx"))
 
-		// AC names three pieces. Each maps to a load-bearing piece of the
-		// Chat layout:
-		//   - channel list: the sidebar <h2>Channels</h2> + a <ul> of
-		//     channels driven by useChannels.
-		//   - message stream: the messages region rendered into the
-		//     [data-testid="message-list"] container the vitest suite
-		//     already pins (Chat.test.tsx).
-		//   - input: the composer <input aria-label="message"> below the
-		//     message list.
-		if !strings.Contains(body, "useChannels") {
-			t.Errorf("Chat.tsx: expected useChannels hook (channel list source) to be wired")
-		}
+		// AC-2 names three pieces. Anchor each on the AC's vocabulary
+		// (heading text, ARIA role, ARIA label) rather than impl details
+		// like testid strings, hook names, or className values — those
+		// are free to refactor without an actual AC regression. See
+		// issue #394 for the rationale.
+		//
+		//   - channel list: the sidebar <h2>Channels</h2> heading. The
+		//     AC's literal noun is "channel list"; the heading is the
+		//     reader-visible label for that region.
+		//   - message stream: an element with role="log" — the standard
+		//     ARIA role for an append-only message feed (ARIA 1.2). The
+		//     AC's "message stream" maps to "log" semantically.
+		//   - input: the composer with aria-label="message" — the AC's
+		//     "input" surfaced as an accessible name for assistive tech.
 		if !regexp.MustCompile(`<h2>\s*Channels\s*</h2>`).MatchString(body) {
 			t.Errorf("Chat.tsx: expected a `<h2>Channels</h2>` heading for the channel list")
 		}
-		if !regexp.MustCompile(`channelsState\.channels\.map`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected `channelsState.channels.map(...)` rendering the channel list")
-		}
 
-		if !strings.Contains(body, "useMessages") {
-			t.Errorf("Chat.tsx: expected useMessages hook (message stream source) to be wired")
-		}
-		if !regexp.MustCompile(`data-testid="message-list"`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `data-testid=\"message-list\"` container for the message stream")
-		}
-		if !regexp.MustCompile(`messagesState\.messages\.map`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected `messagesState.messages.map(...)` rendering the message stream")
+		if !regexp.MustCompile(`role="log"`).MatchString(body) {
+			t.Errorf("Chat.tsx: expected a `role=\"log\"` element for the message stream")
 		}
 
 		// The composer element spans multiple lines with inline arrow
 		// callbacks (which themselves contain `=>`), so the regex can't
 		// stop at the first `>`. Match the opening tag's interior with a
-		// lazy `[^<]*?` instead and let the trailing `/>` (or `>`) close
-		// it. (?s) lets `.` cross newlines. AC-2 names "input"; the
-		// composer is now a <textarea> (issue #137 — multiline + Enter to
-		// send), so the alternation tolerates both element names.
+		// lazy `[^<]*?` and let the trailing `/>` (or `>`) close it.
+		// AC-2 names "input"; the composer is now a <textarea> (issue
+		// #137 — multiline + Enter to send), so the alternation tolerates
+		// both element names.
 		if !regexp.MustCompile(`(?s)<(?:input|textarea)\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(body) {
 			t.Errorf("Chat.tsx: expected a `<input>` or `<textarea>` composer with `aria-label=\"message\"`")
-		}
-		if !regexp.MustCompile(`(?s)<form\b[^<]*?className="composer"`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `<form className=\"composer\">` wrapping the composer")
 		}
 	})
 
