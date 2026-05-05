@@ -20,8 +20,15 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   fullyParallel: false,
   workers: 1,
-  timeout: 60_000,
-  expect: { timeout: 10_000 },
+  // Per-test cap: worker-reported median is ~1.6s/test, so 30s gives ~18x
+  // headroom while killing genuinely stuck waits in single-digit seconds
+  // rather than the previous 60s. See #651.
+  timeout: 30_000,
+  expect: { timeout: 5_000 },
+  // Whole-suite cap so a runaway can never hold a CI runner past 5 min;
+  // the step-level `timeout-minutes: 8` in ci.yml is a belt-and-braces
+  // outer bound covering Playwright launch + browser install fallout.
+  globalTimeout: 5 * 60_000,
   reporter: process.env.CI ? [["list"]] : [["list"]],
 
   globalSetup: resolve(e2eDir, "playwright", "globalSetup.ts"),
@@ -48,10 +55,15 @@ export default defineConfig({
     // iOS Safari is the production target for mobile users, so we
     // pay the cost only for the spec that asserts mobile-specific
     // layout. See #643.
+    //
+    // `iPhone 13` (vs `Desktop Safari`) gives a real iOS profile:
+    // mobile UA, dpr=3, isMobile=true, hasTouch=true. The spec calls
+    // page.setViewportSize() per-AC (375x667 phone, 768x1024 tablet),
+    // which overrides the device's 390x664 default. See #647.
     {
       name: "webkit",
       testMatch: /web-mobile\.spec\.ts$/,
-      use: { ...devices["Desktop Safari"] },
+      use: { ...devices["iPhone 13"] },
     },
   ],
 });
