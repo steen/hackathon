@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,31 @@ import (
 	"testing"
 	"time"
 )
+
+// expectedCSP mirrors the value pinned in
+// apps/server/internal/http/headers_middleware.go (const CSP). Hard-coded
+// here on purpose: the test fails loudly if either side drifts. AC-2 only
+// requires the header to be present and "restrictive"; pinning the exact
+// string also catches accidental relaxations during refactors.
+const expectedCSP = "default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+
+// requireSecHeaders asserts the four SEC-10 headers from AC-2 are present
+// with the documented values. label identifies the call site in failures.
+func requireSecHeaders(t *testing.T, label string, h http.Header) {
+	t.Helper()
+	if got := h.Get("Content-Security-Policy"); got != expectedCSP {
+		t.Errorf("%s: Content-Security-Policy = %q; want %q", label, got, expectedCSP)
+	}
+	if got := h.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("%s: X-Content-Type-Options = %q; want %q", label, got, "nosniff")
+	}
+	if got := h.Get("Referrer-Policy"); got != "no-referrer" {
+		t.Errorf("%s: Referrer-Policy = %q; want %q", label, got, "no-referrer")
+	}
+	if got := h.Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("%s: X-Frame-Options = %q; want %q", label, got, "DENY")
+	}
+}
 
 // runningServer carries the per-test handle the helpers need to talk
 // to the spawned chat-server.
