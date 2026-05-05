@@ -126,7 +126,7 @@ Each story has an ID (`US-N`) used to tag tests and demo steps. A story is "cove
                               │
                      ┌────────┴────────┐
                      │   Go server     │
-                     │   (chi router)  │
+                     │ (net/http mux)  │
                      ├─────────────────┤
                      │   handlers      │  thin transport
                      │   services      │  business logic
@@ -222,7 +222,6 @@ Vite + React 18 + TypeScript. State via React Context; styling via plain CSS at 
 
 | Package | Purpose |
 |---|---|
-| `github.com/go-chi/chi/v5` | HTTP routing |
 | `nhooyr.io/websocket` | Modern WebSocket |
 | `modernc.org/sqlite` | Pure-Go SQLite driver |
 | `github.com/pressly/goose/v3` | Migrations |
@@ -433,6 +432,7 @@ Phase 2 implementation locked in four divergences from the original spec. Each w
 | WS inbound protocol | `{type:"subscribe"\|"unsubscribe"\|"send"}` typed frames | `?channel=<id>` at upgrade; sends via REST `POST /api/channels/{id}/messages`; no application-level inbound frames | Strictly safer — eliminates the client-supplied `channel_id` on send that allowed sender-spoofing (sec finding #3, fix `92d447f`). Cheaper too: one channel per WS removes hub fan-out branching. | commit `92d447f`, PR #88 |
 | Presence frame shape | Per-channel snapshot `{channel_id, users:[{id,username}]}` on every change | Global delta `{kind:"join"\|"leave", user_id}` on transition + `GET /api/presence` snapshot for reconciliation | Cheaper on the wire (delta vs. full set), matches the implemented `usePresence` hook and the e2e suite. Snapshot on (re)connect closes the catch-up gap. | PR #80, #105 |
 | CLI framework | cobra | stdlib `flag` + `splitFlagsAndPositional` helper (allows flags after positional args) | 9 flat commands don't justify cobra's footprint. Migration becomes worthwhile once subcommand groups, generated `--help`, or shell completion are needed (see §13). | PR #88, PR #117 |
+| HTTP routing | `github.com/go-chi/chi/v5` | stdlib `net/http.ServeMux` with Go 1.22+ method+pattern syntax (`apps/server/internal/wiring/auth.go`, `apps/server/internal/wiring/presence.go`, `apps/server/internal/http/channels_handlers.go`) | Go 1.22+ pattern syntax covers our route count with zero added dependency; chi was never imported. Revisit if we need middleware composition or sub-routers chi handles natively. | issue #718 |
 
 ## 11. Success Criteria
 
@@ -601,7 +601,6 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 ### Key dependency links
 - pnpm: https://pnpm.io
 - pnpm workspaces: https://pnpm.io/workspaces
-- chi: https://github.com/go-chi/chi
 - nhooyr.io/websocket: https://pkg.go.dev/nhooyr.io/websocket
 - modernc.org/sqlite: https://pkg.go.dev/modernc.org/sqlite
 - goose: https://github.com/pressly/goose
