@@ -42,5 +42,16 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    // WebKit runs ONLY web-mobile.spec.ts (the iOS-class viewport
+    // regression). Full cross-browser coverage of web.spec.ts +
+    // presence.spec.ts would blow the <5min CI budget that #634 set.
+    // iOS Safari is the production target for mobile users, so we
+    // pay the cost only for the spec that asserts mobile-specific
+    // layout. See #643.
+    {
+      name: "webkit",
+      testMatch: /web-mobile\.spec\.ts$/,
+      use: { ...devices["Desktop Safari"] },
+    },
   ],
 });
