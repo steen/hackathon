@@ -86,3 +86,137 @@ func TestNewWithWriter_UnknownNameFallsBackToInfo(t *testing.T) {
 		t.Errorf("unknown level should default to info, got info dropped: %q", out)
 	}
 }
+
+func TestNewWithWriters_RoutesByLevel(t *testing.T) {
+	cases := []struct {
+		name        string
+		level       string
+		emit        func(*slog.Logger)
+		wantLow     []string
+		wantNotLow  []string
+		wantHigh    []string
+		wantNotHigh []string
+	}{
+		{
+			name:  "info_level_routes_info_low_warn_error_high",
+			level: "info",
+			emit: func(l *slog.Logger) {
+				l.Debug("d-line")
+				l.Info("i-line")
+				l.Warn("w-line")
+				l.Error("e-line")
+			},
+			wantLow:     []string{"i-line"},
+			wantNotLow:  []string{"d-line", "w-line", "e-line"},
+			wantHigh:    []string{"w-line", "e-line"},
+			wantNotHigh: []string{"d-line", "i-line"},
+		},
+		{
+			name:  "debug_level_routes_debug_info_low_warn_error_high",
+			level: "debug",
+			emit: func(l *slog.Logger) {
+				l.Debug("d-line")
+				l.Info("i-line")
+				l.Warn("w-line")
+				l.Error("e-line")
+			},
+			wantLow:     []string{"d-line", "i-line"},
+			wantNotLow:  []string{"w-line", "e-line"},
+			wantHigh:    []string{"w-line", "e-line"},
+			wantNotHigh: []string{"d-line", "i-line"},
+		},
+		{
+			name:  "info_level_drops_debug_from_both_streams",
+			level: "info",
+			emit: func(l *slog.Logger) {
+				l.Debug("d-line")
+			},
+			wantNotLow:  []string{"d-line"},
+			wantNotHigh: []string{"d-line"},
+		},
+		{
+			name:  "warn_level_drops_info_from_both_streams",
+			level: "warn",
+			emit: func(l *slog.Logger) {
+				l.Info("i-line")
+				l.Warn("w-line")
+			},
+			wantNotLow:  []string{"i-line"},
+			wantHigh:    []string{"w-line"},
+			wantNotHigh: []string{"i-line"},
+		},
+		{
+			name:  "error_level_routes_only_error_to_high",
+			level: "error",
+			emit: func(l *slog.Logger) {
+				l.Warn("w-line")
+				l.Error("e-line")
+			},
+			wantNotLow:  []string{"w-line", "e-line"},
+			wantHigh:    []string{"e-line"},
+			wantNotHigh: []string{"w-line"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var lo, hi bytes.Buffer
+			logger := NewWithWriters(tc.level, &lo, &hi)
+			tc.emit(logger)
+
+			lowOut, highOut := lo.String(), hi.String()
+			for _, needle := range tc.wantLow {
+				if !strings.Contains(lowOut, needle) {
+					t.Errorf("low (stdout) missing %q: %q", needle, lowOut)
+				}
+			}
+			for _, needle := range tc.wantNotLow {
+				if strings.Contains(lowOut, needle) {
+					t.Errorf("low (stdout) unexpectedly contained %q: %q", needle, lowOut)
+				}
+			}
+			for _, needle := range tc.wantHigh {
+				if !strings.Contains(highOut, needle) {
+					t.Errorf("high (stderr) missing %q: %q", needle, highOut)
+				}
+			}
+			for _, needle := range tc.wantNotHigh {
+				if strings.Contains(highOut, needle) {
+					t.Errorf("high (stderr) unexpectedly contained %q: %q", needle, highOut)
+				}
+			}
+		})
+	}
+}
+
+func TestNewWithWriters_WithAttrsPropagatesToBothStreams(t *testing.T) {
+	var lo, hi bytes.Buffer
+	logger := NewWithWriters("info", &lo, &hi).With("request_id", "abc-123")
+
+	logger.Info("i-line")
+	logger.Error("e-line")
+
+	lowOut, highOut := lo.String(), hi.String()
+	if !strings.Contains(lowOut, "request_id=abc-123") || !strings.Contains(lowOut, "i-line") {
+		t.Errorf("low stream missing attr or message: %q", lowOut)
+	}
+	if !strings.Contains(highOut, "request_id=abc-123") || !strings.Contains(highOut, "e-line") {
+		t.Errorf("high stream missing attr or message: %q", highOut)
+	}
+}
+
+func TestNewWithWriters_WithGroupPropagatesToBothStreams(t *testing.T) {
+	var lo, hi bytes.Buffer
+	logger := NewWithWriters("info", &lo, &hi).WithGroup("req")
+
+	logger.Info("i-line", "id", "abc")
+	logger.Error("e-line", "id", "abc")
+
+	lowOut, highOut := lo.String(), hi.String()
+	if !strings.Contains(lowOut, "req.id=abc") {
+		t.Errorf("low stream missing grouped attr: %q", lowOut)
+	}
+	if !strings.Contains(highOut, "req.id=abc") {
+		t.Errorf("high stream missing grouped attr: %q", highOut)
+	}
+}
