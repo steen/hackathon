@@ -89,16 +89,36 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-func waitForPort(port int, timeout time.Duration) error {
+// waitForPortOrExit polls 127.0.0.1:port until it accepts a TCP
+// connection, the spawned process exits (signaled by exited closing),
+// or timeout elapses. The exit-channel branch turns "binary failed at
+// startup" — e.g. lost a port race against a sibling test, or hit a
+// transient bind error — into an immediate, descriptive failure rather
+// than a full timeout wait. Issue #671 traced an intermittent first-run
+// flake of TestBinaryStartsWithMinimalEnv to two compounding causes:
+// the missing fast path here, and a 15s budget that was tight under
+// concurrent `go test ./...` load (the cold-build path alone is ~6s on
+// a quiet box; with sibling packages also rebuilding apps/server in
+// parallel and pnpm/tsc/vite contending for CPU it can exceed 15s).
+func waitForPortOrExit(port int, exited <-chan struct{}, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	for time.Now().Before(deadline) {
+		select {
+		case <-exited:
+			return fmt.Errorf("server process exited before %s became reachable", addr)
+		default:
+		}
 		c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
 		if err == nil {
 			_ = c.Close()
 			return nil
 		}
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-exited:
+			return fmt.Errorf("server process exited before %s became reachable", addr)
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
 	return fmt.Errorf("timed out waiting for %s", addr)
 }
@@ -220,7 +240,11 @@ func startServer(t *testing.T, binPath string) *runningServer {
 		close(wait)
 	}()
 
-	if err := waitForPort(port, 15*time.Second); err != nil {
+	// 60s budget: the cold path here is heavier than other e2e harnesses
+	// because buildSingleBinary already ran pnpm + tsc + vite + go build
+	// before we started the server. Under `go test ./...` parallelism a
+	// 15s wait was tight and produced the issue #671 flake.
+	if err := waitForPortOrExit(port, wait, 60*time.Second); err != nil {
 		cancel()
 		<-wait
 		t.Fatalf("server did not listen on :%d in time: %v", port, err)
