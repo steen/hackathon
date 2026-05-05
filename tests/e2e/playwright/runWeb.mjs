@@ -74,14 +74,19 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("[e2e:web] building apps/web (vite build)...");
-  const b = spawnSync("pnpm", ["--filter", "web", "run", "build"], {
+  // Build with --mode e2e (via the build:e2e script) so the
+  // window.__chatd WS-transition hook in main.tsx — gated on MODE !==
+  // "production" — stays installed in the bundle Playwright loads. A
+  // plain `vite build` defaults to MODE=production and would strip it,
+  // breaking the WS-drops assertions in web.spec.ts. See #658.
+  console.log("[e2e:web] building apps/web (vite build --mode e2e)...");
+  const b = spawnSync("pnpm", ["--filter", "web", "run", "build:e2e"], {
     cwd: repoRoot,
     stdio: "inherit",
     env: { ...process.env },
   });
   if (b.status !== 0) {
-    console.error("[e2e:web] pnpm --filter web run build failed");
+    console.error("[e2e:web] pnpm --filter web run build:e2e failed");
     process.exit(1);
   }
   const distDir = resolve(repoRoot, "apps", "web", "dist");
