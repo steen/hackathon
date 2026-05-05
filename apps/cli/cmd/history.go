@@ -28,7 +28,7 @@ func History(ctx context.Context, env *Env, args []string) error {
 	}
 	positional = append(positional, fs.Args()...)
 	if len(positional) != 1 {
-		return fmt.Errorf("usage: chatd history <channel> [--limit N] [--before ID]")
+		return fmt.Errorf("usage: chatd history <channel> [--limit N] [--before ID]\n(run 'chatd history -h' for full flags)")
 	}
 	channel := positional[0]
 	client, _, err := newClient(env, true)
