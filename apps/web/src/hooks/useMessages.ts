@@ -24,10 +24,26 @@ interface UseMessages {
   messages: MessageView[];
   connection: ConnectionState;
   error: string | null;
+  // True from mount (and from each channel switch) until the initial
+  // listMessages fetch settles — success or error. Lets the view gate
+  // empty-state copy that would otherwise flash for the duration of the
+  // fetch (the connection state machine stays at "connecting" through
+  // both history and the WS handshake, so it can't carry this signal).
+  historyLoading: boolean;
   send: (body: string) => Promise<void>;
   retry: (pendingId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
   canLoadOlder: boolean;
+  // True for the duration of an in-flight loadOlder fetch. The view
+  // mirrors this onto the trigger button so the click registers visibly
+  // (disabled + label flip + aria-busy) instead of waiting silently for
+  // the page to land.
+  isLoadingOlder: boolean;
+  // Curated banner for the most recent loadOlder failure. Lives on its
+  // own state slot so a transient older-page failure does not displace
+  // the channel-level `error` (initial-history / WS-connect failures);
+  // cleared on the next loadOlder attempt.
+  loadOlderError: string | null;
 }
 
 const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
@@ -64,6 +80,9 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
   const [connection, setConnection] = useState<ConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [canLoadOlder, setCanLoadOlder] = useState<boolean>(false);
+  const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
+  const [loadOlderError, setLoadOlderError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const loadingOlderRef = useRef<boolean>(false);
   const messagesRef = useRef<MessageView[]>([]);
   const wsRef = useRef<WebSocketClient | null>(null);
@@ -84,6 +103,9 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       setMessages([]);
       setConnection("idle");
       setCanLoadOlder(false);
+      setIsLoadingOlder(false);
+      setLoadOlderError(null);
+      setHistoryLoading(false);
       pendingMetaRef.current.clear();
       return;
     }
@@ -92,6 +114,9 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     setError(null);
     setConnection("connecting");
     setCanLoadOlder(false);
+    setIsLoadingOlder(false);
+    setLoadOlderError(null);
+    setHistoryLoading(true);
     loadingOlderRef.current = false;
     pendingMetaRef.current.clear();
 
@@ -140,6 +165,8 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         const msg = bannerMessage("Failed to load message history", err);
         setError(msg);
         reportAppError(msg);
+      } finally {
+        if (!tok.cancelled) setHistoryLoading(false);
       }
 
       if (tok.cancelled) return;
@@ -320,6 +347,8 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     }
     if (oldestId === undefined) return;
     loadingOlderRef.current = true;
+    setIsLoadingOlder(true);
+    setLoadOlderError(null);
     try {
       const page = await getClient().listMessages(ch, {
         before: oldestId,
@@ -329,24 +358,54 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       // prepending so the prepended block reads chronologically and the
       // newest of the block sits immediately above the previous-top row.
       const reversed = [...page].reverse();
-      setMessages((prev) => {
-        if (reversed.length === 0) return prev;
-        const seen = new Set(prev.map((p) => p.id));
-        const fresh = reversed.filter((m) => !seen.has(m.id));
-        if (fresh.length === 0) return prev;
-        return [...fresh, ...prev];
-      });
-      setCanLoadOlder(page.length >= CATCHUP_LIMIT);
+      // Compute the dedup against the latest committed messages (read
+      // from the ref) outside the reducer. Computing inside the reducer
+      // would race under StrictMode / concurrent rendering: the reducer
+      // runs twice, and a stashed "freshCount" written from each pass
+      // would record the second pass's view of the world (everything
+      // already prepended) rather than the first pass's true fresh
+      // count. WS frames between the awaited fetch and this branch only
+      // append newer rows, so older-window dedup against the ref is
+      // correct.
+      const seen = new Set(messagesRef.current.map((p) => p.id));
+      const fresh = reversed.filter((m) => !seen.has(m.id));
+      if (fresh.length > 0) {
+        setMessages((prev) => {
+          // Belt-and-braces: a second StrictMode pass sees `prev`
+          // already containing the prepend; re-dedup against `prev` so
+          // the second pass becomes a no-op rather than a double-prepend.
+          const seenPrev = new Set(prev.map((p) => p.id));
+          const stillFresh = fresh.filter((m) => !seenPrev.has(m.id));
+          if (stillFresh.length === 0) return prev;
+          return [...stillFresh, ...prev];
+        });
+      }
+      // Gate on deduped fresh count, not raw page size: a full server
+      // page that mostly overlapped state means the channel's start is
+      // effectively in view, so hide the trigger (#589).
+      setCanLoadOlder(fresh.length >= CATCHUP_LIMIT);
     } catch (err) {
       const msg = bannerMessage("Failed to load older messages", err);
-      setError(msg);
+      setLoadOlderError(msg);
       reportAppError(msg);
     } finally {
       loadingOlderRef.current = false;
+      setIsLoadingOlder(false);
     }
   }, []);
 
-  return { messages, connection, error, send, retry, loadOlder, canLoadOlder };
+  return {
+    messages,
+    connection,
+    error,
+    historyLoading,
+    send,
+    retry,
+    loadOlder,
+    canLoadOlder,
+    isLoadingOlder,
+    loadOlderError,
+  };
 }
 
 export { BACKOFF_MS };

@@ -678,8 +678,10 @@ describe("useMessages", () => {
     expect(ids[48]).toBe("M0099");
     expect(ids[49]).toBe("M001");
     expect(ids[98]).toBe("M050");
-    // Page came back full (50) so the "more might exist" heuristic stays on.
-    expect(result.current.canLoadOlder).toBe(true);
+    // Server window overlapped state by one row, so the deduped fresh
+    // count is 49 — below CATCHUP_LIMIT — and the trigger hides. The
+    // gate reads the post-dedup count, not the raw page size (#589).
+    expect(result.current.canLoadOlder).toBe(false);
   });
 
   it("canLoadOlder stays false when initial history is short", async () => {
@@ -688,6 +690,38 @@ describe("useMessages", () => {
     await waitFor(() => {
       expect(result.current.messages).toHaveLength(1);
     });
+    expect(result.current.canLoadOlder).toBe(false);
+  });
+
+  it("canLoadOlder flips off when a full older page is mostly duplicates (gate reads deduped count, not raw page size)", async () => {
+    // Initial page: 50 newest-first rows.
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    // Older page: server returns a full 50-row window, but 49 of those
+    // rows are already in state (overlap window). After dedup only one
+    // fresh row prepends — the trigger should hide because the channel's
+    // start is effectively in view, not stay visible for one extra
+    // (eventually-empty) click (#589).
+    const older: MsgRow[] = [
+      msg("M-049-older", "older-49"),
+      ...Array.from({ length: 49 }, (_, i) =>
+        msg(`M${String(49 - i).padStart(3, "0")}`, `body-${String(49 - i)}`),
+      ),
+    ];
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockResolvedValueOnce(older);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.canLoadOlder).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    expect(result.current.messages).toHaveLength(51);
     expect(result.current.canLoadOlder).toBe(false);
   });
 
@@ -716,6 +750,99 @@ describe("useMessages", () => {
     expect(result.current.canLoadOlder).toBe(false);
   });
 
+  it("loadOlder failure surfaces on loadOlderError, not the channel-level error", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockRejectedValueOnce(new Error("network down internal-trace-77"));
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.canLoadOlder).toBe(true);
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.loadOlderError).toBeNull();
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+
+    // Older-page failure routes to its own slot, with the curated message.
+    expect(result.current.loadOlderError).toBe(
+      "Failed to load older messages: Something went wrong.",
+    );
+    // Raw err.message must not leak into the visible reason.
+    expect(result.current.loadOlderError ?? "").not.toContain("network down");
+    expect(result.current.loadOlderError ?? "").not.toContain("internal-trace-77");
+    // Channel-level error stays reserved for history/socket faults.
+    expect(result.current.error).toBeNull();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("loadOlder clears a stale loadOlderError on the next attempt", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    const olderShort = [msg("M000", "older")];
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockRejectedValueOnce(new Error("transient"));
+    listMessagesMock.mockResolvedValueOnce(olderShort);
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.canLoadOlder).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.loadOlderError).not.toBeNull();
+
+    await act(async () => {
+      await result.current.loadOlder();
+    });
+    expect(result.current.loadOlderError).toBeNull();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("isLoadingOlder is true mid-fetch and false once the older page settles", async () => {
+    const initial = Array.from({ length: 50 }, (_, i) =>
+      msg(`M${String(50 - i).padStart(3, "0")}`, `body-${String(50 - i)}`),
+    );
+    listMessagesMock.mockResolvedValueOnce(initial);
+    let resolveOlder: ((rows: MsgRow[]) => void) | undefined;
+    listMessagesMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow[]>((resolve) => {
+          resolveOlder = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useMessages("C1"));
+    await waitFor(() => {
+      expect(result.current.canLoadOlder).toBe(true);
+    });
+    expect(result.current.isLoadingOlder).toBe(false);
+
+    let olderPromise: Promise<void> | undefined;
+    await act(async () => {
+      olderPromise = result.current.loadOlder();
+      await Promise.resolve();
+    });
+    // Mid-flight: the in-flight flag is on so the view can disable +
+    // relabel the trigger.
+    expect(result.current.isLoadingOlder).toBe(true);
+
+    await act(async () => {
+      resolveOlder?.([msg("M000", "older")]);
+      await olderPromise;
+    });
+    expect(result.current.isLoadingOlder).toBe(false);
+  });
+
   it("dispatches the curated history error into the shared app-error sink", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     listMessagesMock.mockRejectedValueOnce(new Error("history boom"));
@@ -727,6 +854,45 @@ describe("useMessages", () => {
     await waitFor(() => {
       expect(sink.current).toBe("Failed to load message history: Something went wrong.");
     });
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("historyLoading is true from mount until the initial listMessages call resolves", async () => {
+    let resolveHistory: ((rows: MsgRow[]) => void) | undefined;
+    listMessagesMock.mockImplementationOnce(
+      () =>
+        new Promise<MsgRow[]>((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useMessages("C1"));
+    // Mid-fetch: messages are empty, error is null, but historyLoading
+    // marks the gap so the view can suppress empty-state copy.
+    expect(result.current.historyLoading).toBe(true);
+    expect(result.current.messages).toEqual([]);
+    expect(result.current.error).toBeNull();
+
+    await act(async () => {
+      resolveHistory?.([msg("M1", "hello")]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(result.current.historyLoading).toBe(false);
+    });
+    expect(result.current.messages.map((m) => m.id)).toEqual(["M1"]);
+  });
+
+  it("historyLoading flips false on initial-history failure too", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    listMessagesMock.mockRejectedValueOnce(new Error("boom"));
+    const { result } = renderHook(() => useMessages("C1"));
+    expect(result.current.historyLoading).toBe(true);
+    await waitFor(() => {
+      expect(result.current.historyLoading).toBe(false);
+    });
+    expect(result.current.error).not.toBeNull();
     consoleErrorSpy.mockRestore();
   });
 

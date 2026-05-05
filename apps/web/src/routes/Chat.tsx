@@ -2,6 +2,7 @@ import type * as React from "react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -56,13 +57,12 @@ export function Chat(): React.JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  // Mirror of `activeChannel` for the mount-time focus rAF callback, which
-  // captures its scope at mount (when activeChannel is still null) but fires
-  // after the channels-list effect has set the first channel.
-  const activeChannelRef = useRef<string | null>(activeChannel);
-  useEffect(() => {
-    activeChannelRef.current = activeChannel;
-  }, [activeChannel]);
+  // Once the focus anchor lands on the composer, leave it alone — re-running
+  // the effect on later state changes would steal focus from wherever the
+  // user has navigated since (e.g. the channel list). The heading/list
+  // branches are first-paint placeholders and remain re-targetable until the
+  // composer becomes the resting anchor.
+  const composerFocusedRef = useRef(false);
 
   useEffect(() => {
     if (activeChannel === null && channelsState.channels.length > 0) {
@@ -70,40 +70,54 @@ export function Chat(): React.JSX.Element {
     }
   }, [activeChannel, channelsState.channels]);
 
+  // Auto-scroll only when the user is already pinned to the bottom. If they
+  // scrolled up to read history, a new live message must not yank them back —
+  // mid-thread reading is the common mobile case (#633, parent #156). The
+  // 8px tolerance absorbs subpixel rounding from zoom and high-DPI panels;
+  // tighter values flicker on iOS Safari, looser values miss true near-bottom
+  // positions. `scrollHeight` is read *before* the next paint, so the check
+  // races the layout that adds the new row — but the previous render already
+  // pinned `scrollTop` to the prior bottom whenever the user was there, so
+  // the comparison is correct against the pre-update geometry.
+  const wasAtBottomRef = useRef(true);
+  const onListScroll = useCallback((): void => {
+    const el = listRef.current;
+    if (el === null) return;
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    wasAtBottomRef.current = distanceFromBottom <= 8;
+  }, []);
   useEffect(() => {
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el === null) return;
+    if (wasAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messagesState.messages]);
 
-  // Mount-time focus delivery: composer when a channel is active, else the
-  // channel heading, else the message list. Replaces App.tsx's imperative
-  // `document.querySelector` chain (issue #189). Sign-out unmounts <Chat />, so
-  // a later sign-in re-runs. The composer branch reads `activeChannelRef`
-  // (the source of truth driving `disabled` on the textarea) rather than the
-  // DOM `disabled` attribute — the ref reflects the latest state when the rAF
-  // callback fires after the initial channels-list resolve, where the captured
-  // closure value would still be the mount-time `null`.
-  useEffect(() => {
-    const id = window.requestAnimationFrame(() => {
-      const composer = composerRef.current;
-      if (composer !== null && activeChannelRef.current !== null) {
-        composer.focus();
-        return;
-      }
-      const heading = headingRef.current;
-      if (heading !== null) {
-        heading.focus();
-        return;
-      }
-      const list = listRef.current;
-      if (list !== null) {
-        list.focus();
-      }
-    });
-    return () => {
-      window.cancelAnimationFrame(id);
-    };
-  }, []);
+  // Focus delivery, priority composer → heading → list. useLayoutEffect lands
+  // focus before the browser paints so SR users don't see a frame on
+  // `document.body`. Re-runs when `activeChannel` flips from null to a real
+  // id (e.g. once `useChannels` resolves), promoting focus from the heading
+  // placeholder to the composer. `composerFocusedRef` guards against
+  // stealing focus back if the user has tabbed away since.
+  useLayoutEffect(() => {
+    if (composerFocusedRef.current) return;
+    const composer = composerRef.current;
+    if (composer !== null && activeChannel !== null) {
+      composer.focus();
+      composerFocusedRef.current = true;
+      return;
+    }
+    const heading = headingRef.current;
+    if (heading !== null) {
+      heading.focus();
+      return;
+    }
+    const list = listRef.current;
+    if (list !== null) {
+      list.focus();
+    }
+  }, [activeChannel]);
 
   // Build the polite-region announcement text from the latest presence
   // event. The presence list itself reorders rather than appends rows, so
@@ -154,8 +168,15 @@ export function Chat(): React.JSX.Element {
   // the eventual list and flash for SR users.
   const showNoChannelsEmpty =
     !channelsState.loading && channelsState.error === null && channelsState.channels.length === 0;
+  // Mirrors the no-channels guard above: hold the hint until the initial
+  // listMessages fetch settles. Otherwise the connecting → connected window
+  // (state is `messages === []`, `error === null`) flashes the hint for the
+  // duration of the fetch on every channel switch.
   const showEmptyChannelHint =
-    activeChannel !== null && messagesState.error === null && messagesState.messages.length === 0;
+    activeChannel !== null &&
+    !messagesState.historyLoading &&
+    messagesState.error === null &&
+    messagesState.messages.length === 0;
 
   async function submitDraft(): Promise<void> {
     if (sendDisabled) return;
@@ -264,6 +285,7 @@ export function Chat(): React.JSX.Element {
           aria-atomic="false"
           aria-label="conversation"
           tabIndex={-1}
+          onScroll={onListScroll}
         >
           {messagesState.error !== null ? (
             <p role="alert" className="error">
@@ -281,16 +303,29 @@ export function Chat(): React.JSX.Element {
             </p>
           ) : null}
           {messagesState.canLoadOlder ? (
-            <button
-              type="button"
-              className="messages__load-older"
-              data-testid="load-older-button"
-              onClick={() => {
-                void messagesState.loadOlder();
-              }}
-            >
-              Load older messages
-            </button>
+            <>
+              <button
+                type="button"
+                className="messages__load-older"
+                data-testid="load-older-button"
+                onClick={() => {
+                  void messagesState.loadOlder();
+                }}
+                disabled={messagesState.isLoadingOlder}
+                aria-busy={messagesState.isLoadingOlder ? "true" : undefined}
+              >
+                {messagesState.isLoadingOlder ? "Loading older messages…" : "Load older messages"}
+              </button>
+              {messagesState.loadOlderError !== null ? (
+                <p
+                  role="alert"
+                  className="error messages__load-older-error"
+                  data-testid="load-older-error"
+                >
+                  {messagesState.loadOlderError}
+                </p>
+              ) : null}
+            </>
           ) : null}
           {messagesState.messages.map((m) => {
             const cls =

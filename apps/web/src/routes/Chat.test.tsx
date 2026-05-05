@@ -1269,6 +1269,79 @@ describe("test_web_chat_focus_management_mount_with_channel_focuses_composer", (
   });
 });
 
+describe("test_web_chat_focus_promotes_to_composer_when_channels_resolve_after_paint", () => {
+  it("first paint focuses the heading (channels still loading), then promotes focus to the composer once useChannels resolves", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    // Hold listChannels open across the initial paint so the channel list
+    // is empty long enough for the heading branch to win first; then
+    // resolve and assert the focus effect re-runs and lands on the composer.
+    let resolveChannels: ((rows: unknown[]) => void) | undefined;
+    listChannelsMock.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveChannels = resolve;
+        }),
+    );
+    listMessagesMock.mockResolvedValue([]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: /select a channel/i });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(heading);
+    });
+
+    await act(async () => {
+      resolveChannels?.([{ id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" }]);
+      await Promise.resolve();
+    });
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(composer).not.toBeDisabled();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
+  });
+});
+
+describe("test_web_chat_focus_does_not_steal_back_to_composer_after_user_moves_away", () => {
+  it("does not pull focus back to the composer when state changes after the user has tabbed elsewhere", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const composer = await screen.findByLabelText<HTMLTextAreaElement>("message");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(composer);
+    });
+
+    // Simulate the user moving focus to the Sign out button.
+    const signOut = screen.getByRole("button", { name: /sign out/i });
+    act(() => {
+      signOut.focus();
+    });
+    expect(document.activeElement).toBe(signOut);
+
+    // A subsequent state change (typing in the composer) updates Chat
+    // state. The focus effect must not re-run and steal focus back.
+    act(() => {
+      fireEvent.change(composer, { target: { value: "hi" } });
+    });
+    expect(document.activeElement).toBe(signOut);
+  });
+});
+
 describe("test_web_chat_landmarks_have_accessible_names", () => {
   it("aside, main, and sidebar lists each expose an accessible name", async () => {
     happyPath();
@@ -1413,6 +1486,135 @@ describe("test_web_chat_load_older_button_visible_only_after_full_page", () => {
   });
 });
 
+describe("test_web_chat_load_older_button_loading_affordance", () => {
+  it("flips disabled + aria-busy + label to 'Loading older messages…' while a fetch is in flight", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const initial = Array.from({ length: 50 }, (_, i) => ({
+      id: `M${String(50 - i).padStart(3, "0")}`,
+      channel_id: "C1",
+      sender_user_id: "U2",
+      body: `body-${String(50 - i)}`,
+      created_at: "2026-01-01T00:00:00Z",
+    }));
+    listMessagesMock.mockResolvedValueOnce(initial);
+    let resolveOlder: ((rows: unknown[]) => void) | undefined;
+    listMessagesMock.mockImplementationOnce(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveOlder = resolve;
+        }),
+    );
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const trigger = await screen.findByTestId("load-older-button");
+    expect(trigger).not.toBeDisabled();
+    expect(trigger).not.toHaveAttribute("aria-busy");
+    expect(trigger.textContent).toBe("Load older messages");
+
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+
+    // Mid-fetch: button is disabled, announces busy, and the label flips.
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute("aria-busy", "true");
+    expect(trigger.textContent).toBe("Loading older messages…");
+
+    // A second click while busy must not fire a second request — the
+    // disabled flip prevents the click; loadingOlderRef belt-and-braces it.
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+    expect(listMessagesMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveOlder?.([
+        {
+          id: "M000",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "older",
+          created_at: "2025-12-31T00:00:00Z",
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    // Settled: short older page → trigger hides entirely.
+    await waitFor(() => {
+      expect(screen.queryByTestId("load-older-button")).toBeNull();
+    });
+  });
+});
+
+describe("test_web_chat_load_older_failure_renders_inline_not_in_channel_banner", () => {
+  it("loadOlder failure renders inline below the trigger and does not mount the channel-level alert", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    const initial = Array.from({ length: 50 }, (_, i) => ({
+      id: `M${String(50 - i).padStart(3, "0")}`,
+      channel_id: "C1",
+      sender_user_id: "U2",
+      body: `body-${String(50 - i)}`,
+      created_at: "2026-01-01T00:00:00Z",
+    }));
+    listMessagesMock.mockResolvedValueOnce(initial);
+    listMessagesMock.mockRejectedValueOnce(new Error("network down"));
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    const trigger = await screen.findByTestId("load-older-button");
+
+    await act(async () => {
+      fireEvent.click(trigger);
+      await Promise.resolve();
+    });
+
+    // Inline error sits next to the trigger, role=alert so SR users hear it.
+    const inline = await screen.findByTestId("load-older-error");
+    expect(inline).toHaveAttribute("role", "alert");
+    expect(inline.textContent).toBe("Failed to load older messages: Something went wrong.");
+    // Raw err.message must not leak into the visible copy.
+    expect(inline.textContent).not.toContain("network down");
+
+    // Channel-level <p role="alert" class="error"> for history/WS faults
+    // must not have mounted — the per-trigger error is on its own slot.
+    // The inline element shares the `error` class but carries the
+    // distinguishing `messages__load-older-error` class.
+    const list = screen.getByTestId("message-list");
+    const channelBanners = Array.from(list.querySelectorAll<HTMLElement>("p.error")).filter(
+      (el) => !el.classList.contains("messages__load-older-error"),
+    );
+    expect(channelBanners).toHaveLength(0);
+
+    // Trigger remains visible (canLoadOlder did not flip) so the user
+    // can retry.
+    expect(screen.getByTestId("load-older-button")).toBeInTheDocument();
+    consoleErrorSpy.mockRestore();
+  });
+});
+
 describe("test_web_chat_empty_messages_in_selected_channel_renders_start_of_channel_hint", () => {
   it("populated channels with an empty messages list renders the 'start of #general' hint", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });
@@ -1433,5 +1635,157 @@ describe("test_web_chat_empty_messages_in_selected_channel_renders_start_of_chan
     expect(hint.textContent).toBe("This is the start of #general — send a message to say hi.");
     // No-channels copy must not render once a channel is active.
     expect(screen.queryByTestId("empty-state-no-channels")).toBeNull();
+  });
+});
+
+describe("test_web_chat_does_not_flash_empty_channel_hint_before_history_resolves", () => {
+  it("populated channel does not render the start-of-channel hint while listMessages is in flight", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Hold listMessages open until after we have asserted that the hint
+    // is absent. The state at this point — connecting WS, empty messages,
+    // null error — is the exact race the historyLoading gate covers.
+    let resolveHistory: ((rows: unknown[]) => void) | undefined;
+    listMessagesMock.mockImplementation(
+      () =>
+        new Promise<unknown[]>((resolve) => {
+          resolveHistory = resolve;
+        }),
+    );
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    // The channel heading reflecting the active channel is the earliest
+    // signal that activeChannel has been set; from this point onward the
+    // race window in Chat.tsx (connecting + empty messages + null error)
+    // is open until listMessages settles.
+    await screen.findByRole("heading", { name: /^general$/ });
+    expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
+
+    await act(async () => {
+      resolveHistory?.([
+        {
+          id: "M1",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "hello",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    // Once history lands with rows, the hint stays absent (messages>0)
+    // and at least one article renders.
+    const articles = await screen.findAllByRole("article");
+    expect(articles.length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
+  });
+});
+
+describe("test_web_message_list_respects_user_scroll_when_live_message_arrives", () => {
+  it("does not auto-scroll to bottom when the user has scrolled up", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+    expect(sock).toBeDefined();
+
+    const list = screen.getByTestId("message-list");
+    // jsdom doesn't lay out, so scrollHeight/clientHeight are 0 and the
+    // is-at-bottom check would always be true. Stub the geometry to model
+    // a viewport that's been scrolled well above the bottom (distance =
+    // scrollHeight - (scrollTop + clientHeight) = 500, far past the 8px
+    // tolerance). scrollTop is writable in jsdom; the others are getter
+    // properties redefined here.
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M2",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live arrival while reading history",
+            created_at: "2026-01-01T00:00:01Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("live arrival while reading history")).toBeInTheDocument();
+    // The auto-scroll effect must not have fired — scrollTop stays at the
+    // user's position, not jumped to scrollHeight (1000).
+    expect(list.scrollTop).toBe(100);
+  });
+
+  it("auto-scrolls to bottom when the user is pinned at the bottom", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(FakeSocket.instances.some((s) => s.url.includes("channel=C1"))).toBe(true);
+    });
+    const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
+
+    const list = screen.getByTestId("message-list");
+    // Geometry: user is pinned at bottom (distance = 0 ≤ 8px tolerance).
+    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
+    list.scrollTop = 600;
+    fireEvent.scroll(list);
+
+    await act(async () => {
+      sock?.open();
+      sock?.onmessage?.({
+        data: JSON.stringify({
+          type: "message",
+          data: {
+            id: "M2",
+            channel_id: "C1",
+            sender_user_id: "U3",
+            body: "live arrival at bottom",
+            created_at: "2026-01-01T00:00:01Z",
+          },
+        }),
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("live arrival at bottom")).toBeInTheDocument();
+    // The effect ran and pinned scrollTop to scrollHeight.
+    expect(list.scrollTop).toBe(1000);
   });
 });

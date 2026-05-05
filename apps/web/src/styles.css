@@ -99,7 +99,8 @@ button.linklike {
 .chat-layout {
   display: grid;
   grid-template-columns: 240px 1fr;
-  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
 }
 
 .sidebar {
@@ -341,6 +342,26 @@ button.linklike {
   .sidebar li button {
     min-height: 44px;
     padding: 0.6rem 0.75rem;
+  }
+
+  .sidebar header button {
+    min-height: 44px;
+  }
+
+  .messages__load-older {
+    min-height: 44px;
+  }
+
+  .msg__retry {
+    min-height: 44px;
+  }
+
+  .composer textarea {
+    min-height: 44px;
+  }
+
+  .composer button {
+    min-height: 44px;
   }
 
   .messages {
