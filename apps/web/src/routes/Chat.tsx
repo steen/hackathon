@@ -2,6 +2,7 @@ import type * as React from "react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -56,13 +57,12 @@ export function Chat(): React.JSX.Element {
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
-  // Mirror of `activeChannel` for the mount-time focus rAF callback, which
-  // captures its scope at mount (when activeChannel is still null) but fires
-  // after the channels-list effect has set the first channel.
-  const activeChannelRef = useRef<string | null>(activeChannel);
-  useEffect(() => {
-    activeChannelRef.current = activeChannel;
-  }, [activeChannel]);
+  // Once the focus anchor lands on the composer, leave it alone — re-running
+  // the effect on later state changes would steal focus from wherever the
+  // user has navigated since (e.g. the channel list). The heading/list
+  // branches are first-paint placeholders and remain re-targetable until the
+  // composer becomes the resting anchor.
+  const composerFocusedRef = useRef(false);
 
   useEffect(() => {
     if (activeChannel === null && channelsState.channels.length > 0) {
@@ -75,35 +75,30 @@ export function Chat(): React.JSX.Element {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messagesState.messages]);
 
-  // Mount-time focus delivery: composer when a channel is active, else the
-  // channel heading, else the message list. Replaces App.tsx's imperative
-  // `document.querySelector` chain (issue #189). Sign-out unmounts <Chat />, so
-  // a later sign-in re-runs. The composer branch reads `activeChannelRef`
-  // (the source of truth driving `disabled` on the textarea) rather than the
-  // DOM `disabled` attribute — the ref reflects the latest state when the rAF
-  // callback fires after the initial channels-list resolve, where the captured
-  // closure value would still be the mount-time `null`.
-  useEffect(() => {
-    const id = window.requestAnimationFrame(() => {
-      const composer = composerRef.current;
-      if (composer !== null && activeChannelRef.current !== null) {
-        composer.focus();
-        return;
-      }
-      const heading = headingRef.current;
-      if (heading !== null) {
-        heading.focus();
-        return;
-      }
-      const list = listRef.current;
-      if (list !== null) {
-        list.focus();
-      }
-    });
-    return () => {
-      window.cancelAnimationFrame(id);
-    };
-  }, []);
+  // Focus delivery, priority composer → heading → list. useLayoutEffect lands
+  // focus before the browser paints so SR users don't see a frame on
+  // `document.body`. Re-runs when `activeChannel` flips from null to a real
+  // id (e.g. once `useChannels` resolves), promoting focus from the heading
+  // placeholder to the composer. `composerFocusedRef` guards against
+  // stealing focus back if the user has tabbed away since.
+  useLayoutEffect(() => {
+    if (composerFocusedRef.current) return;
+    const composer = composerRef.current;
+    if (composer !== null && activeChannel !== null) {
+      composer.focus();
+      composerFocusedRef.current = true;
+      return;
+    }
+    const heading = headingRef.current;
+    if (heading !== null) {
+      heading.focus();
+      return;
+    }
+    const list = listRef.current;
+    if (list !== null) {
+      list.focus();
+    }
+  }, [activeChannel]);
 
   // Build the polite-region announcement text from the latest presence
   // event. The presence list itself reorders rather than appends rows, so
