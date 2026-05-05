@@ -24,6 +24,13 @@ const MAX_BODY_BYTES = 4 * 1024;
 // they can see the limit approach. Below it, the chrome stays out of the way.
 const WARN_RATIO = 0.8;
 
+// Max distance from the bottom (px) that still counts as "at bottom" for
+// the auto-scroll-on-new-message effect. Absorbs subpixel rounding from
+// zoom and high-DPI panels; tighter values flicker on iOS Safari, looser
+// values miss true near-bottom positions. Exported so tests can derive
+// boundary scrollTop values without re-encoding the literal.
+export const IS_AT_BOTTOM_TOLERANCE_PX = 8;
+
 function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
   const label =
     state === "open"
@@ -72,19 +79,17 @@ export function Chat(): React.JSX.Element {
 
   // Auto-scroll only when the user is already pinned to the bottom. If they
   // scrolled up to read history, a new live message must not yank them back —
-  // mid-thread reading is the common mobile case (#633, parent #156). The
-  // 8px tolerance absorbs subpixel rounding from zoom and high-DPI panels;
-  // tighter values flicker on iOS Safari, looser values miss true near-bottom
-  // positions. `scrollHeight` is read *before* the next paint, so the check
-  // races the layout that adds the new row — but the previous render already
-  // pinned `scrollTop` to the prior bottom whenever the user was there, so
-  // the comparison is correct against the pre-update geometry.
+  // mid-thread reading is the common mobile case (#633, parent #156).
+  // `scrollHeight` is read *before* the next paint, so the check races the
+  // layout that adds the new row — but the previous render already pinned
+  // `scrollTop` to the prior bottom whenever the user was there, so the
+  // comparison is correct against the pre-update geometry.
   const wasAtBottomRef = useRef(true);
   const onListScroll = useCallback((): void => {
     const el = listRef.current;
     if (el === null) return;
     const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
-    wasAtBottomRef.current = distanceFromBottom <= 8;
+    wasAtBottomRef.current = distanceFromBottom <= IS_AT_BOTTOM_TOLERANCE_PX;
   }, []);
   useEffect(() => {
     const el = listRef.current;

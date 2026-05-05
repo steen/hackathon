@@ -60,7 +60,7 @@ vi.mock("../api.js", () => ({
 }));
 
 import { AuthProvider } from "../auth/AuthContext.js";
-import { Chat } from "./Chat.js";
+import { Chat, IS_AT_BOTTOM_TOLERANCE_PX } from "./Chat.js";
 
 beforeEach(() => {
   (globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket;
@@ -1908,12 +1908,14 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
 
     const list = screen.getByTestId("message-list");
     // Boundary case: distance = scrollHeight - (scrollTop + clientHeight)
-    // = 1000 - (592 + 400) = 8. The `<= 8` check in Chat.tsx must treat
+    // = IS_AT_BOTTOM_TOLERANCE_PX. The `<=` check in Chat.tsx must treat
     // this as still-at-bottom and fire the auto-scroll. If a refactor
-    // tightens the comparison to `< 8`, this case regresses.
-    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
-    list.scrollTop = 592;
+    // tightens the comparison to `<`, this case regresses.
+    const scrollHeight = 1000;
+    const clientHeight = 400;
+    Object.defineProperty(list, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: clientHeight, configurable: true });
+    list.scrollTop = scrollHeight - clientHeight - IS_AT_BOTTOM_TOLERANCE_PX;
     fireEvent.scroll(list);
 
     await act(async () => {
@@ -1934,7 +1936,7 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     });
 
     expect(screen.getByText("live arrival at 8px boundary")).toBeInTheDocument();
-    expect(list.scrollTop).toBe(1000);
+    expect(list.scrollTop).toBe(scrollHeight);
   });
 
   it("does not auto-scroll when distance from bottom is 9px (boundary exclusive)", async () => {
@@ -1954,13 +1956,15 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     const sock = FakeSocket.instances.find((s) => s.url.includes("channel=C1"));
 
     const list = screen.getByTestId("message-list");
-    // Boundary case: distance = 1000 - (591 + 400) = 9, just past the
-    // 8px tolerance. The user counts as scrolled-up; auto-scroll must
-    // not fire. If a refactor loosens the comparison to `<= 9` or
-    // `<= 16`, this case regresses.
-    Object.defineProperty(list, "scrollHeight", { value: 1000, configurable: true });
-    Object.defineProperty(list, "clientHeight", { value: 400, configurable: true });
-    list.scrollTop = 591;
+    // Boundary case: distance = IS_AT_BOTTOM_TOLERANCE_PX + 1, just past
+    // the tolerance. The user counts as scrolled-up; auto-scroll must
+    // not fire. If a refactor loosens the comparison, this case regresses.
+    const scrollHeight = 1000;
+    const clientHeight = 400;
+    const scrollTop = scrollHeight - clientHeight - (IS_AT_BOTTOM_TOLERANCE_PX + 1);
+    Object.defineProperty(list, "scrollHeight", { value: scrollHeight, configurable: true });
+    Object.defineProperty(list, "clientHeight", { value: clientHeight, configurable: true });
+    list.scrollTop = scrollTop;
     fireEvent.scroll(list);
 
     await act(async () => {
@@ -1981,7 +1985,7 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     });
 
     expect(screen.getByText("live arrival at 9px past boundary")).toBeInTheDocument();
-    expect(list.scrollTop).toBe(591);
+    expect(list.scrollTop).toBe(scrollTop);
   });
 });
 
