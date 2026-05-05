@@ -204,6 +204,88 @@ describe("usePresence", () => {
     expect(result.current.usernames).toBe(first);
   });
 
+  it("uses the frame-carried username for an unseen user (#490 join)", async () => {
+    requestMock.mockResolvedValue({ users: [] });
+    const { result } = renderHook(() => usePresence(true));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    const sock = FakeSocket.instances[0];
+    sock?.open();
+
+    await deliver(sock, {
+      type: "presence",
+      data: { kind: "join", user_id: "U_NEW", username: "Carol Newcomer" },
+    });
+
+    await waitFor(() => {
+      expect(result.current.users.map((u) => u.id)).toContain("U_NEW");
+    });
+    expect(result.current.users.find((u) => u.id === "U_NEW")?.username).toBe("Carol Newcomer");
+    expect(result.current.lastEvent).toEqual(
+      expect.objectContaining({ kind: "join", id: "U_NEW", username: "Carol Newcomer" }),
+    );
+    expect(result.current.usernames.get("U_NEW")).toBe("Carol Newcomer");
+  });
+
+  it("prefers the frame-carried username over the seeded directory (#490)", async () => {
+    requestMock.mockResolvedValue({ users: [{ id: "U1", username: "stale-name" }] });
+    const { result } = renderHook(() => usePresence(true));
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    const sock = FakeSocket.instances[0];
+    sock?.open();
+
+    await deliver(sock, {
+      type: "presence",
+      data: { kind: "join", user_id: "U1", username: "fresh-name" },
+    });
+
+    await waitFor(() => {
+      expect(result.current.lastEvent?.username).toBe("fresh-name");
+    });
+    expect(result.current.usernames.get("U1")).toBe("fresh-name");
+  });
+
+  it("falls back to the seeded directory when the server omits username (#490 backwards compat)", async () => {
+    requestMock.mockResolvedValue({ users: [{ id: "U1", username: "alice" }] });
+    const { result } = renderHook(() => usePresence(true));
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    const sock = FakeSocket.instances[0];
+    sock?.open();
+
+    // Drop U1 first so the seed-directory fallback is the only source.
+    await deliver(sock, { type: "presence", data: { kind: "leave", user_id: "U1" } });
+
+    await waitFor(() => {
+      expect(result.current.lastEvent?.kind).toBe("leave");
+    });
+    expect(result.current.lastEvent?.username).toBe("alice");
+  });
+
+  it("emits the frame-carried username on a leave for a never-seeded id (#490)", async () => {
+    requestMock.mockResolvedValue({ users: [] });
+    const { result } = renderHook(() => usePresence(true));
+    await waitFor(() => {
+      expect(FakeSocket.instances).toHaveLength(1);
+    });
+    const sock = FakeSocket.instances[0];
+    sock?.open();
+
+    await deliver(sock, {
+      type: "presence",
+      data: { kind: "leave", user_id: "U_GONE", username: "Dora Departed" },
+    });
+
+    await waitFor(() => {
+      expect(result.current.lastEvent?.id).toBe("U_GONE");
+    });
+    expect(result.current.lastEvent?.username).toBe("Dora Departed");
+  });
+
   it("surfaces a curated error when the seed request fails without echoing the raw err.message", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const raw = new Error("seed boom internal-trace-xyz");
