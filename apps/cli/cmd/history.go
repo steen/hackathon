@@ -37,7 +37,7 @@ func History(ctx context.Context, env *Env, args []string) error {
 	}
 	msgs, err := client.ListMessages(ctx, channel, goclient.ListMessagesOptions{
 		Limit:  *limit,
-		Before: *before,
+		Before: goclient.ULID(*before),
 	})
 	if err != nil {
 		return err

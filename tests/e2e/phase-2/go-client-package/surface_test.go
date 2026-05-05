@@ -151,7 +151,7 @@ func TestAC1_GoClientPackageExposesTypedMethods(t *testing.T) {
 
 		// PostMessage
 		messageBody := "hello from AC-1 surface test"
-		msg, err := client.PostMessage(ctx, channel.ID, messageBody)
+		msg, err := client.PostMessage(ctx, string(channel.ID), messageBody)
 		if err != nil {
 			t.Fatalf("PostMessage: %v", err)
 		}
@@ -163,7 +163,7 @@ func TestAC1_GoClientPackageExposesTypedMethods(t *testing.T) {
 		}
 
 		// ListMessages — must include the message we just posted.
-		messages, err := client.ListMessages(ctx, channel.ID, goclient.ListMessagesOptions{Limit: 50})
+		messages, err := client.ListMessages(ctx, string(channel.ID), goclient.ListMessagesOptions{Limit: 50})
 		if err != nil {
 			t.Fatalf("ListMessages: %v", err)
 		}
@@ -199,7 +199,7 @@ func TestAC1_GoClientPackageExposesTypedMethods(t *testing.T) {
 		// called against a real server without erroring out.
 		watchCtx, watchCancel := context.WithCancel(ctx)
 		defer watchCancel()
-		events, err := client.Watch(watchCtx, goclient.WatchOptions{ChannelID: channel.ID})
+		events, err := client.Watch(watchCtx, goclient.WatchOptions{ChannelID: string(channel.ID)})
 		if err != nil {
 			t.Fatalf("Watch: %v", err)
 		}

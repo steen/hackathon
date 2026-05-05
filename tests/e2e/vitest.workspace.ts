@@ -27,4 +27,8 @@ export default defineWorkspace([
     extends: "./phase-2/ts-api-client-package/vitest.config.ts",
     test: { name: "ts-api-client-package" },
   },
+  {
+    extends: "./phase-3/changelog-entry/vitest.config.ts",
+    test: { name: "changelog-entry" },
+  },
 ]);

@@ -6,22 +6,8 @@
 // `data` payload or an *APIError carrying the error code/message. WS
 // connections are minted via the one-shot ticket flow exposed at
 // POST /api/auth/ws-ticket; bearer tokens are never sent on the upgrade.
-package goclient
-
-import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
-)
-
-// Retry/backoff:
+//
+// # Retry/backoff
 //
 // This client is fire-once by design. REST calls (auth.go, channels.go,
 // messages.go) issue exactly one http.Client.Do per invocation; there
@@ -46,6 +32,20 @@ import (
 // wrapping the *http.Client passed to WithHTTPClient with a retrying
 // RoundTripper rather than forking this package — that keeps the
 // retry policy under your control and out of the typed API surface.
+package goclient
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+)
 
 // DefaultTimeout is the per-request HTTP timeout when the caller does
 // not pass a custom transport. WebSocket upgrades do not use it —
