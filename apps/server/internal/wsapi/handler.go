@@ -257,8 +257,8 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 			return
 		}
 		if !bucket.allow() {
-			writeErrorFrame(ctx, conn, ErrCodeRateLimited, "send rate limit exceeded")
-			_ = conn.Close(websocket.StatusPolicyViolation, "send rate limit exceeded")
+			writeErrorFrame(ctx, conn, ErrCodeRateLimited, wsproto.SendRateLimitCloseReason)
+			_ = conn.Close(websocket.StatusPolicyViolation, wsproto.SendRateLimitCloseReason)
 			return
 		}
 		// Audit #78 (medium): drop inbound frames silently. The phase-0
