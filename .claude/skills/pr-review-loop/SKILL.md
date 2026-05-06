@@ -14,6 +14,7 @@ Driven by `/pr-review-loop` (single tick) or `/pr-review-loop auto` (continuous)
 - The `in-review` GitHub label is the per-PR lock — only one tick at a time holds it. Closing the PR (merge or abandon) auto-removes it.
 - Every step is idempotent.
 - The skill never edits source files itself — only dispatches.
+- Per-worktree runtime isolation: the reviewer's §0 first-action runs `.claude/scripts/write-agent-worktree-settings.sh "$WORKTREE"`, which materializes `<worktree>/.claude/settings.local.json` with deny rules against the parent repo's editable code surface plus `sandbox.enabled: true`. This layers a harness-level reject on top of RULE 0's prompt-side rule (issue #678). The dispatched reviewer runs the script — the supervisor's only job is to keep the §0 reminder in the dispatch prompt.
 
 ## Inputs
 
@@ -63,7 +64,7 @@ Take the lowest-numbered eligible PR first. Add more whose head branches are dis
 For each PR in the planned batch:
 
 1. **Claim**: `rtk gh pr edit <pr> --add-label in-review`. This lock prevents another tick from picking the same PR.
-2. **Dispatch** a `pr-reviewer` subagent with `isolation: "worktree"` and `run_in_background: true`. The prompt must include `pr` and `head_branch` inputs and reference the agent definition (`.claude/agents/pr-reviewer.md`) for the procedure. Use `references/reviewer-prompt-template.md` for the scaffold.
+2. **Dispatch** a `pr-reviewer` subagent with `isolation: "worktree"` and `run_in_background: true`. The prompt must include `pr` and `head_branch` inputs and reference the agent definition (`.claude/agents/pr-reviewer.md`) for the procedure. Use `references/reviewer-prompt-template.md` for the scaffold; it already embeds the §0 reminder to run `.claude/scripts/write-agent-worktree-settings.sh "$WORKTREE"` as the first tool call after the path capture.
 3. **Track** via `TaskCreate` — subject `pr-reviewer subagent (#<pr>) reviews + merges`, status `pending`.
 
 If the dispatch itself fails (worktree creation error, etc.), drop the `in-review` label so the next tick retries: `rtk gh pr edit <pr> --remove-label in-review`.

@@ -13,6 +13,7 @@ Driven by `/phase-loop` (single tick) or `/phase-loop auto` (continuous).
 - Parallel work runs in `.claude/worktrees/agent-<id>` via the Agent tool's `isolation: "worktree"`.
 - Every step is idempotent.
 - The skill never merges PRs, pushes to main, or edits source files — only dispatches.
+- Per-worktree runtime isolation: the worker's §0 first-action runs `.claude/scripts/write-agent-worktree-settings.sh "$WORKTREE"`, which materializes `<worktree>/.claude/settings.local.json` with deny rules against the parent repo's editable code surface plus `sandbox.enabled: true`. This layers a harness-level reject on top of RULE 0's prompt-side rule (issue #678). The dispatched agent runs the script — the supervisor's only job is to keep the §0 reminder in the dispatch prompt.
 
 ## Inputs
 
@@ -97,7 +98,7 @@ If the epic has a "Security audit findings" umbrella, each remaining unfixed fin
 For each planned item:
 
 1. **Claim**: `rtk gh issue edit <N> --add-label in-progress`. This lock prevents another tick (here or on a sibling machine) from picking the same sub-issue.
-2. **Dispatch** an `issue-pr-worker` subagent with `isolation: "worktree"` + `run_in_background: true`. Use `references/worker-prompt-template.md` for the prompt scaffold.
+2. **Dispatch** an `issue-pr-worker` subagent with `isolation: "worktree"` + `run_in_background: true`. Use `references/worker-prompt-template.md` for the prompt scaffold; it already embeds the §0 reminder to run `.claude/scripts/write-agent-worktree-settings.sh "$WORKTREE"` as the first tool call after the path capture.
 
 Never dispatch two subagents with overlapping footprints. Queue the second for next tick if needed.
 
