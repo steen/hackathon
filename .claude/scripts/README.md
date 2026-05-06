@@ -10,7 +10,7 @@ action in §0, after the `WORKTREE` / `PARENT` capture.
 
 Materializes `<worktree>/.claude/settings.local.json` from
 `<parent-repo>/.claude/agent-worktree-settings.template.json`, substituting
-`PARENT_ABS` with the resolved parent-repo absolute path.
+`__PARENT_ABS__` with the resolved parent-repo absolute path.
 
 The deny rules block `Edit` / `Write` / `MultiEdit` against the parent's
 editable code surface (`apps/`, `packages/`, `specs/`, `tests/`, `scripts/`,
