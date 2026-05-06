@@ -32,3 +32,10 @@ const MessageBodyLimit = 4 * 1024
 // (e.g. a 5000-byte cap would still print "4 KiB"). The companion
 // test in limits_test.go fails CI if a future cap value breaks this.
 var MessageBodyLimitCloseReason = fmt.Sprintf("message body exceeds %d KiB limit", MessageBodyLimit/1024)
+
+// SendRateLimitCloseReason is the WebSocket close-reason text the
+// server emits when an inbound frame trips the per-connection send
+// rate limit (PRD §9: 10 msg/s, burst 30). Paired with close code
+// 1008 (StatusPolicyViolation) and the rate_limited error code in
+// the typed error frame emitted just before the close.
+const SendRateLimitCloseReason = "send rate limit exceeded"
