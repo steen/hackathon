@@ -65,6 +65,15 @@ export async function createChannelViaApi(token: string, name: string): Promise<
   return env.data;
 }
 
+// Waits for the chat shell to finish its first render after auth by
+// asserting the sidebar shows the signed-in username. Specs that bypass
+// loginInBrowser (e.g. seeding the JWT into localStorage to dodge the
+// per-IP login limiter) call this directly so the sidebar selector lives
+// in one place — if the markup changes, only this helper updates.
+export async function waitForChatShell(page: Page, username: string): Promise<void> {
+  await expect(page.locator(".sidebar strong")).toContainText(username, { timeout: 10_000 });
+}
+
 // Signs the given user into the web app via the on-screen form. Asserts we
 // land on the chat page (sidebar visible). Each call must be on a fresh
 // page or context so prior session state doesn't leak.
@@ -73,7 +82,5 @@ export async function loginInBrowser(page: Page, username: string): Promise<void
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(TEST_PASSWORD);
   await page.getByRole("button", { name: /sign in/i }).click();
-  // The sidebar shows the username after auth; use that as the readiness
-  // check so we don't race the chat view's first render.
-  await expect(page.locator(".sidebar strong")).toContainText(username, { timeout: 10_000 });
+  await waitForChatShell(page, username);
 }
