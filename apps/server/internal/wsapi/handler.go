@@ -5,7 +5,7 @@ package wsapi
 import (
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -172,7 +172,7 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		if cfg.ChannelLookup != nil && channel != defaultChannel {
 			ok, err := cfg.ChannelLookup(r.Context(), channel)
 			if err != nil {
-				log.Printf("ws channel lookup: %v", err)
+				slog.Error("ws channel lookup", "channel", channel, "err", err)
 				http.Error(w, "channel lookup failed", http.StatusInternalServerError)
 				return
 			}
@@ -245,7 +245,7 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 			if errors.As(err, &ce) || ctx.Err() != nil {
 				return
 			}
-			log.Printf("ws read: %v", err)
+			slog.Warn("ws read", "err", err)
 			return
 		}
 		if len(data) > MessageBodyLimit {

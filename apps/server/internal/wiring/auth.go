@@ -1,7 +1,7 @@
 package wiring
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -33,10 +33,14 @@ func registerAuth(mux *http.ServeMux, deps Deps, trustedProxy bool) authBundle {
 	registerIPCfg := ratelimit.RegisterIPConfigFromEnv()
 	registerIPDefault := ratelimit.RegisterIPConfig()
 	if registerIPCfg.Burst != registerIPDefault.Burst || registerIPCfg.Refill != registerIPDefault.Refill {
-		log.Printf("WARN: %s/%s loosen the per-IP register rate limit (Burst=%d, Refill=%s vs PRD §9 default Burst=%d, Refill=%s); ensure this is a test/dev override",
-			ratelimit.EnvRegisterBurst, ratelimit.EnvRegisterRefill,
-			registerIPCfg.Burst, registerIPCfg.Refill,
-			registerIPDefault.Burst, registerIPDefault.Refill)
+		slog.Warn("per-IP register rate limit loosened from PRD §9 default; ensure this is a test/dev override",
+			"env_burst", ratelimit.EnvRegisterBurst,
+			"env_refill", ratelimit.EnvRegisterRefill,
+			"burst", registerIPCfg.Burst,
+			"refill", registerIPCfg.Refill,
+			"default_burst", registerIPDefault.Burst,
+			"default_refill", registerIPDefault.Refill,
+		)
 	}
 	registerIPLimiter := ratelimit.NewIPLimiter(registerIPCfg)
 	userLimiter := ratelimit.NewUserLimiter(ratelimit.LoginUserConfig())
