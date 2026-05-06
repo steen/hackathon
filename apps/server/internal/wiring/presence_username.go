@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"log"
+	"log/slog"
 	"time"
 
 	"hackathon/apps/server/internal/wsapi"
@@ -40,7 +40,7 @@ func registerPresenceUsername(deps Deps) {
 		).Scan(&username)
 		if err != nil {
 			if !errors.Is(err, sql.ErrNoRows) {
-				log.Printf("presence username lookup for %q: %v", userID, err)
+				slog.Error("presence username lookup", "user_id", userID, "err", err)
 			}
 			return ""
 		}

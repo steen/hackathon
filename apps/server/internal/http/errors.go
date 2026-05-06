@@ -6,7 +6,7 @@ package http
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -46,7 +46,7 @@ func WriteJSON(w http.ResponseWriter, status int, env Envelope) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(env); err != nil {
-		log.Printf("envelope encode: %v", err)
+		slog.Error("envelope encode", "err", err)
 	}
 }
 

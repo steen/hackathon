@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -374,8 +375,11 @@ func TestAccessLogRecordsAuthenticatedUserIDThroughRealChain(t *testing.T) {
 	}
 }
 
-// captureLog redirects the standard logger to a buffer for the duration of
-// the test and restores it on cleanup.
+// captureLog redirects the standard logger AND the default slog logger
+// to a buffer for the duration of the test and restores both on cleanup.
+// AccessLog still writes via stdlib log.Printf (issue #715 keeps the
+// raw access line on stderr); Recover writes via slog (issue #734). Tests
+// that assert on either path read out of the same buffer.
 func captureLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
@@ -385,10 +389,13 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	log.SetOutput(&buf)
 	log.SetFlags(0)
 	log.SetPrefix("")
+	prevSlog := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
 	t.Cleanup(func() {
 		log.SetOutput(prevOut)
 		log.SetFlags(prevFlags)
 		log.SetPrefix(prevPrefix)
+		slog.SetDefault(prevSlog)
 	})
 	return &buf
 }
