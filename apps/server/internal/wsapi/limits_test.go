@@ -115,7 +115,7 @@ func TestWSRejectsMessageBodyOver4KiB(t *testing.T) {
 	}
 
 	frame := readErrorFrame(ctx, t, conn)
-	if frame.Data.Code != wsapi.ErrCodeBodyTooLarge {
+	if frame.Data.Code != string(wsapi.ErrCodeBodyTooLarge) {
 		t.Fatalf("error frame code: got %q want %q", frame.Data.Code, wsapi.ErrCodeBodyTooLarge)
 	}
 
@@ -178,7 +178,7 @@ func TestWSSendRateLimitClosesPolicyViolation(t *testing.T) {
 		if mt == websocket.MessageText {
 			var frame wsErrorFrame
 			if jerr := json.Unmarshal(payload, &frame); jerr == nil &&
-				frame.Type == "error" && frame.Data.Code == wsapi.ErrCodeRateLimited {
+				frame.Type == "error" && frame.Data.Code == string(wsapi.ErrCodeRateLimited) {
 				if frame.Data.Message == "" {
 					t.Fatalf("rate-limit error frame message empty: %+v", frame)
 				}

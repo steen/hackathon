@@ -7,11 +7,17 @@ import (
 	"github.com/coder/websocket"
 )
 
+// ErrCode is the named string type carrying a PRD §10 error-frame code.
+// Naming the parameter type forces call sites to pass one of the Err*
+// constants below — a bare string literal won't compile — so typos in
+// the wire code surface at build time as the enum grows.
+type ErrCode string
+
 // Stable error-frame codes per PRD §10. Exported so e2e callers and
 // the web client can switch on the same constants the server emits.
 const (
-	ErrCodeBodyTooLarge = "body_too_large"
-	ErrCodeRateLimited  = "rate_limited"
+	ErrCodeBodyTooLarge ErrCode = "body_too_large"
+	ErrCodeRateLimited  ErrCode = "rate_limited"
 )
 
 // errorFrameType is the discriminator value of a server→client error
@@ -42,10 +48,10 @@ type errorFrameData struct {
 // practice (fixed-shape struct, ASCII-only fields) so the error from
 // json.Marshal is dropped; if conn.Write itself fails the connection
 // is already gone and the subsequent Close will be a no-op.
-func writeErrorFrame(ctx context.Context, conn *websocket.Conn, code, message string) {
+func writeErrorFrame(ctx context.Context, conn *websocket.Conn, code ErrCode, message string) {
 	payload, err := json.Marshal(errorFrame{
 		Type: errorFrameType,
-		Data: errorFrameData{Code: code, Message: message},
+		Data: errorFrameData{Code: string(code), Message: message},
 	})
 	if err != nil {
 		return
