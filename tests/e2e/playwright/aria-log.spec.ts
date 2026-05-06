@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 
+import { TOKEN_KEY } from "../../../apps/web/src/api";
 import { createChannelViaApi, registerViaApi, uniqueUsername } from "./helpers";
 
 // Regression-guard for #559. PR #557 dropped the explicit aria-live="polite"
@@ -21,19 +22,23 @@ test.describe("Messages list ARIA contract", () => {
     const reg = await registerViaApi(username);
     const channel = await createChannelViaApi(reg.token, uniqueUsername("ch"));
 
-    // Seed the token under the same key apps/web/src/api.ts uses
-    // (TOKEN_KEY = "hackathon.token") so AuthContext reads it on mount and
-    // the app boots already-authenticated. This avoids POSTing
-    // /api/auth/login, which matters because the per-IP login limiter is
-    // Burst=10 and the existing specs already crowd that bucket — a 12th
-    // login from this IP returns 429 and tips the suite over (see #559).
-    // page.goto("/") uses Playwright's baseURL (PW_BASE_URL = the proxy
-    // origin) so localStorage is set on the same origin the SPA later
-    // reads from.
+    // Seed the token under the same key apps/web/src/api.ts uses so
+    // AuthContext reads it on mount and the app boots already-authenticated.
+    // Importing TOKEN_KEY (instead of hard-coding the string) means a
+    // future rename trips a compile/runtime failure here rather than
+    // silently re-routing the spec through /api/auth/login — that path is
+    // rate-limited (per-IP login limiter Burst=10) and the existing specs
+    // already crowd the bucket; a 12th login from this IP returns 429 and
+    // tips the suite over (see #559, #744). page.goto("/") uses
+    // Playwright's baseURL (PW_BASE_URL = the proxy origin) so localStorage
+    // is set on the same origin the SPA later reads from.
     await page.goto("/");
-    await page.evaluate((t) => {
-      window.localStorage.setItem("hackathon.token", t);
-    }, reg.token);
+    await page.evaluate(
+      ([key, t]) => {
+        window.localStorage.setItem(key, t);
+      },
+      [TOKEN_KEY, reg.token],
+    );
     // Full reload (not a hash change) so AuthProvider's mount initializer
     // reads the just-seeded token instead of the original null.
     await page.reload();
