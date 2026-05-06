@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 import { TOKEN_KEY } from "../../../apps/web/src/api";
-import { createChannelViaApi, registerViaApi, uniqueUsername } from "./helpers";
+import { createChannelViaApi, registerViaApi, uniqueUsername, waitForChatShell } from "./helpers";
 
 // Regression-guard for #559. PR #557 dropped the explicit aria-live="polite"
 // from the messages-list <div> and now relies on role="log"'s implicit
@@ -42,7 +42,7 @@ test.describe("Messages list ARIA contract", () => {
     // Full reload (not a hash change) so AuthProvider's mount initializer
     // reads the just-seeded token instead of the original null.
     await page.reload();
-    await expect(page.locator(".sidebar strong")).toContainText(username, { timeout: 10_000 });
+    await waitForChatShell(page, username);
 
     await page.getByRole("button", { name: `#${channel.name}` }).click();
 
