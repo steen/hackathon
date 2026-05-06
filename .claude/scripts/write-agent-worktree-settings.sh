@@ -48,8 +48,8 @@ fi
 mkdir -p "$WORKTREE_ABS/.claude"
 OUT="$WORKTREE_ABS/.claude/settings.local.json"
 
-# Substitute the PARENT_ABS sentinel with the resolved parent path. Use python
-# (with json.loads validation) when available; awk otherwise.
+# Substitute the __PARENT_ABS__ sentinel with the resolved parent path. Use
+# python (with json.loads validation) when available; awk otherwise.
 PY="${PYTHON:-python3}"
 if command -v "$PY" >/dev/null 2>&1; then
   "$PY" - "$TEMPLATE" "$PARENT_ABS" "$OUT" <<'PY'
@@ -57,13 +57,13 @@ import json, sys
 src, parent, dst = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(src) as f:
     raw = f.read()
-raw = raw.replace("PARENT_ABS", parent)
+raw = raw.replace("__PARENT_ABS__", parent)
 json.loads(raw)  # fail fast if substitution broke the JSON
 with open(dst, "w") as f:
     f.write(raw)
 PY
 else
-  awk -v parent="$PARENT_ABS" '{ gsub(/PARENT_ABS/, parent); print }' "$TEMPLATE" > "$OUT"
+  awk -v parent="$PARENT_ABS" '{ gsub(/__PARENT_ABS__/, parent); print }' "$TEMPLATE" > "$OUT"
 fi
 
 echo "wrote $OUT (parent: $PARENT_ABS)"
