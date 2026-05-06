@@ -17,6 +17,13 @@ editable code surface (`apps/`, `packages/`, `specs/`, `tests/`, `scripts/`,
 `.github/`, conflict-magnet roots). Project-local settings override user-level
 ones, so a broad upstream allow does not defeat this layer.
 
+`MultiEdit` is denied alongside `Edit` and `Write` even though `issue-pr-worker`
+and `pr-reviewer` declare `tools: Bash, Read, Edit, Write, Glob, Grep` (i.e. no
+`MultiEdit`). The rules are defense-in-depth: a future agent definition that
+adds `MultiEdit`, a Claude Code release that changes how `tools:` is enforced,
+or a supervisor escalation that grants `MultiEdit` would otherwise bypass the
+deny set.
+
 `sandbox.enabled: true` adds OS-level cwd-write scoping for the Bash bypass
 class (sed / python / echo redirects) that PreToolUse:Edit hooks can't catch
 (Anthropic issue #29709).
