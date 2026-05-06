@@ -116,13 +116,8 @@ describe("changelog-entry AC-1: 0.1.0 entry exists with valid release-day date",
   });
 });
 
-// The phase-grouping assertion is currently skipped: the 0.1.0 entry on
-// main groups bullets by Keep-a-Changelog category (Added/Changed/Security),
-// not by phase. The spec wants phase grouping; the impl needs a follow-up
-// edit to the 0.1.0 entry. Unskip once the entry adds `### Phase N`,
-// `**Phase N**`, or `- Phase N:` markers.
 describe("changelog-entry AC-2: 0.1.0 entry references US-1..US-12 grouped by phase", () => {
-  it.skip("AC-2: the 0.1.0 section body mentions every US-1..US-12 and shows phase grouping", async () => {
+  it("AC-2: the 0.1.0 section body mentions every US-1..US-12 and shows phase grouping", async () => {
     const sources = [
       path.join(repoRoot, "CHANGELOG.md"),
       path.join(repoRoot, "CHANGELOG.d", "0.1.0.md"),
