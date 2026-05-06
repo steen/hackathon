@@ -45,6 +45,18 @@ echo "PARENT=$PARENT"
 
 For every Edit/Write, use the absolute worktree-rooted path (i.e. starting with `$WORKTREE`, e.g. `Write(file_path="$WORKTREE/...")`). Never relative paths. Never parent-rooted paths.
 
+#### Materialize per-worktree deny rules + sandbox — BEFORE any Edit/Write
+
+Run this once, immediately after the path capture above and BEFORE any other Edit/Write tool call:
+
+```bash
+"$PARENT/.claude/scripts/write-agent-worktree-settings.sh" "$WORKTREE"
+```
+
+This writes `$WORKTREE/.claude/settings.local.json` with `permissions.deny` rules covering the parent repo's editable code surface (`apps/`, `packages/`, `specs/`, `tests/`, `scripts/`, `.github/`, `CHANGELOG.md`, `CHANGELOG.d/`, `CLAUDE.md`, `go.mod`/`go.sum`, `package.json`, `pnpm-*`) plus `sandbox.enabled: true`. Project-local settings override user-level, so the parent-deny survives any broad upstream allow. This is the structural layer the prose rules above defend; if the script fails (template missing, parent path unresolved), STOP and report — don't proceed without the layer in place.
+
+Why this matters: `Edit(//<parent-abs>/apps/**)` etc. are rejected at the harness rule engine, not by the model. Even under prompt drift, the harness rejects the tool call. Issue #678 has the full background.
+
 #### Mid-flight leak self-check
 
 After every batch of edits (e.g. when transitioning between footprint sections, or after every ~5 Edit/Write calls), run the parent-status guard. If the parent has any of your changes, you've leaked — stop and report so the supervisor can run the recovery procedure (`feedback_subagent_path_leakage.md`):
