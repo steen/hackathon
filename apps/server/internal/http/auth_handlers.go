@@ -6,7 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"log"
+	"log/slog"
 	"net"
 	stdhttp "net/http"
 	"regexp"
@@ -321,7 +321,7 @@ func (h *AuthHandlers) WSTicket(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // body successfully). The store maps "" to SQL NULL.
 func (h *AuthHandlers) logEvent(ctx context.Context, userID, username, kind, ip, ua string) {
 	if err := h.store.LogAuthEvent(ctx, userID, username, kind, ip, ua); err != nil {
-		log.Printf("auth_events insert failed kind=%s: %v", kind, err)
+		slog.Error("auth_events insert failed", "kind", kind, "err", err)
 	}
 }
 

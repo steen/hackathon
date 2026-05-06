@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -193,8 +194,11 @@ func Recover(next http.Handler) http.Handler {
 			if rv == nil {
 				return
 			}
-			log.Printf("panic request_id=%s value=%v\n%s",
-				RequestID(r.Context()), rv, debug.Stack())
+			slog.Error("panic recovered",
+				"request_id", RequestID(r.Context()),
+				"value", rv,
+				"stack", string(debug.Stack()),
+			)
 			WriteError(w, http.StatusInternalServerError, CodeInternal, "internal server error")
 		}()
 		next.ServeHTTP(w, r)
