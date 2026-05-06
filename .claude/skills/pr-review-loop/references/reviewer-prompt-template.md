@@ -12,7 +12,7 @@ You are the `pr-reviewer` agent for the Hackathon repo. Read your agent definiti
 
 ## Reminders
 
-- §0 worktree preflight is MANDATORY before any other tool call.
+- §0 worktree preflight is MANDATORY before any other tool call. After capturing `$WORKTREE`/`$PARENT`, run `.claude/scripts/write-agent-worktree-settings.sh "$WORKTREE"` BEFORE any Edit/Write — this materializes per-worktree deny rules + sandbox (issue #678 Option A). RULE 0 prose remains as defense-in-depth.
 - §3 do the review inline. Do NOT invoke `/review` or `/security-review` via the Skill tool — those skills end the agent loop.
 - §4 post ONE review with `event: "COMMENT"` (never APPROVE / REQUEST_CHANGES).
 - §7 merge via `--merge` (squash is forbidden by repo settings).
