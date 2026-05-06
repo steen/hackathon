@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(//PARENT_ABS/apps/**)",
+      "Write(//PARENT_ABS/apps/**)",
+      "MultiEdit(//PARENT_ABS/apps/**)",
+      "Edit(//PARENT_ABS/packages/**)",
+      "Write(//PARENT_ABS/packages/**)",
+      "MultiEdit(//PARENT_ABS/packages/**)",
+      "Edit(//PARENT_ABS/specs/**)",
+      "Write(//PARENT_ABS/specs/**)",
+      "MultiEdit(//PARENT_ABS/specs/**)",
+      "Edit(//PARENT_ABS/tests/**)",
+      "Write(//PARENT_ABS/tests/**)",
+      "MultiEdit(//PARENT_ABS/tests/**)",
+      "Edit(//PARENT_ABS/scripts/**)",
+      "Write(//PARENT_ABS/scripts/**)",
+      "MultiEdit(//PARENT_ABS/scripts/**)",
+      "Edit(//PARENT_ABS/.github/**)",
+      "Write(//PARENT_ABS/.github/**)",
+      "MultiEdit(//PARENT_ABS/.github/**)",
+      "Edit(//PARENT_ABS/CHANGELOG.md)",
+      "Write(//PARENT_ABS/CHANGELOG.md)",
+      "Edit(//PARENT_ABS/CHANGELOG.d/**)",
+      "Write(//PARENT_ABS/CHANGELOG.d/**)",
+      "MultiEdit(//PARENT_ABS/CHANGELOG.d/**)",
+      "Edit(//PARENT_ABS/CLAUDE.md)",
+      "Write(//PARENT_ABS/CLAUDE.md)",
+      "Edit(//PARENT_ABS/go.mod)",
+      "Write(//PARENT_ABS/go.mod)",
+      "Edit(//PARENT_ABS/go.sum)",
+      "Write(//PARENT_ABS/go.sum)",
+      "Edit(//PARENT_ABS/package.json)",
+      "Write(//PARENT_ABS/package.json)",
+      "Edit(//PARENT_ABS/pnpm-lock.yaml)",
+      "Write(//PARENT_ABS/pnpm-lock.yaml)",
+      "Edit(//PARENT_ABS/pnpm-workspace.yaml)",
+      "Write(//PARENT_ABS/pnpm-workspace.yaml)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true
+  }
+}
