@@ -1220,44 +1220,58 @@ describe("humanizeTimestamp", () => {
 
 describe("test_web_message_timestamp_renders_humanized_form_not_raw_iso", () => {
   it("recent message label is the humanized form; <time dateTime> keeps the ISO", async () => {
-    meMock.mockResolvedValue({ id: "U1", username: "alice" });
-    listChannelsMock.mockResolvedValue([
-      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
-    ]);
-    const recentIso = new Date(Date.now() - 60_000).toISOString();
-    listMessagesMock.mockResolvedValue([
-      {
-        id: "M1",
-        channel_id: "C1",
-        sender_user_id: "U2",
-        body: "recent body",
-        created_at: recentIso,
-      },
-    ]);
-    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
-    httpRequestMock.mockResolvedValue({ users: [] });
+    // Pin Date so the "today" branch of humanizeTimestamp is reached
+    // regardless of the runner's local clock — without this, a CI tick
+    // landing within 60s of local midnight pushes the message into the
+    // "yesterday" branch and the HH:MM regex fails. `toFake: ['Date']`
+    // leaves setTimeout/setInterval real so RTL's `waitFor` still polls.
+    // 15:30 UTC keeps the "60s ago" instant safely mid-day in all four
+    // CI matrix zones (UTC 15:30 / NY-EDT 11:30 / Kolkata 21:00 /
+    // Auckland-NZST 03:30 next-local-day) — 60s of slack on either side.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-07T15:30:00Z"));
+    try {
+      meMock.mockResolvedValue({ id: "U1", username: "alice" });
+      listChannelsMock.mockResolvedValue([
+        { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+      ]);
+      const recentIso = new Date(Date.now() - 60_000).toISOString();
+      listMessagesMock.mockResolvedValue([
+        {
+          id: "M1",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "recent body",
+          created_at: recentIso,
+        },
+      ]);
+      wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+      httpRequestMock.mockResolvedValue({ users: [] });
 
-    render(
-      <AuthProvider>
-        <Chat />
-      </AuthProvider>,
-    );
+      render(
+        <AuthProvider>
+          <Chat />
+        </AuthProvider>,
+      );
 
-    await waitFor(() => {
-      expect(screen.getByText("recent body")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText("recent body")).toBeInTheDocument();
+      });
 
-    const list = screen.getByTestId("message-list");
-    const timeEl = list.querySelector("time");
-    expect(timeEl).not.toBeNull();
-    expect(timeEl?.getAttribute("datetime")).toBe(recentIso);
-    // Visible label is no longer the raw ISO — it must not contain the
-    // 'T' separator nor the 'Z' suffix that mark RFC3339.
-    expect(timeEl?.textContent ?? "").not.toBe(recentIso);
-    expect(timeEl?.textContent ?? "").not.toContain("T");
-    expect(timeEl?.textContent ?? "").not.toMatch(/Z$/);
-    // For a one-minute-old message the format is HH:MM (today branch).
-    expect(timeEl?.textContent ?? "").toMatch(/^\d{2}:\d{2}$/);
+      const list = screen.getByTestId("message-list");
+      const timeEl = list.querySelector("time");
+      expect(timeEl).not.toBeNull();
+      expect(timeEl?.getAttribute("datetime")).toBe(recentIso);
+      // Visible label is no longer the raw ISO — it must not contain the
+      // 'T' separator nor the 'Z' suffix that mark RFC3339.
+      expect(timeEl?.textContent ?? "").not.toBe(recentIso);
+      expect(timeEl?.textContent ?? "").not.toContain("T");
+      expect(timeEl?.textContent ?? "").not.toMatch(/Z$/);
+      // For a one-minute-old message the format is HH:MM (today branch).
+      expect(timeEl?.textContent ?? "").toMatch(/^\d{2}:\d{2}$/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -1348,46 +1362,63 @@ describe("test_web_message_list_inserts_day_divider_between_messages_spanning_mi
   });
 
   it("does not insert a divider between two messages on the same local day", async () => {
-    meMock.mockResolvedValue({ id: "U1", username: "alice" });
-    listChannelsMock.mockResolvedValue([
-      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
-    ]);
-    // Newest-first per server convention; useMessages reverses to
-    // oldest→newest. M2 (afternoon) is later, so it leads here.
-    listMessagesMock.mockResolvedValue([
-      {
-        id: "M2",
-        channel_id: "C1",
-        sender_user_id: "U2",
-        body: "afternoon",
-        // 5 hours later, same local day
-        created_at: new Date(Date.now() + 5 * 60 * 60_000).toISOString(),
-      },
-      {
-        id: "M1",
-        channel_id: "C1",
-        sender_user_id: "U2",
-        body: "morning",
-        created_at: new Date().toISOString(),
-      },
-    ]);
-    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
-    httpRequestMock.mockResolvedValue({ users: [] });
+    // Pin Date so the two messages always land on the same local day
+    // regardless of the runner's TZ. With ambient `Date.now()`, any
+    // runner whose local clock sat within 5h of local midnight pushed
+    // M2 onto the next local day and the divider count went 1→2 — the
+    // exact flake this test guards against. `toFake: ["Date"]` leaves
+    // setTimeout/setInterval real so RTL's `waitFor` keeps polling.
+    // Across the four CI matrix zones (UTC, America/New_York EDT,
+    // Pacific/Auckland NZST, Asia/Kolkata) the morning and the +5h
+    // afternoon message both fall inside one local calendar day at
+    // this UTC anchor: NY 08:00→13:00, UTC 12:00→17:00, Kolkata
+    // 17:30→22:30, Auckland 00:00→05:00 (next-local-day, both messages).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-05-07T12:00:00Z"));
+    try {
+      meMock.mockResolvedValue({ id: "U1", username: "alice" });
+      listChannelsMock.mockResolvedValue([
+        { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+      ]);
+      // Newest-first per server convention; useMessages reverses to
+      // oldest→newest. M2 (afternoon) is later, so it leads here.
+      listMessagesMock.mockResolvedValue([
+        {
+          id: "M2",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "afternoon",
+          // 5 hours later, same local day (clock is pinned).
+          created_at: new Date(Date.now() + 5 * 60 * 60_000).toISOString(),
+        },
+        {
+          id: "M1",
+          channel_id: "C1",
+          sender_user_id: "U2",
+          body: "morning",
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+      httpRequestMock.mockResolvedValue({ users: [] });
 
-    render(
-      <AuthProvider>
-        <Chat />
-      </AuthProvider>,
-    );
+      render(
+        <AuthProvider>
+          <Chat />
+        </AuthProvider>,
+      );
 
-    await waitFor(() => {
-      expect(screen.getByText("afternoon")).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText("afternoon")).toBeInTheDocument();
+      });
 
-    const list = screen.getByTestId("message-list");
-    const dividers = list.querySelectorAll('[data-testid="day-divider"]');
-    // Only one divider — the leading anchor before the first message.
-    expect(dividers).toHaveLength(1);
+      const list = screen.getByTestId("message-list");
+      const dividers = list.querySelectorAll('[data-testid="day-divider"]');
+      // Only one divider — the leading anchor before the first message.
+      expect(dividers).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
