@@ -36,6 +36,13 @@ func EnforcePolicy(password string) error {
 // the policy — call EnforcePolicy first at the handler boundary.
 // Keeping policy out of Hash means tests and migrations can rehash
 // legacy values without tripping over a stricter policy.
+//
+// The BcryptCost read here is unsynchronized: SetBcryptCost is the
+// only writer and is called once at boot before main.go opens the
+// HTTP listener, so every Hash caller (always behind a handler) is
+// strictly happens-after the write. Adding another caller that runs
+// before the listener opens — or a second writer — would invalidate
+// this and require a mutex or threading the cost through AuthDeps.
 func Hash(password string) (string, error) {
 	h, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {
