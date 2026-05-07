@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
-import type { ConnectionStatus } from "@hackathon/chat-ui";
+import type { ConnectionStatus, MessageStatus as ChatUiMessageStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
 
@@ -11,7 +11,11 @@ import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFac
  */
 export type ConnectionState = ConnectionStatus;
 
-export type MessageStatus = "pending" | "failed";
+/**
+ * Re-exported from `@hackathon/chat-ui` for callers that import the type
+ * from this module. New code should import directly from chat-ui.
+ */
+export type MessageStatus = ChatUiMessageStatus;
 
 export interface MessageView extends Message {
   status?: MessageStatus;

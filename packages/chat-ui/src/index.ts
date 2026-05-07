@@ -1,9 +1,14 @@
 export { ChannelHeader } from "./ChannelHeader/ChannelHeader.js";
 export { ConnectionBadge } from "./ConnectionBadge/ConnectionBadge.js";
 export { ChannelsList } from "./ChannelsList/ChannelsList.js";
+export { MessageItem } from "./MessageItem/MessageItem.js";
+export { MessageList, IS_AT_BOTTOM_TOLERANCE_PX } from "./MessageList/MessageList.js";
 export { PresenceList } from "./PresenceList/PresenceList.js";
 export { PresenceLiveRegion } from "./PresenceList/PresenceLiveRegion.js";
 export { Sidebar } from "./Sidebar/Sidebar.js";
+export { humanizeTimestamp } from "./MessageItem/humanizeTimestamp.js";
+export { userColorClass } from "./colorize.js";
 export type { Channel } from "./ChannelsList/ChannelsList.js";
 export type { PresenceUser } from "./PresenceList/PresenceList.js";
-export type { ConnectionStatus } from "./types.js";
+export type { ChatMessage, ConnectionStatus, MessageStatus } from "./types.js";
+export type { UserColorClass } from "./colorize.js";

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { humanizeTimestamp } from "../utils/formatTimestamp.js";
+import { humanizeTimestamp } from "@hackathon/chat-ui";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];

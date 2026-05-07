@@ -12,6 +12,8 @@ import {
 import {
   ChannelHeader,
   ChannelsList,
+  IS_AT_BOTTOM_TOLERANCE_PX,
+  MessageList,
   PresenceList,
   PresenceLiveRegion,
   Sidebar,
@@ -20,7 +22,6 @@ import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
-import { humanizeTimestamp } from "../utils/formatTimestamp.js";
 
 // Mirrors apps/server/internal/http/messages_handlers.go's MaxMessageBodyBytes
 // (4 KiB). The server measures bytes after TrimSpace; the client prevalidates
@@ -31,12 +32,9 @@ const MAX_BODY_BYTES = 4 * 1024;
 // they can see the limit approach. Below it, the chrome stays out of the way.
 const WARN_RATIO = 0.8;
 
-// Max distance from the bottom (px) that still counts as "at bottom" for
-// the auto-scroll-on-new-message effect. Absorbs subpixel rounding from
-// zoom and high-DPI panels; tighter values flicker on iOS Safari, looser
-// values miss true near-bottom positions. Exported so tests can derive
-// boundary scrollTop values without re-encoding the literal.
-export const IS_AT_BOTTOM_TOLERANCE_PX = 8;
+// Re-exported from chat-ui so existing tests (`Chat.test.tsx`) keep their
+// import path. The constant itself lives in chat-ui/MessageList.
+export { IS_AT_BOTTOM_TOLERANCE_PX };
 
 function byteLength(s: string): number {
   return new TextEncoder().encode(s).length;
@@ -65,28 +63,6 @@ export function Chat(): React.JSX.Element {
       setActiveChannel(channelsState.channels[0]?.id ?? null);
     }
   }, [activeChannel, channelsState.channels]);
-
-  // Auto-scroll only when the user is already pinned to the bottom. If they
-  // scrolled up to read history, a new live message must not yank them back —
-  // mid-thread reading is the common mobile case (#633, parent #156).
-  // `scrollHeight` is read *before* the next paint, so the check races the
-  // layout that adds the new row — but the previous render already pinned
-  // `scrollTop` to the prior bottom whenever the user was there, so the
-  // comparison is correct against the pre-update geometry.
-  const wasAtBottomRef = useRef(true);
-  const onListScroll = useCallback((): void => {
-    const el = listRef.current;
-    if (el === null) return;
-    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
-    wasAtBottomRef.current = distanceFromBottom <= IS_AT_BOTTOM_TOLERANCE_PX;
-  }, []);
-  useEffect(() => {
-    const el = listRef.current;
-    if (el === null) return;
-    if (wasAtBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messagesState.messages]);
 
   // Focus delivery, priority composer → heading → list. useLayoutEffect lands
   // focus before the browser paints so SR users don't see a frame on
@@ -238,137 +214,29 @@ export function Chat(): React.JSX.Element {
           connectionStatus={messagesState.connection}
           headingRef={headingRef}
         />
-        {/* role="log" implies aria-live="polite" per ARIA 1.2 — single
-            source of truth so a future flip to assertive only needs the
-            role change. aria-relevant/aria-atomic stay explicit because
-            they override the role's defaults. */}
-        <div
-          className="messages__list"
-          ref={listRef}
-          data-testid="message-list"
-          role="log"
-          aria-relevant="additions"
-          aria-atomic="false"
-          aria-label="conversation"
-          tabIndex={-1}
-          onScroll={onListScroll}
-        >
-          {messagesState.error !== null ? (
-            <p role="alert" className="error">
-              {messagesState.error}
-            </p>
-          ) : null}
-          {showNoChannelsEmpty ? (
-            <p className="empty-state" data-testid="empty-state-no-channels">
-              No channels available yet. Wait for an admin to create one.
-            </p>
-          ) : null}
-          {showEmptyChannelHint && activeChannelName !== null ? (
-            <p className="empty-state" data-testid="empty-state-channel-hint">
-              {`This is the start of #${activeChannelName} — send a message to say hi.`}
-            </p>
-          ) : null}
-          {messagesState.canLoadOlder ? (
-            <>
-              <button
-                type="button"
-                className="messages__load-older"
-                data-testid="load-older-button"
-                onClick={() => {
-                  void messagesState.loadOlder();
-                }}
-                disabled={messagesState.isLoadingOlder}
-                aria-busy={messagesState.isLoadingOlder ? "true" : undefined}
-              >
-                {messagesState.isLoadingOlder ? "Loading older messages…" : "Load older messages"}
-              </button>
-              {messagesState.loadOlderError !== null ? (
-                <p
-                  role="alert"
-                  className="error messages__load-older-error"
-                  data-testid="load-older-error"
-                >
-                  {messagesState.loadOlderError}
-                </p>
-              ) : null}
-            </>
-          ) : null}
-          {messagesState.messages.map((m) => {
-            const cls =
-              m.status === "pending"
-                ? "msg msg--pending"
-                : m.status === "failed"
-                  ? "msg msg--failed"
-                  : "msg";
-            // Suppress SR announcement of the user's own messages — the
-            // optimistic-send path appends them immediately on submit, and
-            // SR users typed them so the polite-log readback is annoying
-            // (#139, #468). The WS echo (`useMessages` reconcile) reuses
-            // the same pending row, so the article keeps aria-hidden once
-            // its sender resolves to self. Failed-status rows stay
-            // announceable (the failed-badge `role="status"` plus the
-            // Retry button must remain in the a11y tree) — failed-send
-            // SR behaviour is tracked separately as #147.
-            const isSelf = user !== null && m.sender_user_id === user.id;
-            const ariaHidden = isSelf && m.status !== "failed" ? "true" : undefined;
-            return (
-              <article
-                key={m.id}
-                className={cls}
-                data-testid="msg"
-                data-status={m.status ?? "sent"}
-                aria-hidden={ariaHidden}
-              >
-                <div className="msg__meta">
-                  <span className="msg__sender">{resolveSender(m.sender_user_id)}</span>
-                  {m.status === "pending" ? (
-                    <span className="msg__badge msg__badge--pending" role="status">
-                      Sending…
-                    </span>
-                  ) : null}
-                  {m.status === "pending" || m.created_at.length === 0 ? null : (
-                    <time dateTime={m.created_at}>{humanizeTimestamp(m.created_at)}</time>
-                  )}
-                  {m.status === "failed" ? (
-                    <>
-                      <span
-                        className="msg__badge msg__badge--error"
-                        role="alert"
-                        data-testid="msg-failed-badge"
-                        aria-describedby={
-                          m.failureReason !== undefined && m.failureReason.length > 0
-                            ? `msg-failed-reason-${m.id}`
-                            : undefined
-                        }
-                      >
-                        Failed to send
-                      </span>
-                      {m.failureReason !== undefined && m.failureReason.length > 0 ? (
-                        <span
-                          id={`msg-failed-reason-${m.id}`}
-                          className="msg__failure-reason"
-                          data-testid="msg-failed-reason"
-                        >
-                          {m.failureReason}
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="msg__retry"
-                        onClick={() => {
-                          void messagesState.retry(m.id);
-                        }}
-                      >
-                        Retry
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-                <div className="msg__body">{m.body}</div>
-              </article>
-            );
-          })}
-        </div>
+        <MessageList
+          messages={messagesState.messages}
+          resolveSender={resolveSender}
+          selfUserId={user?.id ?? null}
+          error={messagesState.error}
+          showNoChannelsEmpty={showNoChannelsEmpty}
+          showEmptyChannelHint={showEmptyChannelHint && activeChannelName !== null}
+          emptyChannelHintText={
+            activeChannelName !== null
+              ? `This is the start of #${activeChannelName} — send a message to say hi.`
+              : undefined
+          }
+          canLoadOlder={messagesState.canLoadOlder}
+          isLoadingOlder={messagesState.isLoadingOlder}
+          loadOlderError={messagesState.loadOlderError}
+          onLoadOlder={() => {
+            void messagesState.loadOlder();
+          }}
+          onRetry={(id) => {
+            void messagesState.retry(id);
+          }}
+          listRef={listRef}
+        />
         <form
           className="composer"
           onSubmit={onSend}
