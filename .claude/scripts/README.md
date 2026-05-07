@@ -40,6 +40,20 @@ This is **not** a chroot — it's a permission-rule layer on top of the existing
 defense-in-depth (a model that drifts on the deny rules' coverage still trips
 RULE 0 first).
 
+## `test-option-a-enforcement.sh`
+
+Adversarial end-to-end test for the deny rules above. Spins up a real temporary
+worktree under the parent repo, runs `write-agent-worktree-settings.sh` against
+it, and validates the three failure modes from #765: (a) bad-arg invocations
+exit non-zero, (b) the rendered `settings.local.json` has the `__PARENT_ABS__`
+sentinel fully substituted with the resolved parent abs path in every entry,
+and (c) `claude --print` driven against the rendered settings hard-rejects
+parent-rooted `Edit` and `Write` tool calls — verified by parsing the
+structured `permission_denials[]` array, not by grep'ing prose. Hard fail
+(non-zero exit) on any miss. Run directly:
+`.claude/scripts/test-option-a-enforcement.sh`. Step (c) requires `claude` and
+`jq` on PATH; otherwise it skips with a documented reason.
+
 ## `cleanup-stale-worktrees.sh`
 
 Operator-run, dry-run by default. Identifies and removes
