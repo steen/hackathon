@@ -1,0 +1,3 @@
+### Fixed
+
+- `scripts/check-env-example.mjs`: replace the script-mode entry guard with `pathToFileURL(process.argv[1]).href === import.meta.url`. The previous `file://${process.argv[1]}` interpolation only matched on POSIX; on Windows `process.argv[1]` is a backslashed native path that never equals the percent-encoded `import.meta.url`, so a contributor running `node scripts/check-env-example.mjs` on Windows would import the module as a side-effect-free no-op instead of running `main()`. CI is Linux-only, so this never bit us; the fix keeps both script-mode (CLI) and module-mode (tests under `tests/check-env-example/`) working everywhere.
