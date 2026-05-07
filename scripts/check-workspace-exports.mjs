@@ -7,7 +7,7 @@
 // Walks `packages/*/package.json` and exits non-zero when any TS package
 // (i.e. one that declares `main`/`types`/`exports`) uses a `./dist/...`
 // path. Non-TS packages (no entry-point fields) are ignored — go-client
-// is Go, scaffold-stub has no TS exports.
+// is Go.
 
 import console from "node:console";
 import { readdirSync, readFileSync, statSync } from "node:fs";
