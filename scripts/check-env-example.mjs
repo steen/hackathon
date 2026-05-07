@@ -5,11 +5,15 @@
 // build step; non-zero exit on drift names the offenders.
 //
 // Sources scanned:
-//   - apps/server/internal/config/config.go — every `^Env[A-Z]\w* = "..."`
-//     const (the canonical names; see lines 17-31 at time of writing).
-//   - apps/server/main.go                    — every `\w+Env = "..."` const
-//     in the package-level const block (legacy/transitional names like
-//     `portEnv`, `dbPathEnv`, `allowedOriginsEnv`).
+//   - apps/server/internal/config/config.go — every `Env[A-Z]\w* = "..."`
+//     const (the canonical names; see lines 17-25 at time of writing).
+//   - apps/server/main.go                    — every `<lowercase>Env = "..."`
+//     const inside the package-level `const ( ... )` block (legacy /
+//     transitional names like `portEnv`, `dbPathEnv`, `allowedOriginsEnv`,
+//     currently lines 22-26). The legacy pattern is run against the const
+//     block body only, not the whole file, so an unrelated identifier
+//     ending in `Env` declared in a `var` block or function body cannot
+//     leak into the required-set.
 //
 // If a constant's string value is missing from `.env.example`, exit 1 and
 // list each offender with its source location and expected env var name.
@@ -36,7 +40,39 @@ const ENV_CONST_PATTERN = /\bEnv[A-Z]\w*\s*=\s*"([^"]+)"/g;
 // Match `<lowercase>Env = "VALUE"` — the legacy const block in main.go uses
 // `portEnv`, `dbPathEnv`, etc. We intentionally exclude the canonical
 // `Env*` form here so a single const isn't reported twice.
+//
+// This pattern is run against the body of the first package-level
+// `const ( ... )` block only (see extractFirstConstBlock below). Without
+// that anchor, any `<lowercase>Env = "CHAT_..."` assignment elsewhere in
+// the file — a function-local sentinel, a var block, a struct tag — would
+// be picked up. The const block is the contract; the scan honors it.
 const LEGACY_ENV_CONST_PATTERN = /\b[a-z]\w*Env\s*=\s*"([^"]+)"/g;
+
+// extractFirstConstBlock returns the body of the first package-level
+// `const ( ... )` block in `source`, or empty string when no such block
+// exists. The body excludes the `const (` opener and the trailing `)`.
+//
+// Go forbids nesting `const ( ... )` blocks, so a simple paren-depth
+// counter from the opening `(` is sufficient — no need to track string
+// literals or comments specially: the only `)` that matters is the one
+// at depth 0, and the legacy regex looks for `name = "..."` shapes which
+// don't appear inside a single `"..."` string in normal Go source.
+function extractFirstConstBlock(source) {
+  const opener = /\bconst\s*\(/.exec(source);
+  if (!opener) return "";
+  let depth = 1;
+  let i = opener.index + opener[0].length;
+  const start = i;
+  for (; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return source.slice(start, i);
+    }
+  }
+  return "";
+}
 
 function readSource(path) {
   try {
@@ -71,7 +107,19 @@ function main() {
   for (const { name, source } of collectMatches(configSrc, ENV_CONST_PATTERN, CONFIG_GO)) {
     if (!required.has(name)) required.set(name, source);
   }
-  for (const { name, source } of collectMatches(mainSrc, LEGACY_ENV_CONST_PATTERN, MAIN_GO)) {
+  const mainConstBlock = extractFirstConstBlock(mainSrc);
+  if (mainConstBlock === "") {
+    console.error(
+      `check-env-example: could not locate a package-level const block in ${MAIN_GO}; ` +
+        "the legacy regex requires one — refusing to scan the whole file.",
+    );
+    process.exit(2);
+  }
+  for (const { name, source } of collectMatches(
+    mainConstBlock,
+    LEGACY_ENV_CONST_PATTERN,
+    MAIN_GO,
+  )) {
     if (!required.has(name)) required.set(name, source);
   }
 
