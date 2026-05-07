@@ -166,66 +166,66 @@ export function Chat(): React.JSX.Element {
         />
       ) : null}
       <div className="chat-layout__body">
-      <Sidebar header={sidebarHeader}>
-        <h2>Channels</h2>
-        <ChannelsList
-          channels={channelsState.channels}
-          activeId={activeChannel}
-          onSelect={setActiveChannel}
-          loading={channelsState.loading}
-          error={channelsState.error}
-        />
-        <h2>Online</h2>
-        <PresenceList users={presenceState.users} />
-        {/* aria-live region is omitted role="status" by design: the connection
-            badge already owns role=status and the e2e `page.getByRole("status")`
-            locator expects exactly one match. aria-atomic="true" so the SR
-            re-reads the whole phrase on each event, not just the diff. */}
-        <PresenceLiveRegion text={presenceAnnouncement} />
-      </Sidebar>
-      <main className="messages" aria-label={activeChannelName ?? "Messages"}>
-        <ChannelHeader
-          channelName={activeChannelName}
-          connectionStatus={messagesState.connection}
-          headingRef={headingRef}
-        />
-        <MessageList
-          messages={messagesState.messages}
-          resolveSender={resolveSender}
-          selfUserId={user?.id ?? null}
-          error={messagesState.error}
-          showNoChannelsEmpty={showNoChannelsEmpty}
-          showEmptyChannelHint={showEmptyChannelHint && activeChannelName !== null}
-          emptyChannelHintText={
-            activeChannelName !== null
-              ? `This is the start of #${activeChannelName} — send a message to say hi.`
-              : undefined
-          }
-          canLoadOlder={messagesState.canLoadOlder}
-          isLoadingOlder={messagesState.isLoadingOlder}
-          loadOlderError={messagesState.loadOlderError}
-          onLoadOlder={() => {
-            void messagesState.loadOlder();
-          }}
-          onRetry={(id) => {
-            void messagesState.retry(id);
-          }}
-          listRef={listRef}
-        />
-        <MessageComposer
-          value={draft}
-          onChange={setDraft}
-          onSubmit={() => {
-            void submitDraft();
-          }}
-          disabled={activeChannel === null}
-          maxBytes={MAX_BODY_BYTES}
-          placeholder={
-            activeChannel === null ? "Select a channel first" : "Write a message..."
-          }
-          composerRef={composerRef}
-        />
-      </main>
+        <Sidebar header={sidebarHeader}>
+          <h2>Channels</h2>
+          <ChannelsList
+            channels={channelsState.channels}
+            activeId={activeChannel}
+            onSelect={setActiveChannel}
+            loading={channelsState.loading}
+            error={channelsState.error}
+          />
+          <h2>Online</h2>
+          <PresenceList users={presenceState.users} />
+          {/* aria-live region is omitted role="status" by design: the connection
+              badge already owns role=status and the e2e `page.getByRole("status")`
+              locator expects exactly one match. aria-atomic="true" so the SR
+              re-reads the whole phrase on each event, not just the diff. */}
+          <PresenceLiveRegion text={presenceAnnouncement} />
+        </Sidebar>
+        <main className="messages" aria-label={activeChannelName ?? "Messages"}>
+          <ChannelHeader
+            channelName={activeChannelName}
+            connectionStatus={messagesState.connection}
+            headingRef={headingRef}
+          />
+          <MessageList
+            messages={messagesState.messages}
+            resolveSender={resolveSender}
+            selfUserId={user?.id ?? null}
+            error={messagesState.error}
+            showNoChannelsEmpty={showNoChannelsEmpty}
+            showEmptyChannelHint={showEmptyChannelHint && activeChannelName !== null}
+            emptyChannelHintText={
+              activeChannelName !== null
+                ? `This is the start of #${activeChannelName} — send a message to say hi.`
+                : undefined
+            }
+            canLoadOlder={messagesState.canLoadOlder}
+            isLoadingOlder={messagesState.isLoadingOlder}
+            loadOlderError={messagesState.loadOlderError}
+            onLoadOlder={() => {
+              void messagesState.loadOlder();
+            }}
+            onRetry={(id) => {
+              void messagesState.retry(id);
+            }}
+            listRef={listRef}
+          />
+          <MessageComposer
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {
+              void submitDraft();
+            }}
+            disabled={activeChannel === null}
+            maxBytes={MAX_BODY_BYTES}
+            placeholder={
+              activeChannel === null ? "Select a channel first" : "Write a message..."
+            }
+            composerRef={composerRef}
+          />
+        </main>
       </div>
     </div>
   );
