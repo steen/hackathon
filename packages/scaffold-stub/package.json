@@ -1,9 +1,0 @@
-{
-  "name": "@hackathon/scaffold-stub",
-  "version": "0.0.0",
-  "private": true,
-  "scripts": {
-    "build": "node -e \"console.log('scaffold-stub build (no-op)')\"",
-    "test": "node -e \"console.log('scaffold-stub test (no-op)')\""
-  }
-}
