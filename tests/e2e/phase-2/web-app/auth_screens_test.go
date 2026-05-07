@@ -112,45 +112,54 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 	t.Run("chat_page_renders_channel_list_message_stream_and_input", func(t *testing.T) {
 		body := mustReadFile(t, filepath.Join(srcDir, "routes", "Chat.tsx"))
 
-		// AC names three pieces. Each maps to an anchor in the AC's own
-		// vocabulary rather than an implementation detail (testid string,
-		// CSS class, hook name) that a refactor could rename without
-		// regressing AC-2:
-		//   - channel list: the sidebar <h2>Channels</h2> heading — the AC
-		//     literally names "channel list", and the heading text is the
-		//     observable surface a user sees.
-		//   - message stream: an element with role="log", which is the
-		//     ARIA role for "a chat-style live message region" — the
-		//     vocabulary AC-2 calls "message stream".
-		//   - input: the composer <textarea aria-label="message"> below
-		//     the message list — aria-label is the screen-reader
-		//     vocabulary AC-2 calls "input".
+		// AC names three pieces. After the Phase 6 chat-ui extraction the
+		// rendering JSX moved into @hackathon/chat-ui components, but
+		// Chat.tsx still owns the wiring — the AC's claim ("the app
+		// provides a chat page with channel list + message stream + input")
+		// is verified by checking that Chat.tsx mounts the three components
+		// AND wires their data props from the appropriate hooks. The
+		// component implementations themselves are checked at the chat-ui
+		// source level below.
+		//   - channel list: the sidebar <h2>Channels</h2> heading + a
+		//     ChannelsList component fed by channelsState.channels.
+		//   - message stream: a MessageList component fed by
+		//     messagesState.messages.
+		//   - input: a MessageComposer component (consumes the canonical
+		//     <textarea aria-label="message"> internally).
 		if !regexp.MustCompile(`<h2>\s*Channels\s*</h2>`).MatchString(body) {
 			t.Errorf("Chat.tsx: expected a `<h2>Channels</h2>` heading for the channel list")
 		}
-		if !regexp.MustCompile(`channelsState\.channels\.map`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected `channelsState.channels.map(...)` rendering the channel list")
+		if !regexp.MustCompile(`(?s)<ChannelsList\b[^/]*?channels=\{channelsState\.channels`).MatchString(body) {
+			t.Errorf("Chat.tsx: expected a `<ChannelsList channels={channelsState.channels}` wiring for the channel list")
 		}
 
 		if !strings.Contains(body, "useMessages") {
 			t.Errorf("Chat.tsx: expected useMessages hook (message stream source) to be wired")
 		}
-		if !regexp.MustCompile(`role="log"`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected an element with `role=\"log\"` for the message stream")
+		if !regexp.MustCompile(`(?s)<MessageList\b[^/]*?messages=\{messagesState\.messages`).MatchString(body) {
+			t.Errorf("Chat.tsx: expected a `<MessageList messages={messagesState.messages}` wiring for the message stream")
 		}
-		if !regexp.MustCompile(`messagesState\.messages\.map`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected `messagesState.messages.map(...)` rendering the message stream")
+		if !strings.Contains(body, "<MessageComposer") {
+			t.Errorf("Chat.tsx: expected a `<MessageComposer ... />` wiring for the input")
 		}
 
-		// The composer element spans multiple lines with inline arrow
-		// callbacks (which themselves contain `=>`), so the regex can't
-		// stop at the first `>`. Match the opening tag's interior with a
-		// lazy `[^<]*?` instead and let the trailing `/>` (or `>`) close
-		// it. (?s) lets `.` cross newlines. AC-2 names "input"; the
-		// composer is now a <textarea> (issue #137 — multiline + Enter to
-		// send), so the alternation tolerates both element names.
-		if !regexp.MustCompile(`(?s)<(?:input|textarea)\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(body) {
-			t.Errorf("Chat.tsx: expected a `<input>` or `<textarea>` composer with `aria-label=\"message\"`")
+		// The chat-ui component implementations carry the AC's named
+		// surface (role="log" on the message stream, <textarea
+		// aria-label="message"> for the input). Verify the contract is
+		// preserved at the package source so a future refactor of either
+		// file flips this test red.
+		chatUiSrc := filepath.Join(root, "packages", "chat-ui", "src")
+		messageListSrc := mustReadFile(t, filepath.Join(chatUiSrc, "MessageList", "MessageList.tsx"))
+		if !regexp.MustCompile(`role="log"`).MatchString(messageListSrc) {
+			t.Errorf("MessageList.tsx: expected an element with `role=\"log\"` for the message stream")
+		}
+		if !regexp.MustCompile(`messages\.map`).MatchString(messageListSrc) {
+			t.Errorf("MessageList.tsx: expected `messages.map(...)` rendering the message stream")
+		}
+
+		composerSrc := mustReadFile(t, filepath.Join(chatUiSrc, "MessageComposer", "MessageComposer.tsx"))
+		if !regexp.MustCompile(`(?s)<(?:input|textarea)\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(composerSrc) {
+			t.Errorf("MessageComposer.tsx: expected a `<input>` or `<textarea>` with `aria-label=\"message\"`")
 		}
 	})
 
