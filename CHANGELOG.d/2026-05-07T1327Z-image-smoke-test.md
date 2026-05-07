@@ -1,0 +1,3 @@
+### Added
+
+- `scripts/smoke-docker.sh` + `scripts/smoke-ws-helper/main.go`: image-level smoke that builds the chat-server Docker image via `docker compose up --build`, waits for `/healthz`, asserts `GET /` carries the SPA `<div id="root">` marker (catches `//go:embed` regressions), registers + logs in a user, mints a ws-ticket, dials `/ws` through a Go helper, posts a message via `POST /api/channels/{id}/messages`, and confirms the helper receives the broadcast — then `docker compose down -v`. Sibling to `scripts/smoke.sh`, which keeps validating the host-built binary path. Hand-runnable today; CI wiring deferred to issue #824 (Playwright runner switch). Closes #795. (2026-05-07T13:27Z)

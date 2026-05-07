@@ -91,6 +91,7 @@ func run() error {
 		"count", len(deps.AllowedOrigins),
 	)
 
+	// openAndMigrate, requireSecret and other bootstrap helpers live in boot.go.
 	sqlDB, repository, err := openAndMigrate(os.Getenv(dbPathEnv))
 	if err != nil {
 		return err
