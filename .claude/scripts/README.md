@@ -53,3 +53,49 @@ structured `permission_denials[]` array, not by grep'ing prose. Hard fail
 (non-zero exit) on any miss. Run directly:
 `.claude/scripts/test-option-a-enforcement.sh`. Step (c) requires `claude` and
 `jq` on PATH; otherwise it skips with a documented reason.
+
+## `cleanup-stale-worktrees.sh`
+
+Operator-run, dry-run by default. Identifies and removes
+`.claude/worktrees/agent-*` worktrees whose PR branch is merged (or which are
+in detached-HEAD state) and whose working tree is clean. Surfaces — never
+silently deletes — anything that needs review.
+
+When to run: at session start, or any time `git worktree list` is unreadable
+because of accumulated stale entries from earlier sessions. The `phase-loop`
+skill keeps current-session worktrees clean as PRs land; this script catches
+what older sessions left behind.
+
+Usage:
+
+```sh
+.claude/scripts/cleanup-stale-worktrees.sh            # dry-run (default)
+.claude/scripts/cleanup-stale-worktrees.sh --execute  # perform removals
+```
+
+Safety modes (these are acceptance criteria from issue #766, not advice):
+
+- **Dry-run is the default.** No `--execute` ⇒ prints
+  `[DRY-RUN] git worktree remove --force <path>` lines, exits 0, touches
+  nothing.
+- **Refuses dirty worktrees** even with `--execute`. Any worktree whose
+  `git status --porcelain` is non-empty is surfaced as `SKIP (dirty): <path>`
+  for operator review. The dirty guard is the gate; the script never uses
+  `--force --force`.
+- **Skips in-flight agents.** The lock reason format is
+  `locked claude agent <id> (pid <N>)`; the script extracts `<N>` and uses
+  `kill -0 <N>` to test liveness. Live PIDs are skipped silently regardless
+  of branch or dirty state.
+- **Removes via `git worktree remove --force`** so `.git/worktrees/<id>/` is
+  cleaned atomically. Never `rm -rf` (which would orphan the admin dir).
+- **Surfaces ambiguity.** A named-branch worktree with no merged PR is
+  surfaced as `SKIP (open/unknown PR): <path> [<branch>]` — the operator
+  decides.
+- **Idempotent.** A second run with no new staleness produces no actions and
+  exits 0.
+
+The script reads `git worktree list --porcelain` (never the human-readable
+form, never globs `.claude/worktrees/` directly). It can be invoked from any
+worktree (the parent or an agent worktree); it always operates on the parent
+repo's full worktree list and refuses to remove its own
+`git rev-parse --show-toplevel`.
