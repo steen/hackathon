@@ -50,7 +50,6 @@ COPY apps/server/package.json ./apps/server/
 COPY packages/api-client/package.json ./packages/api-client/
 COPY packages/chat-ui/package.json ./packages/chat-ui/
 COPY packages/go-client/package.json ./packages/go-client/
-COPY packages/scaffold-stub/package.json ./packages/scaffold-stub/
 COPY tests/package.json ./tests/
 COPY tests/e2e/package.json ./tests/e2e/
 
