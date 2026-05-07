@@ -60,9 +60,7 @@
 
 .msg__meta time {
   font-variant-numeric: tabular-nums;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New",
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
   color: var(--fg-muted);
   font-size: 0.85rem;
   width: var(--msg-col-time);
@@ -73,9 +71,7 @@
 .msg__sender {
   font-weight: 600;
   font-size: 0.95rem;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New",
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
 .msg__sender--user-blue {

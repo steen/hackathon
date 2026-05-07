@@ -43,16 +43,11 @@ export function MessageItem({
   reasonId,
 }: Props): React.JSX.Element {
   const cls =
-    status === "pending"
-      ? "msg msg--pending"
-      : status === "failed"
-        ? "msg msg--failed"
-        : "msg";
+    status === "pending" ? "msg msg--pending" : status === "failed" ? "msg msg--failed" : "msg";
   const dataStatus = status ?? "sent";
   const senderColor = userColorClass(senderId);
   const showTime = status !== "pending" && createdAt.length > 0;
-  const reasonRendered =
-    failureReason !== undefined && failureReason.length > 0;
+  const reasonRendered = failureReason !== undefined && failureReason.length > 0;
 
   return (
     <article
@@ -62,9 +57,7 @@ export function MessageItem({
       aria-hidden={ariaHidden === true ? "true" : undefined}
     >
       <div className="msg__meta">
-        {showTime ? (
-          <time dateTime={createdAt}>{humanizeTimestamp(createdAt)}</time>
-        ) : null}
+        {showTime ? <time dateTime={createdAt}>{humanizeTimestamp(createdAt)}</time> : null}
         <span className={`msg__sender ${senderColor}`}>{sender}</span>
         {status === "pending" ? (
           <span className="msg__badge msg__badge--pending" role="status">
@@ -82,11 +75,7 @@ export function MessageItem({
               Failed to send
             </span>
             {reasonRendered ? (
-              <span
-                id={reasonId}
-                className="msg__failure-reason"
-                data-testid="msg-failed-reason"
-              >
+              <span id={reasonId} className="msg__failure-reason" data-testid="msg-failed-reason">
                 {failureReason}
               </span>
             ) : null}

@@ -148,8 +148,8 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 		// aria-label="message"> for the input). Verify the contract is
 		// preserved at the package source so a future refactor of either
 		// file flips this test red.
-		chatUiSrc := filepath.Join(root, "packages", "chat-ui", "src")
-		messageListSrc := mustReadFile(t, filepath.Join(chatUiSrc, "MessageList", "MessageList.tsx"))
+		chatUISrc := filepath.Join(root, "packages", "chat-ui", "src")
+		messageListSrc := mustReadFile(t, filepath.Join(chatUISrc, "MessageList", "MessageList.tsx"))
 		if !regexp.MustCompile(`role="log"`).MatchString(messageListSrc) {
 			t.Errorf("MessageList.tsx: expected an element with `role=\"log\"` for the message stream")
 		}
@@ -157,7 +157,7 @@ func TestAC2_WebAppProvidesLoginRegisterAndChatScreens(t *testing.T) {
 			t.Errorf("MessageList.tsx: expected `messages.map(...)` rendering the message stream")
 		}
 
-		composerSrc := mustReadFile(t, filepath.Join(chatUiSrc, "MessageComposer", "MessageComposer.tsx"))
+		composerSrc := mustReadFile(t, filepath.Join(chatUISrc, "MessageComposer", "MessageComposer.tsx"))
 		if !regexp.MustCompile(`(?s)<(?:input|textarea)\b[^<]*?aria-label="message"[^<]*?/?>`).MatchString(composerSrc) {
 			t.Errorf("MessageComposer.tsx: expected a `<input>` or `<textarea>` with `aria-label=\"message\"`")
 		}

@@ -21,10 +21,7 @@ interface Props {
 function Avatar({ user }: { user: TopBarUser }): React.JSX.Element {
   const initial = user.username.charAt(0).toUpperCase() || "?";
   return (
-    <span
-      className={`top-bar__avatar ${userColorClass(user.id)}`}
-      aria-hidden="true"
-    >
+    <span className={`top-bar__avatar ${userColorClass(user.id)}`} aria-hidden="true">
       {initial}
     </span>
   );
@@ -57,9 +54,7 @@ export function TopBar({
       <Avatar user={user} />
       <span className="top-bar__user">
         <span className="top-bar__user-name">{user.username}</span>
-        <span className="top-bar__user-status">
-          {online ? "Online" : "Offline"}
-        </span>
+        <span className="top-bar__user-status">{online ? "Online" : "Offline"}</span>
       </span>
       <span className="top-bar__chevron" aria-hidden="true">
         ▾

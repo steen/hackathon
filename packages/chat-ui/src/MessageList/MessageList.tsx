@@ -129,9 +129,7 @@ export function MessageList(props: Props): React.JSX.Element {
             disabled={isLoadingOlder === true}
             aria-busy={isLoadingOlder === true ? "true" : undefined}
           >
-            {isLoadingOlder === true
-              ? "Loading older messages…"
-              : "Load older messages"}
+            {isLoadingOlder === true ? "Loading older messages…" : "Load older messages"}
           </button>
           {loadOlderError !== null && loadOlderError !== undefined ? (
             <p

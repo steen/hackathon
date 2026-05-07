@@ -67,7 +67,7 @@ func listAllUsers(ctx context.Context, db *sql.DB) ([]UserSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]UserSummary, 0, 16)
 	for rows.Next() {
 		var u UserSummary

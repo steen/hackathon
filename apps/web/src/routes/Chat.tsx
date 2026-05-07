@@ -1,12 +1,5 @@
 import type * as React from "react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChannelHeader,
   ChannelsList,
@@ -216,9 +209,7 @@ export function Chat(): React.JSX.Element {
             }}
             disabled={activeChannel === null}
             maxBytes={MAX_BODY_BYTES}
-            placeholder={
-              activeChannel === null ? "Select a channel first" : "Write a message..."
-            }
+            placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
             composerRef={composerRef}
           />
         </main>
