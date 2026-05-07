@@ -5,13 +5,14 @@
 # adds 30-60s to startup. Acceptable for hackathon scope; see
 # docs/ops/runbook.md for the rationale and the upgrade flow.
 #
-# No `healthcheck:` block on purpose. The production image (Dockerfile stage 3)
-# is `gcr.io/distroless/static-debian12:nonroot` — no shell, no `wget`, no
-# `curl`, no `sqlite3` — so there is no in-container probe binary today.
-# Liveness in the recommended deploy is the reverse proxy's upstream health
-# check hitting `/healthz`. A self-contained `--health-probe` flag for the
-# server binary, which would let compose run `CMD-SHELL`-free, is filed as
-# https://github.com/steen/Hackathon/issues/796.
+# The `healthcheck:` block invokes the binary's own `--health-probe`
+# flag (#796). The production image is `gcr.io/distroless/static-debian12:nonroot`
+# — no shell, no `wget`, no `curl` — so the probe lives in the binary
+# itself. `test:` uses the exec form (no CMD-SHELL) since distroless
+# has no /bin/sh. Verify with:
+#
+#   docker inspect $(docker compose ps -q chat-server) \
+#     --format '{{.State.Health.Status}}'
 
 services:
   chat-server:
@@ -24,6 +25,11 @@ services:
     environment:
       CHAT_DB_PATH: /data/chat.db
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/chat-server", "--health-probe"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
 
 volumes:
   chat-data:

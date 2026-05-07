@@ -113,6 +113,13 @@ pnpm run lint
 pnpm run format:check
 ```
 
+### Running a single test
+
+- Go: `go test -run TestRegisterCreatesUserWithInviteCode ./apps/server/...` (the `-run` arg is a regex over `Test*` function names; `./apps/server/...` keeps the build small).
+- Vitest: `pnpm --filter web test useMessages` to filter test files by path substring, or `pnpm --filter web test -- -t "newest-first"` to filter by `it`/`describe` name. Drop `--filter web` to run across every workspace.
+- Playwright: `pnpm --filter web run e2e:web -- --grep "Web e2e"` (extra args after `--` flow through `runWeb.mjs` to `playwright test`). Add `--headed` to see the browser, or `PWDEBUG=1` to open the inspector.
+- CLI e2e only: `pnpm run e2e:cli`. Web e2e only: `pnpm run e2e:web`. Playwright browsers install via `pnpm --filter web exec playwright install --with-deps chromium webkit` (CI does this automatically; the local mirror only needs it the first time).
+
 To fix formatting locally before CI, run `pnpm run format` (writes `prettier --write .` across the tree).
 
 CI runs the same blocks (`.github/workflows/ci.yml`). Working agreements live in [`CLAUDE.md`](CLAUDE.md).

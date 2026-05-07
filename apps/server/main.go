@@ -32,6 +32,12 @@ const (
 )
 
 func main() {
+	// Probe runs before config.Load() so a misconfigured server can
+	// still be probed by docker's HEALTHCHECK (which won't supply the
+	// env vars the server validates). See apps/server/probe.go and #796.
+	if hasHealthProbeFlag(os.Args[1:]) {
+		os.Exit(runHealthProbe())
+	}
 	if err := run(); err != nil {
 		log.Fatalf("%v", err)
 	}

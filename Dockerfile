@@ -13,10 +13,17 @@
 # Stage 3 (final): distroless static-debian12 :nonroot. Single binary at
 # /chat-server, EXPOSE 8080, runs as USER nonroot (UID 65532).
 #
-# No HEALTHCHECK instruction is set: distroless :nonroot has no shell,
-# wget, or curl, so there is no in-container probe path today. Liveness
-# is handled by the reverse proxy (see docs/ops/runbook.md from #792); a
-# self-contained `--health-probe` flag is filed as #796.
+# HEALTHCHECK uses the binary's own `--health-probe` flag (#796): the
+# distroless :nonroot stage has no shell, wget, or curl, so the probe
+# path has to live in the binary. The flag GETs http://127.0.0.1:<port>/healthz
+# (port from CHAT_LISTEN_ADDR or 8080), exits 0 on 200, 1 otherwise.
+# Verify after `docker compose up -d` with:
+#
+#   docker inspect <container> --format '{{.State.Health.Status}}'
+#
+# The reverse proxy (docs/ops/runbook.md from #792) remains the
+# recommended external probe path; this in-image check covers
+# proxy-less dev/test and CI smoke runs.
 #
 # Operator notes:
 #   The SQLite database file is not part of the image. Mount a volume
@@ -95,4 +102,6 @@ COPY --from=go /chat-server /chat-server
 
 USER nonroot:nonroot
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD ["/chat-server", "--health-probe"]
 ENTRYPOINT ["/chat-server"]

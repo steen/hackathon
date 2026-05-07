@@ -1,0 +1,3 @@
+### Added
+
+- `apps/server`: `--health-probe` flag turns the binary into its own liveness probe. It GETs `http://127.0.0.1:<port>/healthz` (port from `CHAT_LISTEN_ADDR` or default 8080) with a 1.5s timeout, exits 0 on HTTP 200, exits 1 otherwise. The flag is parsed before `config.Load()` so a probe never trips the server's env-var validation. Wired into the Dockerfile via `HEALTHCHECK --interval=30s --timeout=3s --start-period=10s CMD ["/chat-server", "--health-probe"]` and into `docker-compose.yml` via a matching `healthcheck:` block. Verify with `docker inspect <container> --format '{{.State.Health.Status}}'`. Closes #796.
