@@ -9,7 +9,7 @@ afterEach(() => {
 
 describe("MessageItem — status rendering", () => {
   it("pending: shows the 'Sending…' status badge and suppresses the timestamp", () => {
-    render(
+    const { container } = render(
       <MessageItem
         sender="alice"
         body="hello"
@@ -19,7 +19,7 @@ describe("MessageItem — status rendering", () => {
     );
     const badge = screen.getByRole("status");
     expect(badge).toHaveTextContent(/sending/i);
-    expect(screen.queryByRole("time")).toBeNull();
+    expect(container.querySelector("time")).toBeNull();
     expect(screen.getByTestId("msg")).toHaveAttribute("data-status", "pending");
   });
 
