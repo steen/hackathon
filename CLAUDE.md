@@ -57,3 +57,6 @@ Rules:
 
 ## Go module layout
 Single root `go.mod` with module name `hackathon`. There is no `go.work` and no per-app `go.mod`. Imports use the form `hackathon/<path>` (e.g. `hackathon/apps/server/internal/hub`). Do NOT introduce per-app modules or hardcode any GitHub coordinate (`github.com/...`) — the module name is intentionally unrelated to the repo's hosting URL so it survives org renames.
+
+## Wire types
+Wire types are hand-mirrored on both sides of the wire: `packages/go-client/{auth,channels,messages,ws,client}.go` (structs with `json:"..."` tags) and `packages/api-client/src/types.ts` (interfaces). Each file carries a top-of-file `sync with <counterpart>` comment. When adding a JSON field, change both files in the same PR and add an e2e assertion under `tests/e2e/` so drift fails CI. Codegen is out of scope at the current scale (five envelope types, low churn) — `grep -r 'sync with' packages/` is the discovery mechanism.

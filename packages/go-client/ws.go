@@ -1,5 +1,8 @@
 package goclient
 
+// Wire types — keep in sync with packages/api-client/src/types.ts.
+// When adding a JSON field here, mirror it in TS and add an e2e assertion.
+
 import (
 	"context"
 	"encoding/json"
