@@ -16,6 +16,7 @@ import (
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/logging"
 	"hackathon/apps/server/internal/wiring"
+	"hackathon/internal/buildinfo"
 )
 
 const (
@@ -51,6 +52,8 @@ func run() error {
 	// don't want it wrapped in slog's `time=… level=INFO msg="…"` envelope.
 	// Restore the stdlib log destination so middleware lines stay raw.
 	log.SetOutput(os.Stderr)
+
+	slog.LogAttrs(context.Background(), slog.LevelInfo, "server build", buildinfo.Read().LogAttrs()...)
 
 	if cfg.LogLevelInvalid != "" {
 		slog.Warn("ignoring unrecognized log level; falling back to default",
