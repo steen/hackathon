@@ -96,7 +96,7 @@ test.describe("Web e2e (real browser via Playwright)", () => {
     await page.getByRole("button", { name: `#${channel.name}` }).click();
 
     const status = page.getByRole("status");
-    await expect(status).toHaveText(/^connected$/i, { timeout: 10_000 });
+    await expect(status).toHaveText(/^online$/i, { timeout: 10_000 });
     expect(serverSides.length).toBeGreaterThanOrEqual(1);
 
     // Capture the count before the drop so we can assert a fresh socket was

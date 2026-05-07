@@ -1,5 +1,4 @@
 import type * as React from "react";
-import { userColorClass } from "../colorize.js";
 import "./TopBar.css";
 
 interface TopBarUser {
@@ -10,85 +9,50 @@ interface TopBarUser {
 interface Props {
   workspaceName: string;
   user: TopBarUser;
+  /** Whether the WS connection to the chat server is established. Drives
+      the user-cluster status dot (green when online, red when offline). */
   online: boolean;
-  /** Optional click handlers; when undefined, the cluster renders as a
-      static `<div>` instead of a dead `<button>`. The chevron stays in
-      either case as a visual affordance. */
-  onWorkspaceClick?: () => void;
-  onUserClick?: () => void;
+  /** Sign-out handler. Wired to a button in the user cluster; replaces
+      the previous sidebar-header `Sign out` button so the user identity
+      lives in exactly one place. */
+  onSignOut: () => void;
 }
 
-function Avatar({ user }: { user: TopBarUser }): React.JSX.Element {
-  const initial = user.username.charAt(0).toUpperCase() || "?";
-  return (
-    <span className={`top-bar__avatar ${userColorClass(user.id)}`} aria-hidden="true">
-      {initial}
-    </span>
-  );
-}
-
-export function TopBar({
-  workspaceName,
-  user,
-  online,
-  onWorkspaceClick,
-  onUserClick,
-}: Props): React.JSX.Element {
-  const dotClass = online ? "top-bar__dot top-bar__dot--online" : "top-bar__dot";
-
-  const left = (
-    <>
-      <span className="top-bar__hash" aria-hidden="true">
-        #
-      </span>
-      <span className="top-bar__workspace-name">{workspaceName}</span>
-      <span className="top-bar__chevron" aria-hidden="true">
-        ▾
-      </span>
-      <span className={dotClass} aria-hidden="true" />
-    </>
-  );
-
-  const right = (
-    <>
-      <Avatar user={user} />
-      <span className="top-bar__user">
-        <span className="top-bar__user-name">{user.username}</span>
-        <span className="top-bar__user-status">{online ? "Online" : "Offline"}</span>
-      </span>
-      <span className="top-bar__chevron" aria-hidden="true">
-        ▾
-      </span>
-    </>
-  );
+export function TopBar({ workspaceName, user, online, onSignOut }: Props): React.JSX.Element {
+  const dotClass = online
+    ? "top-bar__status-dot top-bar__status-dot--online"
+    : "top-bar__status-dot top-bar__status-dot--offline";
+  const statusText = online ? "online" : "offline";
 
   return (
     <header className="top-bar" role="banner">
-      {onWorkspaceClick !== undefined ? (
-        <button
-          type="button"
-          className="top-bar__cluster top-bar__cluster--workspace"
-          onClick={onWorkspaceClick}
-          aria-label={`${workspaceName} workspace`}
-        >
-          {left}
-        </button>
-      ) : (
-        <div className="top-bar__cluster top-bar__cluster--workspace">{left}</div>
-      )}
+      <div className="top-bar__cluster top-bar__cluster--workspace">
+        <span className="top-bar__hash" aria-hidden="true">
+          #
+        </span>
+        <span className="top-bar__workspace-name">{workspaceName}</span>
+      </div>
       <div className="top-bar__center" />
-      {onUserClick !== undefined ? (
+      <div className="top-bar__cluster top-bar__cluster--user">
+        {/* Single source of truth for connection status visible to the user.
+            role="status" + aria-live="polite" so screen readers announce
+            online/offline transitions. Tests querying `getByRole("status")`
+            (web.spec.ts WS-drops scenario) find exactly one match. The
+            visual rendering is a colored dot; the text is visually hidden
+            so the SR announcement still works. */}
+        <span className={dotClass} role="status" aria-live="polite">
+          <span className="visually-hidden">{statusText}</span>
+        </span>
+        <span className="top-bar__user-name">{user.username}</span>
         <button
           type="button"
-          className="top-bar__cluster top-bar__cluster--user"
-          onClick={onUserClick}
-          aria-label={`${user.username} menu`}
+          className="top-bar__signout"
+          onClick={onSignOut}
+          aria-label="Sign out"
         >
-          {right}
+          Sign out
         </button>
-      ) : (
-        <div className="top-bar__cluster top-bar__cluster--user">{right}</div>
-      )}
+      </div>
     </header>
   );
 }

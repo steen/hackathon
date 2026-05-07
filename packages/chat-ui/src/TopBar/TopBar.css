@@ -14,21 +14,19 @@
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
-  background: none;
-  border: 0;
   padding: 0.25rem 0.5rem;
   border-radius: 6px;
-  font: inherit;
   color: var(--fg);
-  cursor: default;
+  /* Pin a single line-height across cluster children so the name span
+     and the sign-out <button> (which has its own UA line-height) sit on
+     the same baseline. Without this `align-items: center` aligns vertical
+     midpoints, but the differing line-heights leave the text glyphs ~1px
+     out of alignment. */
+  line-height: 1;
 }
 
-button.top-bar__cluster {
-  cursor: pointer;
-}
-
-button.top-bar__cluster:hover {
-  background: var(--bg-hover);
+.top-bar__cluster--user > * {
+  line-height: 1;
 }
 
 .top-bar__cluster--workspace .top-bar__hash {
@@ -41,23 +39,6 @@ button.top-bar__cluster:hover {
   font-size: 1.05rem;
 }
 
-.top-bar__chevron {
-  color: var(--fg-muted);
-  font-size: 0.7rem;
-}
-
-.top-bar__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--fg-subtle);
-  margin-left: 0.15rem;
-}
-
-.top-bar__dot--online {
-  background: var(--ok);
-}
-
 .top-bar__center {
   flex: 1;
 }
@@ -66,45 +47,53 @@ button.top-bar__cluster:hover {
   margin-left: auto;
 }
 
-.top-bar__avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
+.top-bar__status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  font-weight: 700;
-  font-size: 0.75rem;
-  color: var(--accent-fg);
-  background: var(--accent);
 }
 
-.top-bar__avatar.msg__sender--user-blue {
-  background: var(--user-blue);
-}
-.top-bar__avatar.msg__sender--user-green {
-  background: var(--user-green);
-}
-.top-bar__avatar.msg__sender--user-purple {
-  background: var(--user-purple);
-}
-.top-bar__avatar.msg__sender--user-yellow {
-  background: var(--user-yellow);
+.top-bar__status-dot--online {
+  background: var(--ok);
 }
 
-.top-bar__user {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.15;
+.top-bar__status-dot--offline {
+  background: var(--error);
 }
 
 .top-bar__user-name {
   font-weight: 600;
   font-size: 1rem;
+  /* Match the button's vertical padding so text baselines align across
+     the dot / name / sign-out trio. The button has 0.3rem 0.6rem padding
+     plus a 1px border-equivalent; mirror it here so the name span
+     reserves the same vertical box. */
+  padding: 0.3rem 0;
 }
 
-.top-bar__user-status {
-  font-size: 0.85rem;
+.top-bar__signout {
+  background: none;
+  border: 0;
   color: var(--fg-muted);
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font: inherit;
+  /* Match the user-name font-size (1rem). A smaller font-size on this
+     button shifts the rendered glyph baseline relative to the name span,
+     which the user sees as a vertical mis-alignment even when the box
+     midpoints line up exactly (verified via getBoundingClientRect). */
+  font-size: 1rem;
+  cursor: pointer;
+  margin-left: 0.5rem;
+}
+
+.top-bar__signout:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.top-bar__signout:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

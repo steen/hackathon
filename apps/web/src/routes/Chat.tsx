@@ -125,21 +125,6 @@ export function Chat(): React.JSX.Element {
     await messagesState.send(body);
   }
 
-  const sidebarHeader = (
-    <>
-      <strong>{user?.username ?? "..."}</strong>
-      <button
-        type="button"
-        className="sidebar__signout"
-        onClick={() => {
-          void logout();
-        }}
-      >
-        Sign out
-      </button>
-    </>
-  );
-
   return (
     <div className="chat-layout">
       {user !== null ? (
@@ -147,10 +132,13 @@ export function Chat(): React.JSX.Element {
           workspaceName="Hackathon"
           user={user}
           online={messagesState.connection === "open"}
+          onSignOut={() => {
+            void logout();
+          }}
         />
       ) : null}
       <div className="chat-layout__body">
-        <Sidebar header={sidebarHeader}>
+        <Sidebar>
           <h2>Channels</h2>
           <ChannelsList
             channels={channelsState.channels}
@@ -161,18 +149,15 @@ export function Chat(): React.JSX.Element {
           />
           <h2>Online</h2>
           <PresenceList users={presenceState.users} />
-          {/* aria-live region is omitted role="status" by design: the connection
-              badge already owns role=status and the e2e `page.getByRole("status")`
-              locator expects exactly one match. aria-atomic="true" so the SR
-              re-reads the whole phrase on each event, not just the diff. */}
+          {/* role="status" is owned by the TopBar's "Online" indicator, so
+              the live region here drops it to avoid duplicate role-status
+              elements (web.spec.ts queries by role=status, expects exactly
+              one match). aria-atomic="true" so the SR re-reads the whole
+              phrase on each event, not just the diff. */}
           <PresenceLiveRegion text={presenceAnnouncement} />
         </Sidebar>
         <main className="messages" aria-label={activeChannelName ?? "Messages"}>
-          <ChannelHeader
-            channelName={activeChannelName}
-            connectionStatus={messagesState.connection}
-            headingRef={headingRef}
-          />
+          <ChannelHeader channelName={activeChannelName} headingRef={headingRef} />
           <MessageList
             messages={messagesState.messages}
             resolveSender={resolveSender}

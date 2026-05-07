@@ -8,42 +8,18 @@
   font-size: 0.95rem; /* tighter than body so channel rows + presence read denser */
 }
 
-.sidebar header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 0.75rem;
-  padding: 0.25rem 0.4rem;
-  color: var(--fg);
-}
-
-.sidebar header strong {
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.sidebar header .sidebar__signout {
-  background: none;
-  border: 0;
-  color: var(--fg-muted);
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font: inherit;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.sidebar header .sidebar__signout:hover {
-  background: var(--bg-hover);
-  color: var(--fg);
-}
-
 .sidebar h2 {
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--fg-subtle);
-  margin: 0.85rem 0 0.3rem;
+  margin: 0.5rem 0 0.3rem;
   padding: 0 0.4rem;
   font-weight: 600;
+}
+
+/* First section heading shouldn't have an extra margin since the
+   sidebar's own padding-top already separates it from the top bar. */
+.sidebar > h2:first-child {
+  margin-top: 0;
 }

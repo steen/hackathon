@@ -6,7 +6,6 @@
 @import "./tokens.css";
 @import "./ChannelHeader/ChannelHeader.css";
 @import "./ChannelsList/ChannelsList.css";
-@import "./ConnectionBadge/ConnectionBadge.css";
 @import "./MessageComposer/MessageComposer.css";
 @import "./MessageList/MessageList.css";
 @import "./PresenceList/PresenceList.css";

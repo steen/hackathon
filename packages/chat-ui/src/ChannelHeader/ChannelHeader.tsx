@@ -1,21 +1,18 @@
 import type * as React from "react";
-import { ConnectionBadge } from "../ConnectionBadge/ConnectionBadge.js";
-import type { ConnectionStatus } from "../types.js";
 import "./ChannelHeader.css";
 
 interface Props {
   channelName: string | null;
-  connectionStatus: ConnectionStatus;
   /** Optional ref forwarded so the parent's focus orchestration can
       target the heading on channel switch. */
   headingRef?: React.Ref<HTMLHeadingElement>;
 }
 
-export function ChannelHeader({
-  channelName,
-  connectionStatus,
-  headingRef,
-}: Props): React.JSX.Element {
+// Channel-name strip above the message log. Connection status used to
+// live here as a `<ConnectionBadge>`; the TopBar now owns the single
+// "Online"/"Offline" status indicator (with role="status"), so this
+// header is back to a plain title row.
+export function ChannelHeader({ channelName, headingRef }: Props): React.JSX.Element {
   return (
     <header className="messages__header">
       <h2 ref={headingRef} tabIndex={-1} className="messages__title">
@@ -30,7 +27,6 @@ export function ChannelHeader({
           "Select a channel"
         )}
       </h2>
-      <ConnectionBadge state={connectionStatus} />
     </header>
   );
 }
