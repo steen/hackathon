@@ -1,0 +1,25 @@
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 1rem;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  width: 240px;
+  flex-shrink: 0;
+}
+
+.sidebar header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  color: var(--fg);
+}
+
+.sidebar h2 {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  margin: 1rem 0 0.4rem;
+  font-weight: 600;
+}

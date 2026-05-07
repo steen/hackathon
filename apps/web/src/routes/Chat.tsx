@@ -14,6 +14,7 @@ import {
   ConnectionBadge,
   PresenceList,
   PresenceLiveRegion,
+  Sidebar,
 } from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
@@ -198,20 +199,23 @@ export function Chat(): React.JSX.Element {
     void submitDraft();
   }
 
+  const sidebarHeader = (
+    <>
+      <strong>{user?.username ?? "..."}</strong>
+      <button
+        type="button"
+        onClick={() => {
+          void logout();
+        }}
+      >
+        Sign out
+      </button>
+    </>
+  );
+
   return (
     <div className="chat-layout">
-      <aside className="sidebar" aria-label="Chat sidebar">
-        <header>
-          <strong>{user?.username ?? "..."}</strong>
-          <button
-            type="button"
-            onClick={() => {
-              void logout();
-            }}
-          >
-            Sign out
-          </button>
-        </header>
+      <Sidebar header={sidebarHeader}>
         <h2>Channels</h2>
         <ChannelsList
           channels={channelsState.channels}
@@ -227,7 +231,7 @@ export function Chat(): React.JSX.Element {
             locator expects exactly one match. aria-atomic="true" so the SR
             re-reads the whole phrase on each event, not just the diff. */}
         <PresenceLiveRegion text={presenceAnnouncement} />
-      </aside>
+      </Sidebar>
       <main className="messages" aria-label={activeChannelName ?? "Messages"}>
         <header className="messages__header">
           <h2 ref={headingRef} tabIndex={-1}>
