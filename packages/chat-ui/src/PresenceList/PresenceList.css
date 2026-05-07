@@ -1,0 +1,11 @@
+.presence {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.presence li {
+  padding: 0.35rem 0.6rem;
+  color: var(--fg-muted);
+  font-size: 0.95rem;
+}

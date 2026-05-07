@@ -9,7 +9,12 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ChannelsList, ConnectionBadge } from "@hackathon/chat-ui";
+import {
+  ChannelsList,
+  ConnectionBadge,
+  PresenceList,
+  PresenceLiveRegion,
+} from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages } from "../hooks/useMessages.js";
@@ -216,28 +221,12 @@ export function Chat(): React.JSX.Element {
           error={channelsState.error}
         />
         <h2>Online</h2>
-        <ul className="presence" aria-label="Online users" data-testid="presence-list">
-          {presenceState.users.map((u) => (
-            <li key={u.id} data-testid={`presence-user-${u.id}`}>
-              {u.username.length > 0 ? u.username : u.id}
-            </li>
-          ))}
-        </ul>
-        {/* aria-live="polite" alone is the load-bearing announcement
-            mechanism; an explicit role="status" is omitted so the
-            element doesn't collide with `getByRole("status")` queries
-            already used by the connection badge (the e2e
-            `page.getByRole("status")` locator expects exactly one
-            match). aria-atomic="true" so the SR re-reads the whole
-            phrase on each event, not just the diff. */}
-        <div
-          className="visually-hidden"
-          aria-live="polite"
-          aria-atomic="true"
-          data-testid="presence-live-region"
-        >
-          {presenceAnnouncement}
-        </div>
+        <PresenceList users={presenceState.users} />
+        {/* aria-live region is omitted role="status" by design: the connection
+            badge already owns role=status and the e2e `page.getByRole("status")`
+            locator expects exactly one match. aria-atomic="true" so the SR
+            re-reads the whole phrase on each event, not just the diff. */}
+        <PresenceLiveRegion text={presenceAnnouncement} />
       </aside>
       <main className="messages" aria-label={activeChannelName ?? "Messages"}>
         <header className="messages__header">
