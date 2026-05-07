@@ -115,6 +115,15 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # The Playwright image bundles Ubuntu 22.04 (jammy) + the system libs
+    # Playwright needs (libnss3, libatk-bridge, libgbm, the GTK/X stack,
+    # fonts, etc.) + chromium/firefox/webkit pinned to this exact Playwright
+    # release. The tag (v1.59.1) tracks the resolved @playwright/test version
+    # in pnpm-lock.yaml; bumping @playwright/test requires bumping this tag
+    # in the same PR, otherwise the bundled browsers won't match the test
+    # runner's protocol. See #824 — this avoids the ~180-package apt-install
+    # over Azure mirrors that consistently timed out at 8min on the runner.
+    container: mcr.microsoft.com/playwright:v1.59.1-jammy
     if: ${{ github.event.pull_request.draft != true }}
     steps:
       - uses: actions/checkout@v4
@@ -137,37 +146,14 @@ jobs:
         timeout-minutes: 5
         run: pnpm install --frozen-lockfile
 
-      # Resolve the pinned Playwright version from apps/web/package.json so
-      # cache keys below invalidate on a bump but stay stable otherwise.
-      # GitHub Actions doesn't run shell inside `key:` values, so we expose
-      # the version via a step output.
-      - name: Resolve Playwright version
-        id: pw
-        run: |
-          version=$(jq -r '.devDependencies."@playwright/test"' apps/web/package.json)
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-
-      - name: Cache APT packages (Playwright runtime deps)
-        uses: actions/cache@v4
-        with:
-          path: |
-            /var/cache/apt/archives/*.deb
-            /var/lib/apt/lists
-          key: apt-${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
-          restore-keys: |
-            apt-${{ runner.os }}-playwright-
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install Playwright browsers
-        timeout-minutes: 8
-        run: pnpm --filter web exec playwright install --with-deps chromium webkit
+      # Browsers and system deps are baked into the container image, so this
+      # is a fast-path no-op that just verifies the install. No --with-deps
+      # because the libs are already present. Keeping the step makes the
+      # contract explicit and surfaces image/devDep skew loudly: a mismatch
+      # forces Playwright to re-download, and the 2min timeout catches it.
+      - name: Verify Playwright browsers
+        timeout-minutes: 2
+        run: pnpm --filter web exec playwright install chromium webkit
 
       - name: e2e (CLI + web)
         timeout-minutes: 8
