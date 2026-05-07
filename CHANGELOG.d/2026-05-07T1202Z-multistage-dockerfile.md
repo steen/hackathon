@@ -1,0 +1,3 @@
+### Added
+
+- `Dockerfile` + `.dockerignore` at repo root: multi-stage build (`node:20-alpine` for the Vite SPA, `golang:1.25` for `CGO_ENABLED=0` static linking, `gcr.io/distroless/static-debian12:nonroot` final). The web bundle is copied into `apps/server/internal/web/dist/` between stages so `//go:embed all:dist` picks it up. Image runs as `nonroot:nonroot` (UID 65532), exposes 8080, `ENTRYPOINT ["/chat-server"]`. No `HEALTHCHECK` instruction — distroless ships no shell or HTTP client; a self-contained `--health-probe` flag is filed as #796. `.dockerignore` deliberately keeps top-level `internal/` so the build-info package introduced by #789 stays in the build context.

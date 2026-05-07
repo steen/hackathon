@@ -85,7 +85,7 @@ func registerWeb(mux *http.ServeMux) {
 // PR. TestReservedPrefixesCoverWiringMux walks every mux.Handle/HandleFunc
 // call site in this package and fails if a registered top-level prefix
 // is missing from this list.
-var reservedAPITopLevelPrefixes = []string{"/api", "/ws", "/debug"}
+var reservedAPITopLevelPrefixes = []string{"/api", "/ws", "/debug", "/healthz", "/readyz"}
 
 func isReservedAPIPath(p string) bool {
 	for _, prefix := range reservedAPITopLevelPrefixes {
