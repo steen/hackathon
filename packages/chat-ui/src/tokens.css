@@ -1,0 +1,21 @@
+/* Phase 6 dark palette tokens consumed via `@hackathon/chat-ui/tokens.css`. */
+:root {
+  --bg-app: #0e0e10;
+  --bg-panel: #141417;
+  --bg-elevated: #1a1a1f;
+  --bg-hover: #232328;
+  --bg-active: #2a2a31;
+  --fg: #e4e4e7;
+  --fg-muted: #8b8b94;
+  --fg-subtle: #6b6b73;
+  --border: #27272a;
+  --accent: #7c5cff;
+  --accent-fg: #ffffff;
+  --user-blue: #6ea8fe;
+  --user-green: #4ade80;
+  --user-purple: #c084fc;
+  --user-yellow: #fbbf24;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --error: #ef4444;
+}
