@@ -6,7 +6,7 @@
  *   --fg-subtle    7.42 /  7.07  ✓ body  (used for section headers)
  *   --accent       4.44 /  4.23  ~ large/UI surfaces only — DO NOT use as body text
  *   --accent-text  6.51 /  6.20  ✓ body  (links, accent text)
- *   --user-blue/green/purple/yellow ✓ body
+ *   sender colors (oklch via colorize.ts) ✓ body — see colorize.ts header
  *   --ok/--warn    ≥6 ✓
  *   --error        5.12 /  4.89  ✓ body
  */
