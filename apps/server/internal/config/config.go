@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
+
+	"hackathon/apps/server/internal/auth"
 )
 
 // Env var names read at startup. Names, not values — gosec's G101
@@ -23,6 +26,12 @@ const (
 	// future parser implementation refer to the same name.
 	EnvTrustedProxy = "CHAT_TRUSTED_PROXY"
 	EnvLogLevel     = "CHAT_LOG_LEVEL"
+	// EnvBcryptCost names the optional bcrypt cost override (PRD §9). When
+	// unset or empty, the auth package keeps the default (auth.DefaultBcryptCost,
+	// = 10, OWASP floor). When set, it must parse as an integer in
+	// [auth.MinBcryptCost, auth.MaxBcryptCost]; ParseBcryptCost errors out
+	// of range and the boot path aborts before the listener starts.
+	EnvBcryptCost = "CHAT_BCRYPT_COST"
 
 	DefaultListenAddr = "127.0.0.1:8080"
 	DefaultLogLevel   = "info"
@@ -123,6 +132,29 @@ func parseLogLevel(raw string) (level, invalid string) {
 		return lower, ""
 	}
 	return DefaultLogLevel, trimmed
+}
+
+// ParseBcryptCost interprets the raw CHAT_BCRYPT_COST env value. An
+// empty string returns auth.DefaultBcryptCost with no error (the env
+// var is optional and the default is the OWASP floor). A numeric value
+// inside [auth.MinBcryptCost, auth.MaxBcryptCost] is returned as-is.
+// Anything else — non-integer, below floor, above ceiling — returns a
+// non-nil error naming the env var so the operator can fix it. Boot
+// code passes the int through to auth.SetBcryptCost; both share the
+// same range constants so the two checks cannot drift.
+func ParseBcryptCost(raw string) (int, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return auth.DefaultBcryptCost, nil
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not an integer: %w", EnvBcryptCost, trimmed, err)
+	}
+	if n < auth.MinBcryptCost || n > auth.MaxBcryptCost {
+		return 0, fmt.Errorf("%s=%d out of range [%d, %d]", EnvBcryptCost, n, auth.MinBcryptCost, auth.MaxBcryptCost)
+	}
+	return n, nil
 }
 
 // LoadTrustedProxy returns the parsed CHAT_TRUSTED_PROXY flag without

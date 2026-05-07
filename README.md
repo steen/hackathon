@@ -68,10 +68,6 @@ The CLI honours `$CHAT_SERVER` (default `http://localhost:8080`).
 
 For demo deploys the web app is embedded into the server binary, so `go build ./apps/server` produces a single executable that serves both the API/WS and the SPA. See [`specs/plans/phase-3/40-feature-single-binary-demo-verified.md`](specs/plans/phase-3/40-feature-single-binary-demo-verified.md) for the full path; the embed wiring lives in [`specs/plans/phase-3/20-feature-embedded-web-build.md`](specs/plans/phase-3/20-feature-embedded-web-build.md).
 
-## Production-style deploy (docker compose)
-
-For the full deploy story — `docker compose up --build -d`, first-user registration, daily ops, backup/restore, reverse-proxy topology, the single-instance constraint, and upgrade — see [`docs/ops/runbook.md`](docs/ops/runbook.md). The repo-root [`docker-compose.yml`](docker-compose.yml) is a one-service file (`chat-server`) with a named volume for the SQLite database.
-
 ## Server environment variables
 
 The server reads the following at startup (`apps/server/internal/config/config.go` + `apps/server/main.go`). Validation runs once at boot; failures abort the process before any port is opened. A copy-pasteable starter template lives at [`.env.example`](.env.example) — every variable below is documented inline with its failure mode. The drift-check script `node scripts/check-env-example.mjs` asserts the template stays in sync with the Go source (it scans every `Env*`-prefixed const in `config.go` and the legacy `*Env` const block in `main.go`).
@@ -87,7 +83,7 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 | `CHAT_TRUSTED_PROXY` | no | `0` | Set to `1` to honor the leftmost `X-Forwarded-For` entry as the source IP for the access log, the per-IP rate-limit key, and auth-event audit rows. Any other value (unset, `0`, `true`, `yes`) leaves the safe default in place: trust only `RemoteAddr`. PRD §9 / §11 documents only the binary on/off form. |
 | `CHAT_LOG_LEVEL` | no | `info` | One of `debug`, `info`, `warn`, `error`. Unrecognized values fall back to `info` and emit a single startup `WARN` naming the bad value. |
 | `CHAT_SERVER_PORT` | no | — | Legacy compatibility — replaces the port half of `CHAT_LISTEN_ADDR` without changing the host. Prefer `CHAT_LISTEN_ADDR` for new configs. |
-| `CHAT_BCRYPT_COST` | no | unread | Tunable per PRD §9; the parser is **not yet wired** — see [#785](https://github.com/steen/Hackathon/issues/785) for the follow-up. Setting this today has no effect; the server uses the constant in `apps/server/internal/auth/constants.go`. Listed in `.env.example` so the var name is discoverable. |
+| `CHAT_BCRYPT_COST` | no | `10` | Bcrypt cost for password hashing (PRD §9 / OWASP floor). Accepted range `[10, 31]`; out-of-range, non-numeric, or empty-after-trim values are rejected at startup with `config: CHAT_BCRYPT_COST=… out of range [10, 31]` (or `… is not an integer`). Existing stored hashes verify against the cost embedded in each hash, so raising the cost does not break old logins. |
 
 ### Client environment variable
 

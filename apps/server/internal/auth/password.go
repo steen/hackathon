@@ -30,10 +30,12 @@ func EnforcePolicy(password string) error {
 	return nil
 }
 
-// Hash returns a bcrypt hash of password using BcryptCost. It does NOT
-// enforce the policy — call EnforcePolicy first at the handler boundary.
-// Keeping policy out of Hash means tests and migrations can rehash legacy
-// values without tripping over a stricter policy.
+// Hash returns a bcrypt hash of password using the package-level
+// BcryptCost (defaults to DefaultBcryptCost; raised at boot via
+// SetBcryptCost when CHAT_BCRYPT_COST is set). It does NOT enforce
+// the policy — call EnforcePolicy first at the handler boundary.
+// Keeping policy out of Hash means tests and migrations can rehash
+// legacy values without tripping over a stricter policy.
 func Hash(password string) (string, error) {
 	h, err := bcrypt.GenerateFromPassword([]byte(password), BcryptCost)
 	if err != nil {

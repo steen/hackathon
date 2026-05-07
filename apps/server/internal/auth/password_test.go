@@ -63,17 +63,18 @@ func TestDummyHashIsValidBcrypt(t *testing.T) {
 	}
 }
 
-func TestDummyHashCostMatchesBcryptCost(t *testing.T) {
+func TestDummyHashCostMatchesDefaultBcryptCost(t *testing.T) {
 	// SEC-3 timing parity holds only while the dummy comparison and the
-	// real comparison run at the same bcrypt cost. If BcryptCost is ever
-	// raised without regenerating dummyHash, unknown-username responses
-	// stay fast while wrong-password responses get slower — a silent
-	// timing-side-channel regression. Fail CI loudly on that drift.
+	// real comparison run at the same bcrypt cost. The dummy hash is a
+	// fixed const generated at DefaultBcryptCost; this test guards that
+	// invariant. Operators who raise CHAT_BCRYPT_COST above the default
+	// accept a small unknown-vs-wrong-password timing skew — that's the
+	// cost-tunability tradeoff and is documented in PRD §9 / SEC-3.
 	c, err := bcrypt.Cost([]byte(dummyHash))
 	if err != nil {
 		t.Fatalf("bcrypt.Cost(dummyHash): %v", err)
 	}
-	if c != BcryptCost {
-		t.Fatalf("dummyHash cost %d != BcryptCost %d — regenerate dummyHash at the new cost", c, BcryptCost)
+	if c != DefaultBcryptCost {
+		t.Fatalf("dummyHash cost %d != DefaultBcryptCost %d — regenerate dummyHash at the new default", c, DefaultBcryptCost)
 	}
 }

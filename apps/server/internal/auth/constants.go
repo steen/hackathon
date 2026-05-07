@@ -20,10 +20,20 @@ const (
 	// the same value — we reject instead so the user sees a real error.
 	PasswordMaxBytes = 72
 
-	// BcryptCost is the default cost. PRD §9 sets the OWASP floor at 10
-	// and notes it is tunable via CHAT_BCRYPT_COST; reading that env var
-	// is the job of the auth-endpoints feature, not this package.
-	BcryptCost = 10
+	// DefaultBcryptCost is the cost the dummy hash below was generated at
+	// and the default operators get when CHAT_BCRYPT_COST is unset (PRD §9
+	// OWASP floor). The runtime cost lives in the BcryptCost variable
+	// further down so an operator can raise it via env without recompiling.
+	DefaultBcryptCost = 10
+
+	// MinBcryptCost is the floor accepted by SetBcryptCost: PRD §9 / OWASP
+	// guidance pins the lowest-permissible bcrypt cost at 10.
+	MinBcryptCost = 10
+
+	// MaxBcryptCost is the ceiling accepted by SetBcryptCost: 31 is the
+	// upper limit bcrypt.GenerateFromPassword accepts
+	// (golang.org/x/crypto/bcrypt rejects above 31 with InvalidCostError).
+	MaxBcryptCost = 31
 
 	// JWTTTL is the session token lifetime. PRD §9: 7 days.
 	JWTTTL = 7 * 24 * time.Hour
@@ -33,6 +43,19 @@ const (
 	// simple — there is one issuer for the lifetime of the MVP.
 	JWTIssuer = "chat-server"
 )
+
+// BcryptCost is the runtime cost Hash uses. Defaults to DefaultBcryptCost;
+// operators raise it on faster hosts via CHAT_BCRYPT_COST (PRD §9). The
+// value is set once at server boot (see SetBcryptCost) before the HTTP
+// listener accepts traffic, so the field is read concurrently from
+// handlers but never written after startup — the goroutine-start in
+// main.go provides the happens-before edge for the Go memory model.
+//
+// Kept as a package-level var (rather than threaded through AuthDeps)
+// so the existing Hash signature stays put and feature wiring code does
+// not have to know about a tunable that has one writer (boot) and one
+// reader (Register's hash call).
+var BcryptCost = DefaultBcryptCost
 
 // LoginErrorMessage is the user-facing text returned for every failed
 // login. PRD §9 + SEC-4 require this string to be byte-identical for

@@ -16,7 +16,6 @@ import (
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/logging"
 	"hackathon/apps/server/internal/wiring"
-	"hackathon/internal/buildinfo"
 )
 
 const (
@@ -53,14 +52,15 @@ func run() error {
 	// Restore the stdlib log destination so middleware lines stay raw.
 	log.SetOutput(os.Stderr)
 
-	slog.LogAttrs(context.Background(), slog.LevelInfo, "server build", buildinfo.Read().LogAttrs()...)
-
 	if cfg.LogLevelInvalid != "" {
 		slog.Warn("ignoring unrecognized log level; falling back to default",
 			"env", config.EnvLogLevel,
 			"got", cfg.LogLevelInvalid,
 			"using", cfg.LogLevel,
 		)
+	}
+	if err := applyBcryptCost(os.Getenv(config.EnvBcryptCost)); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
 	for _, ch := range checks {
 		slog.Info("config check ok", "name", ch.Name)
