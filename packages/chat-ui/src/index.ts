@@ -7,6 +7,7 @@ export { MessageList, IS_AT_BOTTOM_TOLERANCE_PX } from "./MessageList/MessageLis
 export { PresenceList } from "./PresenceList/PresenceList.js";
 export { PresenceLiveRegion } from "./PresenceList/PresenceLiveRegion.js";
 export { Sidebar } from "./Sidebar/Sidebar.js";
+export { TopBar } from "./TopBar/TopBar.js";
 export { humanizeTimestamp } from "./MessageItem/humanizeTimestamp.js";
 export { userColorClass } from "./colorize.js";
 export type { Channel } from "./ChannelsList/ChannelsList.js";

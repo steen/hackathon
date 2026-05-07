@@ -16,6 +16,7 @@ import {
   PresenceList,
   PresenceLiveRegion,
   Sidebar,
+  TopBar,
 } from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
@@ -157,6 +158,14 @@ export function Chat(): React.JSX.Element {
 
   return (
     <div className="chat-layout">
+      {user !== null ? (
+        <TopBar
+          workspaceName="Hackathon"
+          user={user}
+          online={messagesState.connection === "open"}
+        />
+      ) : null}
+      <div className="chat-layout__body">
       <Sidebar header={sidebarHeader}>
         <h2>Channels</h2>
         <ChannelsList
@@ -217,6 +226,7 @@ export function Chat(): React.JSX.Element {
           composerRef={composerRef}
         />
       </main>
+      </div>
     </div>
   );
 }

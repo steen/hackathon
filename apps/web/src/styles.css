@@ -110,10 +110,17 @@ button.linklike {
 }
 
 .chat-layout {
-  display: grid;
-  grid-template-columns: 240px 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100svh;
   height: 100dvh;
+}
+
+.chat-layout__body {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  flex: 1;
+  min-height: 0;
 }
 
 .empty-state {
@@ -173,7 +180,7 @@ button.linklike {
    column, stacks the sidebar above messages, and bumps tap targets to
    the 44px iOS HIG / WCAG 2.5.5 minimum. */
 @media (max-width: 767px) {
-  .chat-layout {
+  .chat-layout__body {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
   }
