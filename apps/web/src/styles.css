@@ -210,15 +210,32 @@ button.linklike {
    column, stacks the sidebar above messages, and bumps tap targets to
    the 44px iOS HIG / WCAG 2.5.5 minimum. */
 @media (max-width: 767px) {
+  /* Mobile: collapse the desktop grid into a flex column. Webkit/iOS
+     computes the desktop `display: grid` + `grid-template-rows: auto 1fr`
+     sizing differently than chromium when the grid is itself a flex
+     child (`.chat-layout__body { flex: 1; min-height: 0 }`), which made
+     `.messages` collapse to zero height on iPhone-class viewports
+     (#634 webkit). Plain flex column is uniformly supported. */
   .chat-layout__body {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
   }
 
+  /* On mobile the sidebar stacks above the messages region. Cap it so
+     a long channel list (or a busy presence panel) can't push the
+     message log off the bottom of the viewport — the sidebar
+     overflow-y already scrolls inside the cap. */
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
     width: auto;
+    flex: 0 1 auto;
+    max-height: 40vh;
+  }
+
+  .messages {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   .channels-list li button {
@@ -244,10 +261,6 @@ button.linklike {
 
   .composer__send {
     min-height: 44px;
-  }
-
-  .messages {
-    min-height: 0;
   }
 }
 
