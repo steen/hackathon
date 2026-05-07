@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/coder/websocket"
 
@@ -72,19 +73,29 @@ type Config struct {
 // userID and channel are bound at connect time so messages.user_id writes
 // can attribute the sender (gap-D wiring). Both are read-only after
 // construction; no mutex needed.
+//
+// shutdown signals the writeLoop to emit a typed 1001 close frame and
+// tear down the connection (Hub.CloseAll path). closeMu guards one-shot
+// close of the shutdown and done channels so concurrent Shutdown / handler
+// teardown can both run safely.
 type connSubscriber struct {
-	send    chan []byte
-	done    chan struct{}
-	userID  string
-	channel string
+	send       chan []byte
+	done       chan struct{}
+	shutdown   chan struct{}
+	closeFlush chan struct{}
+	closeMu    sync.Mutex
+	userID     string
+	channel    string
 }
 
 func newConnSubscriber(userID, channel string) *connSubscriber {
 	return &connSubscriber{
-		send:    make(chan []byte, sendBuffer),
-		done:    make(chan struct{}),
-		userID:  userID,
-		channel: channel,
+		send:       make(chan []byte, sendBuffer),
+		done:       make(chan struct{}),
+		shutdown:   make(chan struct{}),
+		closeFlush: make(chan struct{}),
+		userID:     userID,
+		channel:    channel,
 	}
 }
 
@@ -100,10 +111,47 @@ func (c *connSubscriber) Send(msg []byte) {
 }
 
 func (c *connSubscriber) close() {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
 	select {
 	case <-c.done:
 	default:
 		close(c.done)
+	}
+}
+
+// Shutdown signals the writeLoop to emit a 1001 close frame and waits
+// for the flush (or ctx) before returning. Idempotent: subsequent calls
+// observe the already-closed shutdown channel and return immediately
+// once the flush completes.
+//
+// Implements hub.ShutdownSubscriber so Hub.CloseAll can drain every
+// open WS subscriber on SIGTERM (issue #788).
+func (c *connSubscriber) Shutdown(ctx context.Context) {
+	c.closeMu.Lock()
+	select {
+	case <-c.shutdown:
+		// already signalled; fall through to wait on closeFlush.
+	default:
+		close(c.shutdown)
+	}
+	c.closeMu.Unlock()
+
+	select {
+	case <-c.closeFlush:
+	case <-ctx.Done():
+	}
+}
+
+// signalCloseFlushed marks the close-frame flush done so any goroutine
+// blocked in Shutdown returns. One-shot, idempotent.
+func (c *connSubscriber) signalCloseFlushed() {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	select {
+	case <-c.closeFlush:
+	default:
+		close(c.closeFlush)
 	}
 }
 
@@ -286,6 +334,22 @@ func writeLoop(ctx context.Context, conn *websocket.Conn, sub *connSubscriber) {
 		case <-ctx.Done():
 			return
 		case <-sub.done:
+			return
+		case <-sub.shutdown:
+			// Server-initiated graceful shutdown (issue #788). Emit
+			// the 1001 close frame so the browser sees a clean
+			// "going away" instead of a 1006 abnormal closure, then
+			// signal the flush so Hub.CloseAll can return. coder/
+			// websocket's Close has its own internal 5s write +
+			// 5s read budget; the hub-side 2s drain caps total
+			// wall-clock so a misbehaving peer can't hold shutdown.
+			//
+			// Close races the deferred CloseNow in Handler if the
+			// request context cancels concurrently; coder/websocket
+			// guards Close with a once-token, so a second call is
+			// a benign no-op.
+			_ = conn.Close(websocket.StatusGoingAway, wsproto.ServerShutdownCloseReason)
+			sub.signalCloseFlushed()
 			return
 		case msg := <-sub.send:
 			if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {

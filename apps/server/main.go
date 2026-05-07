@@ -120,6 +120,7 @@ func run() error {
 	}()
 
 	<-ctx.Done()
+	deps.Hub.CloseAll()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
