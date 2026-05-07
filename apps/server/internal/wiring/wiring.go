@@ -74,6 +74,7 @@ func Build(deps Deps) http.Handler {
 	registerWS(mux, deps, authFeature.Tickets)
 	registerPresenceUsername(deps)
 	registerPanicProbe(mux)
+	registerHealth(mux, deps)
 	registerWeb(mux)
 
 	// Middleware order (outer → inner):
