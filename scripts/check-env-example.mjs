@@ -22,7 +22,7 @@ import console from "node:console";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -362,6 +362,10 @@ function main() {
 }
 
 // Only run when invoked as a script — importing for tests must not exit.
-if (import.meta.url === `file://${process.argv[1]}`) {
+// `pathToFileURL` produces a percent-encoded `file://` URL that matches
+// `import.meta.url` on Windows where `process.argv[1]` is a backslashed
+// native path; the previous `file://${process.argv[1]}` interpolation only
+// matched on POSIX.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   main();
 }
