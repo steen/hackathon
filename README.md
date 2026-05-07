@@ -16,8 +16,15 @@ Two terminals — one for the Go server, one for the web dev proxy.
 # 1. Install JS deps (once per clone, and after any lockfile change).
 pnpm install
 
-# 2. Generate a JWT secret and pick an invite code.
-#    openssl rand -hex 24 → 48 hex bytes (well over the 32-byte floor).
+# 2. Seed a local env file from the tracked template, then fill in real values.
+#    `.env` is git-ignored; `.env.example` is the canonical reference, kept in
+#    sync with the Go source by `node scripts/check-env-example.mjs`.
+cp .env.example .env
+# Edit .env and replace the JWT_SECRET / INVITE_CODE placeholders. Generate
+# fresh values with:
+#    openssl rand -hex 24    # ≥32 ASCII bytes — clears the validator floor
+#    openssl rand -hex 8     # invite code (any non-empty string is accepted)
+# If you prefer ad-hoc shell exports instead of a .env file:
 export CHAT_JWT_SECRET="$(openssl rand -hex 24)"
 export CHAT_INVITE_CODE="$(openssl rand -hex 8)"
 export CHAT_DB_PATH="$PWD/.dev.db"
@@ -63,7 +70,7 @@ For demo deploys the web app is embedded into the server binary, so `go build ./
 
 ## Server environment variables
 
-The server reads the following at startup (`apps/server/internal/config/config.go` + `apps/server/main.go`). Validation runs once at boot; failures abort the process before any port is opened.
+The server reads the following at startup (`apps/server/internal/config/config.go` + `apps/server/main.go`). Validation runs once at boot; failures abort the process before any port is opened. A copy-pasteable starter template lives at [`.env.example`](.env.example) — every variable below is documented inline with its failure mode. The drift-check script `node scripts/check-env-example.mjs` asserts the template stays in sync with the Go source (it scans every `Env*`-prefixed const in `config.go` and the legacy `*Env` const block in `main.go`).
 
 | Var | Required | Default | Purpose |
 |-----|----------|---------|---------|
@@ -71,9 +78,12 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 | `CHAT_INVITE_CODE` | yes | — | Gate code for registration. Any non-empty string. Validated unconditionally at startup. |
 | `CHAT_DB_PATH` | for the auth/persistence boot path | — | SQLite file path. When set, the server mounts the auth + channels + messages handlers and boots the migration runner. When unset, the server runs in **phase-0 mode** with the WS hub and `/debug/subs` only (no auth, no SQLite); not used by `scripts/smoke.sh` (which sets a `$WORK_DIR`-scoped DB path) and not intended for real use. |
 | `CHAT_LISTEN_ADDR` | no | `127.0.0.1:8080` | `host:port` to bind. Non-loopback hosts are rejected unless `CHAT_ALLOW_PUBLIC_BIND=1`. |
-| `CHAT_ALLOW_PUBLIC_BIND` | no | unset | Set to `1` to allow a non-loopback bind (e.g. `0.0.0.0:8080`). The server logs a `WARN` because `CHAT_TRUSTED_PROXY` is not yet wired (PRD §9), so behind a proxy IP rate limits collapse onto the proxy IP. |
+| `CHAT_ALLOW_PUBLIC_BIND` | no | unset | Set to `1` to allow a non-loopback bind (e.g. `0.0.0.0:8080`). Without `CHAT_TRUSTED_PROXY=1`, the server logs a `WARN` because per-IP rate limits collapse onto the proxy IP behind a reverse proxy (PRD §9). |
 | `CHAT_ALLOWED_ORIGINS` | no | same-origin only | Comma-separated WebSocket `Origin` allowlist. Stray empty entries are dropped. |
-| `CHAT_SERVER_PORT` | no | — | Legacy compatibility — replaces the port half of `CHAT_LISTEN_ADDR` without changing the host. |
+| `CHAT_TRUSTED_PROXY` | no | `0` | Set to `1` to honor the leftmost `X-Forwarded-For` entry as the source IP for the access log, the per-IP rate-limit key, and auth-event audit rows. Any other value (unset, `0`, `true`, `yes`) leaves the safe default in place: trust only `RemoteAddr`. PRD §9 / §11 documents only the binary on/off form. |
+| `CHAT_LOG_LEVEL` | no | `info` | One of `debug`, `info`, `warn`, `error`. Unrecognized values fall back to `info` and emit a single startup `WARN` naming the bad value. |
+| `CHAT_SERVER_PORT` | no | — | Legacy compatibility — replaces the port half of `CHAT_LISTEN_ADDR` without changing the host. Prefer `CHAT_LISTEN_ADDR` for new configs. |
+| `CHAT_BCRYPT_COST` | no | unread | Tunable per PRD §9; the parser is **not yet wired** — see [#785](https://github.com/steen/Hackathon/issues/785) for the follow-up. Setting this today has no effect; the server uses the constant in `apps/server/internal/auth/constants.go`. Listed in `.env.example` so the var name is discoverable. |
 
 ### Client environment variable
 

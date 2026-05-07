@@ -41,3 +41,8 @@ bin/
 .phase6-shots/
 .dev.db
 .dev.db-*
+
+# Local environment file. `.env.example` is tracked as the starter template;
+# only the root-anchored real `.env` is ignored. Avoid `*.env` so siblings
+# like `.env.example` stay tracked.
+/.env
