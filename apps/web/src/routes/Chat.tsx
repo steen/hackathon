@@ -9,7 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { ConnectionBadge } from "@hackathon/chat-ui";
+import { ChannelsList, ConnectionBadge } from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages } from "../hooks/useMessages.js";
@@ -208,27 +208,13 @@ export function Chat(): React.JSX.Element {
           </button>
         </header>
         <h2>Channels</h2>
-        {channelsState.loading ? <p>Loading...</p> : null}
-        {channelsState.error !== null ? (
-          <p role="alert" className="error">
-            {channelsState.error}
-          </p>
-        ) : null}
-        <ul aria-label="Channels">
-          {channelsState.channels.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveChannel(c.id);
-                }}
-                aria-current={c.id === activeChannel ? "true" : undefined}
-              >
-                #{c.name}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <ChannelsList
+          channels={channelsState.channels}
+          activeId={activeChannel}
+          onSelect={setActiveChannel}
+          loading={channelsState.loading}
+          error={channelsState.error}
+        />
         <h2>Online</h2>
         <ul className="presence" aria-label="Online users" data-testid="presence-list">
           {presenceState.users.map((u) => (
