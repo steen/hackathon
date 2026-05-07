@@ -1,7 +1,11 @@
 // Package hub is an in-memory pub/sub fan-out keyed by channel name.
 package hub
 
-import "sync"
+import (
+	"context"
+	"sync"
+	"time"
+)
 
 // Subscriber receives broadcast payloads on Send. Implementations are
 // expected to drop messages when their internal queue is full rather than
@@ -9,6 +13,20 @@ import "sync"
 type Subscriber interface {
 	Send(msg []byte)
 }
+
+// ShutdownSubscriber is an optional capability a Subscriber may implement
+// so Hub.CloseAll can ask it to flush a typed close frame and tear down
+// its underlying transport. Implementations must respect ctx so the
+// hub-side drain budget bounds total shutdown time.
+type ShutdownSubscriber interface {
+	Shutdown(ctx context.Context)
+}
+
+// closeAllDrainBudget is the wall-clock budget Hub.CloseAll waits for
+// every ShutdownSubscriber to finish its close-frame flush before
+// returning. 2s — sized for hackathon-scale subscriber counts (≤ low
+// hundreds). Bump if /healthz read shows persistent shutdown timeouts.
+const closeAllDrainBudget = 2 * time.Second
 
 // Hub is an in-memory pub/sub registry keyed by channel name. Safe for
 // concurrent Subscribe/Unsubscribe/Broadcast.
@@ -178,4 +196,59 @@ func (h *Hub) PresenceCount() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.presence)
+}
+
+// CloseAll asks every subscriber across every channel to shut down and
+// waits up to closeAllDrainBudget (2s) for them to flush their close
+// frames. Subscribers that implement ShutdownSubscriber receive a
+// Shutdown(ctx) call concurrently; subscribers that do not are left
+// alone (the deferred CloseNow in the connection handler will still
+// tear them down on TCP close).
+//
+// Called from the server's signal handler before srv.Shutdown so the
+// 1001 close frame goes out while the connection is still attached:
+// once srv.Shutdown returns the listener is gone but hijacked WS conns
+// remain open until the process exits, so the ordering is — drain WS
+// first, then HTTP.
+//
+// Safe to call once. Calling concurrently with Subscribe/Unsubscribe is
+// safe; the snapshot is taken under the read lock.
+func (h *Hub) CloseAll() {
+	h.mu.RLock()
+	seen := make(map[Subscriber]struct{})
+	for _, subs := range h.channels {
+		for s := range subs {
+			seen[s] = struct{}{}
+		}
+	}
+	h.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), closeAllDrainBudget)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for s := range seen {
+		ss, ok := s.(ShutdownSubscriber)
+		if !ok {
+			continue
+		}
+		wg.Add(1)
+		go func(target ShutdownSubscriber) {
+			defer wg.Done()
+			target.Shutdown(ctx)
+		}(ss)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		// Budget exhausted; let the deferred CloseNow in the
+		// per-conn handler tear down anything still mid-flush.
+	}
 }

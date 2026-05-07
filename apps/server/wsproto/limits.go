@@ -39,3 +39,10 @@ var MessageBodyLimitCloseReason = fmt.Sprintf("message body exceeds %d KiB limit
 // 1008 (StatusPolicyViolation) and the rate_limited error code in
 // the typed error frame emitted just before the close.
 const SendRateLimitCloseReason = "send rate limit exceeded"
+
+// ServerShutdownCloseReason is the WebSocket close-reason text the
+// server emits to every open subscriber on SIGINT/SIGTERM, paired
+// with close code 1001 (StatusGoingAway). Lets the browser distinguish
+// a clean redeploy from a 1006 abnormal closure so the reconnect
+// backoff can short-circuit instead of treating it like a flaky link.
+const ServerShutdownCloseReason = "server_shutdown"
