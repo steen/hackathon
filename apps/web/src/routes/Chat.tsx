@@ -3,6 +3,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   ChannelHeader,
   ChannelsList,
+  MESSAGE_MAX_BYTES,
   MessageComposer,
   MessageList,
   PresenceList,
@@ -14,12 +15,6 @@ import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
-
-// Mirrors apps/server/internal/http/messages_handlers.go's MaxMessageBodyBytes
-// (4 KiB). The server measures bytes after TrimSpace; the client prevalidates
-// in raw bytes so paste-of-large-text gets a warning before the user hits
-// Enter rather than after a round-trip.
-const MAX_BODY_BYTES = 4 * 1024;
 
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
@@ -208,7 +203,7 @@ export function Chat(): React.JSX.Element {
               void submitDraft();
             }}
             disabled={activeChannel === null}
-            maxBytes={MAX_BODY_BYTES}
+            maxBytes={MESSAGE_MAX_BYTES}
             placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
             composerRef={composerRef}
           />

@@ -13,4 +13,5 @@ export { userColorClass } from "./colorize.js";
 export type { Channel } from "./ChannelsList/ChannelsList.js";
 export type { PresenceUser } from "./PresenceList/PresenceList.js";
 export type { ChatMessage, ConnectionStatus, MessageStatus } from "./types.js";
+export { MESSAGE_MAX_BYTES } from "./types.js";
 export type { UserColorClass } from "./colorize.js";

@@ -10,7 +10,8 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./tokens.css": "./src/tokens.css"
+    "./tokens.css": "./src/tokens.css",
+    "./styles.css": "./src/styles.css"
   },
   "files": [
     "src"

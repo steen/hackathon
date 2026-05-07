@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { WebSocketClient, type Event as WsEvent } from "@hackathon/api-client";
+import type { PresenceUser } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError } from "../lib/userFacingError.js";
 
-export interface PresenceUser {
-  id: string;
-  username: string;
-}
+export type { PresenceUser };
 
 export interface PresenceEvent {
   kind: "join" | "leave";

@@ -18,3 +18,12 @@ export interface ChatMessage {
   status?: MessageStatus;
   failureReason?: string;
 }
+
+/**
+ * Maximum message body size, bytes. Mirrors the server's
+ * `MaxMessageBodyBytes` in `apps/server/internal/http/messages_handlers.go`
+ * (the server measures bytes after TrimSpace; the client uses this for the
+ * composer's over-cap guard). Single source of truth so consumers don't
+ * drift from the server-side limit.
+ */
+export const MESSAGE_MAX_BYTES = 4 * 1024;

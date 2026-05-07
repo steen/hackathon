@@ -1,9 +1,11 @@
 /* The vite alias for `@hackathon/chat-ui` is a simple string match and
    collides with the package's own subpath exports (it would rewrite this
-   import to `.../src/index.ts/tokens.css`), so use the workspace-relative
-   path here. The package's `exports["./tokens.css"]` entry is the
-   contract for external consumers via Node module resolution. */
-@import "../../packages/chat-ui/src/tokens.css";
+   import to `.../src/index.ts/...`), so use the workspace-relative
+   path here. The package's `exports["./styles.css"]` entry is the
+   contract for external consumers via Node module resolution; this file
+   pulls every chat-ui component stylesheet (tokens + 8 components) so
+   apps/web doesn't bookkeep the per-component list. */
+@import "../../../packages/chat-ui/src/styles.css";
 
 * {
   box-sizing: border-box;
