@@ -24,6 +24,7 @@ const cssBundle = [
   resolvePath(here, "../../../packages/chat-ui/src/MessageList/MessageList.css"),
   resolvePath(here, "../../../packages/chat-ui/src/PresenceList/PresenceList.css"),
   resolvePath(here, "../../../packages/chat-ui/src/Sidebar/Sidebar.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/TopBar/TopBar.css"),
 ]
   .map((p) => readFileSync(p, "utf-8"))
   .join("\n");

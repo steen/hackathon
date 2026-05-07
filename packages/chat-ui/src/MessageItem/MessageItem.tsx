@@ -8,7 +8,12 @@ interface Props {
   senderId: string;
   body: string;
   createdAt: string;
-  status?: MessageStatus | "sent";
+  /** Optimistic-send state. Absent ≡ the message was successfully sent
+      and persisted; the row renders with no status badge. The
+      `data-status` attribute on the article reflects this as
+      "pending" | "failed" | "sent" so existing E2E selectors keep
+      working. */
+  status?: MessageStatus;
   failureReason?: string;
   onRetry?: () => void;
   ariaHidden?: boolean;

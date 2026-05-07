@@ -1,6 +1,7 @@
 import type * as React from "react";
 import { useCallback, useEffect, useRef } from "react";
 import { MessageItem } from "../MessageItem/MessageItem.js";
+import { setRef } from "../setRef.js";
 import type { ChatMessage } from "../types.js";
 import "./MessageList.css";
 
@@ -17,9 +18,10 @@ interface Props {
   selfUserId?: string | null;
   /** Top-level fetch error banner. */
   error?: string | null;
-  /** Optional empty-state nodes. Both render unconditionally when their
-      respective showXxx flags resolve true; consumer decides the order. */
-  emptyState?: React.ReactNode;
+  /** Empty-state copy. Each block renders independently when its
+      flag is true; the order is fixed inside this component (no-channels
+      first, then per-channel hint). The consumer toggles visibility but
+      not order. */
   showNoChannelsEmpty?: boolean;
   showEmptyChannelHint?: boolean;
   emptyChannelHintText?: string;
@@ -34,13 +36,6 @@ interface Props {
   listRef?: React.Ref<HTMLDivElement>;
   /** Retry a failed send; receives the message id. */
   onRetry?: (messageId: string) => void;
-}
-
-function setRef<T>(ref: React.Ref<T> | undefined, value: T | null): void {
-  if (typeof ref === "function") ref(value);
-  else if (ref !== null && ref !== undefined) {
-    (ref as React.MutableRefObject<T | null>).current = value;
-  }
 }
 
 export function MessageList(props: Props): React.JSX.Element {

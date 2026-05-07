@@ -1,5 +1,6 @@
 import type * as React from "react";
 import { useMemo, useRef, type FormEvent, type KeyboardEvent } from "react";
+import { setRef } from "../setRef.js";
 import "./MessageComposer.css";
 
 const WARN_RATIO = 0.8;
@@ -18,13 +19,6 @@ interface Props {
   maxBytes: number;
   placeholder?: string;
   composerRef?: React.Ref<HTMLTextAreaElement>;
-}
-
-function setRef<T>(ref: React.Ref<T> | undefined, v: T | null): void {
-  if (typeof ref === "function") ref(v);
-  else if (ref !== null && ref !== undefined) {
-    (ref as React.MutableRefObject<T | null>).current = v;
-  }
 }
 
 export function MessageComposer({
@@ -92,7 +86,7 @@ export function MessageComposer({
         placeholder={placeholder}
         disabled={disabled === true}
         aria-label="message"
-        aria-invalid={overCap || undefined}
+        aria-invalid={overCap ? "true" : undefined}
         aria-errormessage={overCap ? "composer-counter" : undefined}
         rows={2}
         data-testid="composer-textarea"
