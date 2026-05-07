@@ -1,75 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
-import type { ConnectionStatus, MessageStatus } from "@hackathon/chat-ui";
+import { type WebSocketClient, type Message } from "@hackathon/api-client";
+import type { ConnectionStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
+import { type CancelToken, connectChannel } from "./useMessages.connect.js";
+import {
+  BACKOFF_MS,
+  CATCHUP_LIMIT,
+  makePendingRow,
+  markPendingFailed,
+  type MessageView,
+  newPendingId,
+  oldestCommittedId,
+  type PendingMeta,
+  prependOlderPage,
+  reconcilePersisted,
+  startRetry,
+} from "./useMessages.helpers.js";
 
-export interface MessageView extends Message {
-  status?: MessageStatus;
-  // Curated reason for a `failed` status, derived via classifyError() from
-  // the underlying postMessage rejection. Absent for pending/sent rows; also
-  // absent for failures classified before this field existed (graceful
-  // fallback to the badge label alone).
-  failureReason?: string;
-}
-
-interface PendingMeta {
-  submittedAt: number;
-}
+export type { MessageView } from "./useMessages.helpers.js";
+export { BACKOFF_MS };
 
 interface UseMessages {
   messages: MessageView[];
   connection: ConnectionStatus;
   error: string | null;
-  // True from mount (and from each channel switch) until the initial
-  // listMessages fetch settles — success or error. Lets the view gate
-  // empty-state copy that would otherwise flash for the duration of the
-  // fetch (the connection state machine stays at "connecting" through
-  // both history and the WS handshake, so it can't carry this signal).
+  /** True from mount until the initial listMessages fetch settles. */
   historyLoading: boolean;
   send: (body: string) => Promise<void>;
   retry: (pendingId: string) => Promise<void>;
   loadOlder: () => Promise<void>;
   canLoadOlder: boolean;
-  // True for the duration of an in-flight loadOlder fetch. The view
-  // mirrors this onto the trigger button so the click registers visibly
-  // (disabled + label flip + aria-busy) instead of waiting silently for
-  // the page to land.
+  /** True while a loadOlder fetch is in flight. */
   isLoadingOlder: boolean;
-  // Curated banner for the most recent loadOlder failure. Lives on its
-  // own state slot so a transient older-page failure does not displace
-  // the channel-level `error` (initial-history / WS-connect failures);
-  // cleared on the next loadOlder attempt.
+  /** Curated banner for the latest loadOlder failure; cleared on next attempt. */
   loadOlderError: string | null;
-}
-
-const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
-
-interface CancelToken {
-  cancelled: boolean;
-}
-
-const CATCHUP_LIMIT = 50;
-
-// Reconcile window: when both sides' clocks agree, a WS frame must land
-// within this many ms of the local submit timestamp to fold onto a pending
-// entry. If wall clocks differ by more than this (test fixtures with frozen
-// dates, severe client drift), fall back to FIFO matching by body+sender —
-// the strict gate is only useful for telling apart back-to-back identical
-// sends on a healthy clock.
-const RECONCILE_WINDOW_MS = 10_000;
-
-function newPendingId(): string {
-  // jsdom + modern browsers provide crypto.randomUUID. Fall back to a
-  // time+random string only if the runtime lacks it (older test stubs).
-  const c: { randomUUID?: () => string } | undefined = (
-    globalThis as { crypto?: { randomUUID?: () => string } }
-  ).crypto;
-  const uuid =
-    typeof c?.randomUUID === "function"
-      ? c.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  return `pending-${uuid}`;
 }
 
 export function useMessages(channelId: string | null, currentUserId?: string | null): UseMessages {
@@ -83,171 +48,46 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
   const loadingOlderRef = useRef<boolean>(false);
   const messagesRef = useRef<MessageView[]>([]);
   const wsRef = useRef<WebSocketClient | null>(null);
-  // Tracks original submit time per pending id, so the reconcile path can
-  // bound the WS-frame match to a recent window without leaking timestamps
-  // into the rendered MessageView.
+  // Per-pendingId submit timestamps drive the WS-echo reconcile window
+  // without leaking timestamps into MessageView rows.
   const pendingMetaRef = useRef<Map<string, PendingMeta>>(new Map());
+  const userIdRef = useRef<string | null>(currentUserId ?? null);
+  const channelIdRef = useRef<string | null>(channelId);
+  userIdRef.current = currentUserId ?? null;
+  channelIdRef.current = channelId;
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-  const userIdRef = useRef<string | null>(currentUserId ?? null);
-  userIdRef.current = currentUserId ?? null;
-  const channelIdRef = useRef<string | null>(channelId);
-  channelIdRef.current = channelId;
 
   useEffect(() => {
-    if (channelId === null) {
-      setMessages([]);
-      setConnection("idle");
-      setCanLoadOlder(false);
-      setIsLoadingOlder(false);
-      setLoadOlderError(null);
-      setHistoryLoading(false);
-      pendingMetaRef.current.clear();
-      return;
-    }
-    const tok: CancelToken = { cancelled: false };
     setMessages([]);
-    setError(null);
-    setConnection("connecting");
     setCanLoadOlder(false);
     setIsLoadingOlder(false);
     setLoadOlderError(null);
+    pendingMetaRef.current.clear();
+    if (channelId === null) {
+      setConnection("idle");
+      setHistoryLoading(false);
+      return;
+    }
+    const tok: CancelToken = { cancelled: false };
+    setError(null);
+    setConnection("connecting");
     setHistoryLoading(true);
     loadingOlderRef.current = false;
-    pendingMetaRef.current.clear();
 
-    let openCount = 0;
-
-    const mergeFetched = (fetched: Message[]): void => {
-      if (tok.cancelled) return;
-      setMessages((prev) => {
-        if (fetched.length === 0) return prev;
-        const seen = new Set(prev.map((p) => p.id));
-        const fresh = fetched.filter((m) => !seen.has(m.id)).reverse();
-        if (fresh.length === 0) return prev;
-        return [...prev, ...fresh];
-      });
-    };
-
-    const catchup = (): void => {
-      void (async () => {
-        try {
-          const recent = await getClient().listMessages(channelId, { limit: CATCHUP_LIMIT });
-          mergeFetched(recent);
-        } catch {
-          /* see history-failure note below */
-        }
-      })();
-    };
-
-    /* eslint-disable @typescript-eslint/no-unnecessary-condition --
-       Rule: @typescript-eslint/no-unnecessary-condition.
-       tok.cancelled is mutated by the effect cleanup closure; eslint's
-       flow analysis can't see the cross-closure write, so flags every
-       check as "always falsy". */
-    void (async () => {
-      try {
-        const history = await getClient().listMessages(channelId, { limit: CATCHUP_LIMIT });
-        if (tok.cancelled) return;
-        // Server returns newest-first to match the `before` cursor contract.
-        // The view wants oldest→newest (composer sits under the newest row),
-        // so reverse at the boundary and keep every in-state op unchanged.
-        setMessages([...history].reverse());
-        // Heuristic: a full page implies more older history might exist
-        // behind the cursor. A short page implies the channel's start is
-        // already in view, so the "Load older" trigger stays hidden.
-        setCanLoadOlder(history.length >= CATCHUP_LIMIT);
-      } catch (err) {
-        if (tok.cancelled) return;
-        const msg = bannerMessage("Failed to load message history", err);
-        setError(msg);
-        reportAppError(msg);
-      } finally {
-        if (!tok.cancelled) setHistoryLoading(false);
-      }
-
-      if (tok.cancelled) return;
-
-      const ws = new WebSocketClient({
-        http: getClient().http,
-        channelId,
-        backoffMs: BACKOFF_MS,
-      });
-      wsRef.current = ws;
-      ws.on("open", () => {
-        if (tok.cancelled) return;
-        setConnection("open");
-        openCount += 1;
-        if (openCount > 1) catchup();
-      });
-      ws.on("close", () => {
-        if (!tok.cancelled) setConnection("reconnecting");
-      });
-      ws.on("error", () => {
-        if (!tok.cancelled) setConnection("reconnecting");
-      });
-      ws.on("message", (ev: WsEvent) => {
-        if (tok.cancelled) return;
-        if (ev.type === "message") {
-          const m = ev.data as Message;
-          setMessages((prev) => {
-            if (prev.some((p) => p.id === m.id)) return prev;
-            // Reconcile: if this frame is an echo of a still-pending local
-            // send, swap the pending entry in place rather than appending a
-            // duplicate.
-            const me = userIdRef.current;
-            if (me !== null && m.sender_user_id === me) {
-              const wsAt = Date.parse(m.created_at);
-              interface Candidate {
-                idx: number;
-                submittedAt: number;
-                inWindow: boolean;
-              }
-              let best: Candidate | null = null;
-              for (let i = 0; i < prev.length; i += 1) {
-                const p = prev[i];
-                if (p === undefined) continue;
-                if (p.status !== "pending") continue;
-                if (p.body !== m.body) continue;
-                const meta = pendingMetaRef.current.get(p.id);
-                if (meta === undefined) continue;
-                const inWindow =
-                  !Number.isNaN(wsAt) && Math.abs(wsAt - meta.submittedAt) <= RECONCILE_WINDOW_MS;
-                // Prefer in-window matches, then oldest submitted (FIFO).
-                if (
-                  best === null ||
-                  (inWindow && !best.inWindow) ||
-                  (inWindow === best.inWindow && meta.submittedAt < best.submittedAt)
-                ) {
-                  best = { idx: i, submittedAt: meta.submittedAt, inWindow };
-                }
-              }
-              if (best !== null) {
-                const next = prev.slice();
-                const pendingEntry = next[best.idx];
-                if (pendingEntry !== undefined) {
-                  pendingMetaRef.current.delete(pendingEntry.id);
-                }
-                next[best.idx] = m;
-                return next;
-              }
-            }
-            return [...prev, m];
-          });
-        }
-      });
-      try {
-        await ws.connect();
-      } catch (err) {
-        if (tok.cancelled) return;
-        const msg = bannerMessage("Message connection failed", err);
-        setError(msg);
-        reportAppError(msg);
-        setConnection("reconnecting");
-      }
-    })();
-    /* eslint-enable @typescript-eslint/no-unnecessary-condition */
+    void connectChannel({
+      channelId,
+      tok,
+      setMessages,
+      setConnection,
+      setError,
+      setCanLoadOlder,
+      setHistoryLoading,
+      wsRef,
+      pendingMetaRef,
+      userIdRef,
+    });
 
     return () => {
       tok.cancelled = true;
@@ -264,40 +104,17 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     pendingMetaRef.current.set(id, { submittedAt: Date.now() });
     try {
       const persisted = (await getClient().postMessage(ch, body)) as Message | undefined;
-      // Reconcile from the REST response, not the WS echo. The POST
-      // returns the persisted Message (with its server ULID and
-      // created_at), so we can swap the pending row in place
-      // immediately. The subsequent WS broadcast carries the same id
-      // and is dropped by the `prev.some((p) => p.id === m.id)`
-      // early-return in the "message" handler — which kept the
-      // sender's own optimistic row from reconciling and produced two
-      // visible rows in the 2026-05-05 demo (#677). The WS-side body+
-      // sender+timestamp heuristic stays as a fallback for the rare
-      // case where a WS frame outruns the REST response.
-      //
-      // `persisted` may be undefined under test fixtures that mock
-      // `postMessage` returning void; treat that as "no useful body,
-      // leave the optimistic row to reconcile via the WS echo".
+      // Reconcile from REST when present; the WS echo with the same id
+      // is dropped by reconcileWsMessage's dedup. `persisted` is
+      // undefined under test fixtures mocking postMessage as void —
+      // leave the optimistic row to reconcile via the WS echo.
       if (persisted !== undefined) {
         pendingMetaRef.current.delete(id);
-        setMessages((prev) => {
-          if (prev.some((p) => p.id === persisted.id)) {
-            return prev.filter((p) => p.id !== id);
-          }
-          return prev.map((p) => (p.id === id ? persisted : p));
-        });
+        setMessages((prev) => reconcilePersisted(prev, id, persisted));
       }
     } catch (err) {
-      // Keep the entry but mark it failed so the user can retry. Channel-
-      // level `error` stays reserved for history/socket failures; the per-
-      // entry `failed` status is what surfaces to the user. The curated
-      // reason rides on the row so the badge can describe the failure
-      // ("Could not reach the server", "session no longer valid", etc.)
-      // instead of just "Failed to send".
       const reason = userFacingMessage("Failed to send message", err);
-      setMessages((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, status: "failed", failureReason: reason } : p)),
-      );
+      setMessages((prev) => markPendingFailed(prev, id, reason));
     }
   }, []);
 
@@ -308,15 +125,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       const trimmed = body.trim();
       if (trimmed.length === 0) return;
       const id = newPendingId();
-      const me = userIdRef.current ?? "";
-      const synthetic: MessageView = {
-        id,
-        channel_id: ch,
-        sender_user_id: me,
-        body: trimmed,
-        created_at: "",
-        status: "pending",
-      };
+      const synthetic = makePendingRow(id, ch, userIdRef.current ?? "", trimmed);
       setMessages((prev) => [...prev, synthetic]);
       setError(null);
       await submitPending(id, ch, trimmed);
@@ -328,23 +137,15 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     async (pendingId: string): Promise<void> => {
       const ch = channelIdRef.current;
       if (ch === null) return;
-      // setMessages's reducer can't read state out, so capture the body via
-      // a closure-mutable holder. The first character of the holder string
-      // signals "not found"; any pending entry's body is the stored value.
-      const found: { body: string | undefined } = { body: undefined };
-      setMessages((prev) =>
-        prev.map((p) => {
-          if (p.id !== pendingId) return p;
-          found.body = p.body;
-          // Drop a stale failureReason when the user retries — otherwise a
-          // retry that succeeds (and only the status flips back) would leak
-          // the previous attempt's reason into a sent row.
-          return { ...p, status: "pending", failureReason: undefined };
-        }),
-      );
-      if (found.body === undefined) return;
+      const captured: { body: string | undefined } = { body: undefined };
+      setMessages((prev) => {
+        const { next, body } = startRetry(prev, pendingId);
+        captured.body = body;
+        return next;
+      });
+      if (captured.body === undefined) return;
       setError(null);
-      await submitPending(pendingId, ch, found.body);
+      await submitPending(pendingId, ch, captured.body);
     },
     [submitPending],
   );
@@ -353,55 +154,23 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     const ch = channelIdRef.current;
     if (ch === null) return;
     if (loadingOlderRef.current) return;
-    // Read the oldest currently-visible ULID from a ref mirror of state.
-    // The ref avoids re-binding the callback on every messages change while
-    // sidestepping the reducer-no-op trick (which is not reliably
-    // synchronous under React 18's concurrent rendering).
-    let oldestId: string | undefined;
-    for (const m of messagesRef.current) {
-      if (m.status === "pending" || m.status === "failed") continue;
-      oldestId = m.id;
-      break;
-    }
+    const oldestId = oldestCommittedId(messagesRef.current);
     if (oldestId === undefined) return;
     loadingOlderRef.current = true;
     setIsLoadingOlder(true);
     setLoadOlderError(null);
     try {
-      const page = await getClient().listMessages(ch, {
-        before: oldestId,
-        limit: CATCHUP_LIMIT,
-      });
-      // Server returns newest-first; reverse to oldest→newest before
-      // prepending so the prepended block reads chronologically and the
-      // newest of the block sits immediately above the previous-top row.
-      const reversed = [...page].reverse();
-      // Compute the dedup against the latest committed messages (read
-      // from the ref) outside the reducer. Computing inside the reducer
-      // would race under StrictMode / concurrent rendering: the reducer
-      // runs twice, and a stashed "freshCount" written from each pass
-      // would record the second pass's view of the world (everything
-      // already prepended) rather than the first pass's true fresh
-      // count. WS frames between the awaited fetch and this branch only
-      // append newer rows, so older-window dedup against the ref is
-      // correct.
-      const seen = new Set(messagesRef.current.map((p) => p.id));
-      const fresh = reversed.filter((m) => !seen.has(m.id));
-      if (fresh.length > 0) {
-        setMessages((prev) => {
-          // Belt-and-braces: a second StrictMode pass sees `prev`
-          // already containing the prepend; re-dedup against `prev` so
-          // the second pass becomes a no-op rather than a double-prepend.
-          const seenPrev = new Set(prev.map((p) => p.id));
-          const stillFresh = fresh.filter((m) => !seenPrev.has(m.id));
-          if (stillFresh.length === 0) return prev;
-          return [...stillFresh, ...prev];
-        });
-      }
-      // Gate on deduped fresh count, not raw page size: a full server
-      // page that mostly overlapped state means the channel's start is
-      // effectively in view, so hide the trigger (#589).
-      setCanLoadOlder(fresh.length >= CATCHUP_LIMIT);
+      const page = await getClient().listMessages(ch, { before: oldestId, limit: CATCHUP_LIMIT });
+      // Dedup against the ref outside the reducer: under StrictMode the
+      // reducer runs twice, and a stashed count would record the second
+      // pass's view. WS frames between fetch and here only append newer
+      // rows, so older-window dedup against the ref is correct.
+      const refSeen = new Set(messagesRef.current.map((p) => p.id));
+      const refFreshCount = page.filter((m) => !refSeen.has(m.id)).length;
+      setMessages((prev) => prependOlderPage(prev, page) ?? prev);
+      // Gate on deduped fresh count, not raw page size: a mostly-
+      // overlapping full page means the channel's start is in view (#589).
+      setCanLoadOlder(refFreshCount >= CATCHUP_LIMIT);
     } catch (err) {
       const msg = bannerMessage("Failed to load older messages", err);
       setLoadOlderError(msg);
@@ -425,5 +194,3 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     loadOlderError,
   };
 }
-
-export { BACKOFF_MS };
