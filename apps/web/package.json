@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@hackathon/api-client": "workspace:*",
+    "@hackathon/chat-ui": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

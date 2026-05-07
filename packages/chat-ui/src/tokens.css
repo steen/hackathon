@@ -1,0 +1,29 @@
+/* Phase 6 dark palette tokens consumed via `@hackathon/chat-ui/tokens.css`.
+ *
+ * WCAG AA contrast checks (computed against `--bg-app` and `--bg-panel`):
+ *   --fg          15.20 / 14.49  ✓ body
+ *   --fg-muted     5.71 /  5.44  ✓ body
+ *   --fg-subtle    7.42 /  7.07  ✓ body  (used for section headers)
+ *   --accent       4.44 /  4.23  ~ large/UI surfaces only — DO NOT use as body text
+ *   --accent-text  6.51 /  6.20  ✓ body  (links, accent text)
+ *   --user-blue/green/purple/yellow ✓ body
+ *   --ok/--warn    ≥6 ✓
+ *   --error        5.12 /  4.89  ✓ body
+ */
+:root {
+  --bg-app: #0e0e10;
+  --bg-panel: #141417;
+  --bg-elevated: #1a1a1f;
+  --bg-hover: #232328;
+  --bg-active: #2c2d33;
+  --fg: #e4e4e7;
+  --fg-muted: #9ba0aa;
+  --fg-subtle: #a1a1aa;
+  --border: #2a2a32;
+  --accent: #7c5cff;
+  --accent-text: #a78bfa;
+  --accent-fg: #ffffff;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --error: #ef4444;
+}

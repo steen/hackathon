@@ -1,0 +1,13 @@
+/* Single CSS entrypoint that pulls every component stylesheet plus the
+   theme tokens. Consumers (apps/web/src/styles.css, jsdom test-setup)
+   import this file once instead of bookkeeping the per-component list.
+   Component .tsx files still import their own CSS for IDE locality and
+   tree-shaking under bundlers that prune unused JSX→CSS edges. */
+@import "./tokens.css";
+@import "./ChannelHeader/ChannelHeader.css";
+@import "./ChannelsList/ChannelsList.css";
+@import "./MessageComposer/MessageComposer.css";
+@import "./MessageList/MessageList.css";
+@import "./PresenceList/PresenceList.css";
+@import "./Sidebar/Sidebar.css";
+@import "./TopBar/TopBar.css";

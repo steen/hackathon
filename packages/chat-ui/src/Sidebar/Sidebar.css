@@ -1,0 +1,25 @@
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 0.75rem 0.85rem;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  width: 240px;
+  flex-shrink: 0;
+  font-size: 0.95rem; /* tighter than body so channel rows + presence read denser */
+}
+
+.sidebar h2 {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--fg-subtle);
+  margin: 0.5rem 0 0.3rem;
+  padding: 0 0.4rem;
+  font-weight: 600;
+}
+
+/* First section heading shouldn't have an extra margin since the
+   sidebar's own padding-top already separates it from the top bar. */
+.sidebar > h2:first-child {
+  margin-top: 0;
+}

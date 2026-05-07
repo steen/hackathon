@@ -1,0 +1,172 @@
+.messages__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.35rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: var(--bg-app);
+  color: var(--fg);
+}
+
+/* Day-divider sits in the messages list with the same left-edge as
+   the time column on each row, so the eye reads "Today" / "Mon" /
+   "Mar 4" in the same gutter as "12:01". A trailing horizontal rule
+   stretches the rest of the way to the right edge so the divider
+   reads as a separator, not just a label. */
+.msg-day-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0 0.15rem;
+  margin-top: 0.25rem;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-day-divider__label {
+  flex: 0 0 auto;
+  /* Width slot matches the time column on the meta line so "Today" /
+     "Mon" sit directly above "12:01" / "13:23" timestamps. */
+  min-width: var(--msg-col-time, 2.75rem);
+}
+
+.msg-day-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.messages__load-older {
+  align-self: center;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  border-radius: 4px;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+}
+
+.messages__load-older:hover {
+  background: var(--bg-hover);
+}
+
+.messages__load-older-error {
+  text-align: center;
+}
+
+/* No horizontal padding on the row; the parent `.messages__list`
+   already pads the panel by 1rem and adding more here would push the
+   timestamp column past the channel-header text's left edge. The
+   hover swap uses negative margin + matching padding on the inline
+   axis so the highlight bleeds into the panel padding instead of
+   creating a visible inset around the message. */
+.msg {
+  border: 0;
+  background: transparent;
+  border-radius: 4px;
+  padding: 0.05rem 1rem;
+  margin: 0 -1rem;
+}
+
+.msg:hover {
+  background: var(--bg-hover);
+}
+
+/* Use the same horizontal slot for the time column on the meta line and
+   the body's left padding so the username (col 2 of the meta line) and the
+   message body line up vertically. The slot is a fixed width — `min-width`
+   would be a bug because tabular-nums "12:10" exceeds it on default body
+   font and the column then stretches non-uniformly. The slot width must
+   include the meta's time font-size + a small slack for the colon. */
+.msg {
+  --msg-col-time: 2.75rem;
+  --msg-col-gap: 0.55rem;
+  /* Tight inter-message rhythm. The base padding pulls the next row's
+     time-stamp close enough to read as a continuation; consecutive
+     messages from the same author still feel related rather than
+     isolated. */
+  padding-block: 0.05rem;
+}
+
+.msg__meta {
+  display: flex;
+  gap: var(--msg-col-gap);
+  align-items: baseline;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  margin-bottom: 0.05rem;
+}
+
+.msg__meta time {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  width: var(--msg-col-time);
+  flex: 0 0 var(--msg-col-time);
+  text-align: left;
+}
+
+.msg__sender {
+  font-weight: 600;
+  font-size: 0.95rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
+}
+
+/* Sender colors are no longer driven by class — `userColor(sender)`
+   in MessageItem.tsx assigns an inline `color: hsl(...)` derived from
+   the username so every distinct user gets a distinct hue. */
+
+.msg__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg);
+  font-size: 1rem;
+  /* Mirror the meta's time-column slot so the body left-edge aligns with
+     where the username text starts on the meta line above. */
+  padding-left: calc(var(--msg-col-time) + var(--msg-col-gap));
+}
+
+.msg--pending .msg__body {
+  font-style: italic;
+  color: var(--fg-muted);
+}
+
+.msg__badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+}
+
+.msg__badge--pending {
+  color: var(--warn);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.msg__badge--error {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.msg__failure-reason {
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+}
+
+.msg__retry {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 0.05rem 0.4rem;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.msg__retry:hover {
+  background: var(--bg-hover);
+}

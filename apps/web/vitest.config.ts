@@ -9,6 +9,9 @@ export default defineConfig({
       "@hackathon/api-client": fileURLToPath(
         new URL("../../packages/api-client/src/index.ts", import.meta.url),
       ),
+      "@hackathon/chat-ui": fileURLToPath(
+        new URL("../../packages/chat-ui/src/index.ts", import.meta.url),
+      ),
     },
   },
   test: {

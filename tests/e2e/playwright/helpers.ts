@@ -66,12 +66,12 @@ export async function createChannelViaApi(token: string, name: string): Promise<
 }
 
 // Waits for the chat shell to finish its first render after auth by
-// asserting the sidebar shows the signed-in username. Specs that bypass
+// asserting the TopBar shows the signed-in username. Specs that bypass
 // loginInBrowser (e.g. seeding the JWT into localStorage to dodge the
-// per-IP login limiter) call this directly so the sidebar selector lives
-// in one place — if the markup changes, only this helper updates.
+// per-IP login limiter) call this directly so the selector lives in
+// one place — if the markup changes, only this helper updates.
 export async function waitForChatShell(page: Page, username: string): Promise<void> {
-  await expect(page.locator(".sidebar strong")).toContainText(username, { timeout: 10_000 });
+  await expect(page.locator(".top-bar__user-name")).toContainText(username, { timeout: 10_000 });
 }
 
 // Signs the given user into the web app via the on-screen form. Asserts we

@@ -38,7 +38,7 @@ function isDistPath(p) {
 }
 
 function isSourcePath(p) {
-  return /\.tsx?$/.test(p);
+  return /\.(tsx?|css)$/.test(p);
 }
 
 function checkPackage(pkgDir) {

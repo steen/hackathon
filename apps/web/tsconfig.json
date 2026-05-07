@@ -5,7 +5,8 @@
     "types": ["node", "vite/client"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "paths": {
-      "@hackathon/api-client": ["../../packages/api-client/src/index.ts"]
+      "@hackathon/api-client": ["../../packages/api-client/src/index.ts"],
+      "@hackathon/chat-ui": ["../../packages/chat-ui/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.config.ts"]

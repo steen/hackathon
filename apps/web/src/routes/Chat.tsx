@@ -1,57 +1,20 @@
 import type * as React from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent,
-} from "react";
+  ChannelHeader,
+  ChannelsList,
+  MESSAGE_MAX_BYTES,
+  MessageComposer,
+  MessageList,
+  PresenceList,
+  PresenceLiveRegion,
+  Sidebar,
+  TopBar,
+} from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
-import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
+import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
-import { humanizeTimestamp } from "../utils/formatTimestamp.js";
-
-// Mirrors apps/server/internal/http/messages_handlers.go's MaxMessageBodyBytes
-// (4 KiB). The server measures bytes after TrimSpace; the client prevalidates
-// in raw bytes so paste-of-large-text gets a warning before the user hits
-// Enter rather than after a round-trip.
-const MAX_BODY_BYTES = 4 * 1024;
-// Above this fraction of the cap, show the user the live byte counter so
-// they can see the limit approach. Below it, the chrome stays out of the way.
-const WARN_RATIO = 0.8;
-
-// Max distance from the bottom (px) that still counts as "at bottom" for
-// the auto-scroll-on-new-message effect. Absorbs subpixel rounding from
-// zoom and high-DPI panels; tighter values flicker on iOS Safari, looser
-// values miss true near-bottom positions. Exported so tests can derive
-// boundary scrollTop values without re-encoding the literal.
-export const IS_AT_BOTTOM_TOLERANCE_PX = 8;
-
-function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
-  const label =
-    state === "open"
-      ? "Connected"
-      : state === "connecting"
-        ? "Connecting..."
-        : state === "reconnecting"
-          ? "Reconnecting..."
-          : state === "closed"
-            ? "Disconnected"
-            : "Idle";
-  return (
-    <span className={`conn conn--${state}`} role="status" aria-live="polite">
-      {label}
-    </span>
-  );
-}
-
-function byteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
 
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
@@ -60,7 +23,6 @@ export function Chat(): React.JSX.Element {
   const messagesState = useMessages(activeChannel, user?.id ?? null);
   const presenceState = usePresence(true);
   const [draft, setDraft] = useState("");
-  const composingRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -76,28 +38,6 @@ export function Chat(): React.JSX.Element {
       setActiveChannel(channelsState.channels[0]?.id ?? null);
     }
   }, [activeChannel, channelsState.channels]);
-
-  // Auto-scroll only when the user is already pinned to the bottom. If they
-  // scrolled up to read history, a new live message must not yank them back —
-  // mid-thread reading is the common mobile case (#633, parent #156).
-  // `scrollHeight` is read *before* the next paint, so the check races the
-  // layout that adds the new row — but the previous render already pinned
-  // `scrollTop` to the prior bottom whenever the user was there, so the
-  // comparison is correct against the pre-update geometry.
-  const wasAtBottomRef = useRef(true);
-  const onListScroll = useCallback((): void => {
-    const el = listRef.current;
-    if (el === null) return;
-    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
-    wasAtBottomRef.current = distanceFromBottom <= IS_AT_BOTTOM_TOLERANCE_PX;
-  }, []);
-  useEffect(() => {
-    const el = listRef.current;
-    if (el === null) return;
-    if (wasAtBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messagesState.messages]);
 
   // Focus delivery, priority composer → heading → list. useLayoutEffect lands
   // focus before the browser paints so SR users don't see a frame on
@@ -162,12 +102,6 @@ export function Chat(): React.JSX.Element {
     return channelsState.channels.find((c) => c.id === activeChannel)?.name ?? null;
   }, [activeChannel, channelsState.channels]);
 
-  const draftBytes = useMemo(() => byteLength(draft), [draft]);
-  const overCap = draftBytes > MAX_BODY_BYTES;
-  const showCounter = draftBytes >= Math.floor(MAX_BODY_BYTES * WARN_RATIO);
-  const trimmedEmpty = draft.trim().length === 0;
-  const sendDisabled = activeChannel === null || trimmedEmpty || overCap;
-
   // Empty-state surfaces only after the initial channel fetch settles (no
   // loading, no error). Showing the "no channels" copy mid-load would race
   // the eventual list and flash for SR users.
@@ -184,276 +118,82 @@ export function Chat(): React.JSX.Element {
     messagesState.messages.length === 0;
 
   async function submitDraft(): Promise<void> {
-    if (sendDisabled) return;
+    if (activeChannel === null) return;
     const body = draft.trim();
     if (body.length === 0) return;
     setDraft("");
     await messagesState.send(body);
   }
 
-  function onSend(e: FormEvent<HTMLFormElement>): void {
-    e.preventDefault();
-    void submitDraft();
-  }
-
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
-    // Enter sends; Shift+Enter inserts a newline. IME composition (Japanese,
-    // Chinese, Korean) fires Enter to commit a candidate — never treat that
-    // as a send.
-    if (e.key !== "Enter") return;
-    if (e.shiftKey) return;
-    if (composingRef.current) return;
-    // `isComposing` is the canonical flag for browsers that emit it; the
-    // ref handles older fallbacks. Keep both.
-    if (e.nativeEvent.isComposing) return;
-    e.preventDefault();
-    void submitDraft();
-  }
-
   return (
     <div className="chat-layout">
-      <aside className="sidebar" aria-label="Chat sidebar">
-        <header>
-          <strong>{user?.username ?? "..."}</strong>
-          <button
-            type="button"
-            onClick={() => {
-              void logout();
-            }}
-          >
-            Sign out
-          </button>
-        </header>
-        <h2>Channels</h2>
-        {channelsState.loading ? <p>Loading...</p> : null}
-        {channelsState.error !== null ? (
-          <p role="alert" className="error">
-            {channelsState.error}
-          </p>
-        ) : null}
-        <ul aria-label="Channels">
-          {channelsState.channels.map((c) => (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveChannel(c.id);
-                }}
-                aria-current={c.id === activeChannel ? "true" : undefined}
-              >
-                #{c.name}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <h2>Online</h2>
-        <ul className="presence" aria-label="Online users" data-testid="presence-list">
-          {presenceState.users.map((u) => (
-            <li key={u.id} data-testid={`presence-user-${u.id}`}>
-              {u.username.length > 0 ? u.username : u.id}
-            </li>
-          ))}
-        </ul>
-        {/* aria-live="polite" alone is the load-bearing announcement
-            mechanism; an explicit role="status" is omitted so the
-            element doesn't collide with `getByRole("status")` queries
-            already used by the connection badge (the e2e
-            `page.getByRole("status")` locator expects exactly one
-            match). aria-atomic="true" so the SR re-reads the whole
-            phrase on each event, not just the diff. */}
-        <div
-          className="visually-hidden"
-          aria-live="polite"
-          aria-atomic="true"
-          data-testid="presence-live-region"
-        >
-          {presenceAnnouncement}
-        </div>
-      </aside>
-      <main className="messages" aria-label={activeChannelName ?? "Messages"}>
-        <header className="messages__header">
-          <h2 ref={headingRef} tabIndex={-1}>
-            {activeChannelName ?? "Select a channel"}
-          </h2>
-          <ConnectionBadge state={messagesState.connection} />
-        </header>
-        {/* role="log" implies aria-live="polite" per ARIA 1.2 — single
-            source of truth so a future flip to assertive only needs the
-            role change. aria-relevant/aria-atomic stay explicit because
-            they override the role's defaults. */}
-        <div
-          className="messages__list"
-          ref={listRef}
-          data-testid="message-list"
-          role="log"
-          aria-relevant="additions"
-          aria-atomic="false"
-          aria-label="conversation"
-          tabIndex={-1}
-          onScroll={onListScroll}
-        >
-          {messagesState.error !== null ? (
-            <p role="alert" className="error">
-              {messagesState.error}
-            </p>
-          ) : null}
-          {showNoChannelsEmpty ? (
-            <p className="empty-state" data-testid="empty-state-no-channels">
-              No channels available yet. Wait for an admin to create one.
-            </p>
-          ) : null}
-          {showEmptyChannelHint && activeChannelName !== null ? (
-            <p className="empty-state" data-testid="empty-state-channel-hint">
-              {`This is the start of #${activeChannelName} — send a message to say hi.`}
-            </p>
-          ) : null}
-          {messagesState.canLoadOlder ? (
-            <>
-              <button
-                type="button"
-                className="messages__load-older"
-                data-testid="load-older-button"
-                onClick={() => {
-                  void messagesState.loadOlder();
-                }}
-                disabled={messagesState.isLoadingOlder}
-                aria-busy={messagesState.isLoadingOlder ? "true" : undefined}
-              >
-                {messagesState.isLoadingOlder ? "Loading older messages…" : "Load older messages"}
-              </button>
-              {messagesState.loadOlderError !== null ? (
-                <p
-                  role="alert"
-                  className="error messages__load-older-error"
-                  data-testid="load-older-error"
-                >
-                  {messagesState.loadOlderError}
-                </p>
-              ) : null}
-            </>
-          ) : null}
-          {messagesState.messages.map((m) => {
-            const cls =
-              m.status === "pending"
-                ? "msg msg--pending"
-                : m.status === "failed"
-                  ? "msg msg--failed"
-                  : "msg";
-            // Suppress SR announcement of the user's own messages — the
-            // optimistic-send path appends them immediately on submit, and
-            // SR users typed them so the polite-log readback is annoying
-            // (#139, #468). The WS echo (`useMessages` reconcile) reuses
-            // the same pending row, so the article keeps aria-hidden once
-            // its sender resolves to self. Failed-status rows stay
-            // announceable (the failed-badge `role="status"` plus the
-            // Retry button must remain in the a11y tree) — failed-send
-            // SR behaviour is tracked separately as #147.
-            const isSelf = user !== null && m.sender_user_id === user.id;
-            const ariaHidden = isSelf && m.status !== "failed" ? "true" : undefined;
-            return (
-              <article
-                key={m.id}
-                className={cls}
-                data-testid="msg"
-                data-status={m.status ?? "sent"}
-                aria-hidden={ariaHidden}
-              >
-                <div className="msg__meta">
-                  <span className="msg__sender">{resolveSender(m.sender_user_id)}</span>
-                  {m.status === "pending" ? (
-                    <span className="msg__badge msg__badge--pending" role="status">
-                      Sending…
-                    </span>
-                  ) : null}
-                  {m.status === "pending" || m.created_at.length === 0 ? null : (
-                    <time dateTime={m.created_at}>{humanizeTimestamp(m.created_at)}</time>
-                  )}
-                  {m.status === "failed" ? (
-                    <>
-                      <span
-                        className="msg__badge msg__badge--error"
-                        role="alert"
-                        data-testid="msg-failed-badge"
-                        aria-describedby={
-                          m.failureReason !== undefined && m.failureReason.length > 0
-                            ? `msg-failed-reason-${m.id}`
-                            : undefined
-                        }
-                      >
-                        Failed to send
-                      </span>
-                      {m.failureReason !== undefined && m.failureReason.length > 0 ? (
-                        <span
-                          id={`msg-failed-reason-${m.id}`}
-                          className="msg__failure-reason"
-                          data-testid="msg-failed-reason"
-                        >
-                          {m.failureReason}
-                        </span>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="msg__retry"
-                        onClick={() => {
-                          void messagesState.retry(m.id);
-                        }}
-                      >
-                        Retry
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-                <div className="msg__body">{m.body}</div>
-              </article>
-            );
-          })}
-        </div>
-        <form
-          className="composer"
-          onSubmit={onSend}
-          aria-describedby={showCounter && !overCap ? "composer-counter" : undefined}
-        >
-          <textarea
-            ref={composerRef}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-            }}
-            onKeyDown={onKeyDown}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
-            }}
-            placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
-            disabled={activeChannel === null}
-            aria-label="message"
-            aria-invalid={overCap || undefined}
-            aria-errormessage={overCap ? "composer-counter" : undefined}
-            rows={2}
-            data-testid="composer-textarea"
+      {user !== null ? (
+        <TopBar
+          workspaceName="Hackathon"
+          user={user}
+          online={messagesState.connection === "open"}
+          onSignOut={() => {
+            void logout();
+          }}
+        />
+      ) : null}
+      <div className="chat-layout__body">
+        <Sidebar>
+          <h2>Channels</h2>
+          <ChannelsList
+            channels={channelsState.channels}
+            activeId={activeChannel}
+            onSelect={setActiveChannel}
+            loading={channelsState.loading}
+            error={channelsState.error}
           />
-          <button type="submit" disabled={sendDisabled}>
-            Send
-          </button>
-          {showCounter ? (
-            <span
-              id="composer-counter"
-              className={
-                overCap
-                  ? "composer__counter composer__counter--error"
-                  : "composer__counter composer__counter--warn"
-              }
-              role="status"
-              data-testid="composer-counter"
-            >
-              {draftBytes} / {MAX_BODY_BYTES} bytes
-              {overCap ? " — too long to send" : ""}
-            </span>
-          ) : null}
-        </form>
-      </main>
+          <h2>Online</h2>
+          <PresenceList users={presenceState.users} />
+          {/* role="status" is owned by the TopBar's "Online" indicator, so
+              the live region here drops it to avoid duplicate role-status
+              elements (web.spec.ts queries by role=status, expects exactly
+              one match). aria-atomic="true" so the SR re-reads the whole
+              phrase on each event, not just the diff. */}
+          <PresenceLiveRegion text={presenceAnnouncement} />
+        </Sidebar>
+        <main className="messages" aria-label={activeChannelName ?? "Messages"}>
+          <ChannelHeader channelName={activeChannelName} headingRef={headingRef} />
+          <MessageList
+            messages={messagesState.messages}
+            resolveSender={resolveSender}
+            selfUserId={user?.id ?? null}
+            error={messagesState.error}
+            showNoChannelsEmpty={showNoChannelsEmpty}
+            showEmptyChannelHint={showEmptyChannelHint && activeChannelName !== null}
+            emptyChannelHintText={
+              activeChannelName !== null
+                ? `This is the start of #${activeChannelName} — send a message to say hi.`
+                : undefined
+            }
+            canLoadOlder={messagesState.canLoadOlder}
+            isLoadingOlder={messagesState.isLoadingOlder}
+            loadOlderError={messagesState.loadOlderError}
+            onLoadOlder={() => {
+              void messagesState.loadOlder();
+            }}
+            onRetry={(id) => {
+              void messagesState.retry(id);
+            }}
+            listRef={listRef}
+          />
+          <MessageComposer
+            value={draft}
+            onChange={setDraft}
+            onSubmit={() => {
+              void submitDraft();
+            }}
+            disabled={activeChannel === null}
+            maxBytes={MESSAGE_MAX_BYTES}
+            placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
+            composerRef={composerRef}
+          />
+        </main>
+      </div>
     </div>
   );
 }

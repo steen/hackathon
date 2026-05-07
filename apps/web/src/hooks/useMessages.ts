@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
+import type { ConnectionStatus, MessageStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
-
-export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "reconnecting";
-
-export type MessageStatus = "pending" | "failed";
 
 export interface MessageView extends Message {
   status?: MessageStatus;
@@ -22,7 +19,7 @@ interface PendingMeta {
 
 interface UseMessages {
   messages: MessageView[];
-  connection: ConnectionState;
+  connection: ConnectionStatus;
   error: string | null;
   // True from mount (and from each channel switch) until the initial
   // listMessages fetch settles — success or error. Lets the view gate
@@ -77,7 +74,7 @@ function newPendingId(): string {
 
 export function useMessages(channelId: string | null, currentUserId?: string | null): UseMessages {
   const [messages, setMessages] = useState<MessageView[]>([]);
-  const [connection, setConnection] = useState<ConnectionState>("idle");
+  const [connection, setConnection] = useState<ConnectionStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [canLoadOlder, setCanLoadOlder] = useState<boolean>(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);

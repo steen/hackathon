@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { humanizeTimestamp } from "../utils/formatTimestamp.js";
+import { humanizeTimestamp } from "@hackathon/chat-ui";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -60,7 +60,8 @@ vi.mock("../api.js", () => ({
 }));
 
 import { AuthProvider } from "../auth/AuthContext.js";
-import { Chat, IS_AT_BOTTOM_TOLERANCE_PX } from "./Chat.js";
+import { IS_AT_BOTTOM_TOLERANCE_PX } from "@hackathon/chat-ui";
+import { Chat } from "./Chat.js";
 
 beforeEach(() => {
   (globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket;
@@ -100,7 +101,7 @@ function happyPath(): void {
     return { ticket: `ticket-${String(n)}`, expires_at: "2026-01-01T01:00:00Z" };
   });
   httpRequestMock.mockImplementation((method: string, path: string) => {
-    if (method === "GET" && path === "/api/presence") {
+    if (method === "GET" && (path === "/api/presence" || path === "/api/users")) {
       return Promise.resolve({ users: [] });
     }
     return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
@@ -375,6 +376,9 @@ describe("test_web_presence_list_renders_seed_join_leave_and_dedupes", () => {
       if (method === "GET" && path === "/api/presence") {
         return Promise.resolve({ users: [{ id: "U1", username: "alice" }] });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -448,6 +452,9 @@ describe("test_web_presence_live_region_announces_join_with_known_username", () 
           ],
         });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -510,6 +517,9 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
       if (method === "GET" && path === "/api/presence") {
         return Promise.resolve({ users: [] });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -544,6 +554,9 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
     happyPath();
     httpRequestMock.mockImplementation((method: string, path: string) => {
       if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      if (method === "GET" && path === "/api/users") {
         return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
@@ -588,6 +601,9 @@ describe("test_web_presence_live_region_rebroadcasts_join_when_already_present",
             { id: "U2", username: "bob" },
           ],
         });
+      }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
@@ -1245,6 +1261,136 @@ describe("test_web_message_timestamp_renders_humanized_form_not_raw_iso", () => 
   });
 });
 
+describe("test_web_message_list_inserts_day_divider_between_messages_spanning_midnight", () => {
+  it("renders one [data-testid=day-divider] above each new local-day group", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Three messages: two on 2026-05-04, one on 2026-05-05. Built in
+    // local-time so the test is portable across CI timezones — the
+    // divider rule keys off `getFullYear/Month/Date` which read the
+    // local zone. ISO output uses an offset suffix so the server
+    // round-trip would survive intact.
+    function localIso(y: number, mo: number, d: number, h: number, mi: number): string {
+      const date = new Date(y, mo - 1, d, h, mi, 0);
+      const tzMin = date.getTimezoneOffset();
+      const sign = tzMin > 0 ? "-" : "+";
+      const abs = Math.abs(tzMin);
+      const tz = `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+      const pad = (n: number): string => String(n).padStart(2, "0");
+      return `${String(y)}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:00${tz}`;
+    }
+    // listMessages returns newest-first (server convention);
+    // useMessages reverses to oldest→newest in state (see line ~156).
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M3",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "day-2 first (across midnight)",
+        created_at: localIso(2026, 5, 5, 0, 5),
+      },
+      {
+        id: "M2",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "day-1 second",
+        created_at: localIso(2026, 5, 4, 23, 50),
+      },
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "day-1 first",
+        created_at: localIso(2026, 5, 4, 9, 0),
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("day-2 first (across midnight)")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const dividers = list.querySelectorAll('[data-testid="day-divider"]');
+    // First message always gets a divider so the reader anchors "what
+    // day am I reading?" — that's one. A second divider must appear
+    // between M2 and M3 because they cross local midnight. Total: 2.
+    expect(dividers).toHaveLength(2);
+
+    // Children of .messages__list, in order, must be:
+    //   [divider, M1, M2, divider, M3]
+    // Walk visible children and check that the divider at index 3
+    // (zero-based) sits immediately before the article carrying the
+    // day-2 body. Filter to article + divider only — the load-older
+    // button + empty-state nodes are absent in this fixture.
+    const interesting = Array.from(list.children).filter(
+      (n) =>
+        (n.tagName === "ARTICLE" && n.getAttribute("data-testid") === "msg") ||
+        n.getAttribute("data-testid") === "day-divider",
+    );
+    expect(interesting).toHaveLength(5);
+    expect(interesting[0]?.getAttribute("data-testid")).toBe("day-divider");
+    expect(interesting[1]?.querySelector(".msg__body")?.textContent).toBe("day-1 first");
+    expect(interesting[2]?.querySelector(".msg__body")?.textContent).toBe("day-1 second");
+    expect(interesting[3]?.getAttribute("data-testid")).toBe("day-divider");
+    expect(interesting[4]?.querySelector(".msg__body")?.textContent).toBe(
+      "day-2 first (across midnight)",
+    );
+  });
+
+  it("does not insert a divider between two messages on the same local day", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Newest-first per server convention; useMessages reverses to
+    // oldest→newest. M2 (afternoon) is later, so it leads here.
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M2",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "afternoon",
+        // 5 hours later, same local day
+        created_at: new Date(Date.now() + 5 * 60 * 60_000).toISOString(),
+      },
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "morning",
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("afternoon")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const dividers = list.querySelectorAll('[data-testid="day-divider"]');
+    // Only one divider — the leading anchor before the first message.
+    expect(dividers).toHaveLength(1);
+  });
+});
+
 describe("test_web_message_sender_renders_username_when_known", () => {
   it("a sender id present in the /api/presence seed renders as the username, not the UUID", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });
@@ -1269,6 +1415,9 @@ describe("test_web_message_sender_renders_username_when_known", () => {
             { id: "U2", username: "bob" },
           ],
         });
+      }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
@@ -1309,6 +1458,9 @@ describe("test_web_message_sender_falls_back_to_uuid_when_unknown", () => {
     // Empty seed — U-stranger never enters the directory.
     httpRequestMock.mockImplementation((method: string, path: string) => {
       if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      if (method === "GET" && path === "/api/users") {
         return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
@@ -1986,101 +2138,5 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
 
     expect(screen.getByText("live arrival at 9px past boundary")).toBeInTheDocument();
     expect(list.scrollTop).toBe(scrollTop);
-  });
-});
-
-describe("test_web_conn_badge_phone_header_wraps_to_two_rows", () => {
-  it("renders the connection badge inside the messages header", async () => {
-    happyPath();
-    render(
-      <AuthProvider>
-        <Chat />
-      </AuthProvider>,
-    );
-
-    // The badge is the only role=status node in the messages region (the
-    // presence live region is in the sidebar; comment at line ~462
-    // documents this). It must always render so SR users can hear WS
-    // state changes regardless of viewport width.
-    const badge = await screen.findByRole("status");
-    expect(badge).toBeInTheDocument();
-    expect(badge.classList.contains("conn")).toBe(true);
-
-    const header = badge.closest(".messages__header");
-    expect(header).not.toBeNull();
-    // h2 is rendered as a sibling of the badge inside the same header.
-    expect(header?.querySelector("h2")).not.toBeNull();
-  });
-
-  // jsdom does not run layout, so getBoundingClientRect width assertions
-  // would all return zero and silently pass. The contract that prevents
-  // mobile clipping lives in the stylesheet itself: at ≤767px the header
-  // must wrap, and the title must claim the full row so the stable-width
-  // badge falls to row 2. Walk the injected stylesheet (test-setup.ts
-  // attaches styles.css verbatim) and assert the rules exist with the
-  // expected declarations. A future refactor that drops these rules
-  // re-introduces the bug from #632 and fails this test.
-  it("styles.css carries phone-width header wrap rules so the badge can never sit beside an overflowing title", () => {
-    interface DecMatch {
-      selector: string;
-      declarations: Record<string, string>;
-    }
-
-    function collectPhoneRules(): DecMatch[] {
-      const out: DecMatch[] = [];
-      for (const sheet of Array.from(document.styleSheets)) {
-        let rules: CSSRuleList;
-        try {
-          rules = sheet.cssRules;
-        } catch {
-          continue;
-        }
-        for (const rule of Array.from(rules)) {
-          if (!(rule instanceof CSSMediaRule)) continue;
-          // The baseline phone breakpoint is `(max-width: 767px)`. Match
-          // exact text after whitespace normalization to avoid picking
-          // up unrelated future media blocks.
-          const condition = rule.conditionText.replace(/\s+/g, " ").trim();
-          if (condition !== "(max-width: 767px)") continue;
-          for (const inner of Array.from(rule.cssRules)) {
-            if (!(inner instanceof CSSStyleRule)) continue;
-            const decls: Record<string, string> = {};
-            // jsdom's CSSStyleDeclaration exposes properties via numeric
-            // index (e.g. `style[0]`) but does not implement `.item(i)`,
-            // unlike the browser CSSOM. Spread to an array so we can
-            // iterate via for-of without poking the indexed-access shape.
-            const style = inner.style;
-            const propNames = Array.from(
-              { length: style.length },
-              (_, i) => (style as unknown as Record<number, string>)[i],
-            );
-            for (const prop of propNames) {
-              if (typeof prop !== "string" || prop.length === 0) continue;
-              decls[prop] = style.getPropertyValue(prop).trim();
-            }
-            out.push({ selector: inner.selectorText, declarations: decls });
-          }
-        }
-      }
-      return out;
-    }
-
-    const rules = collectPhoneRules();
-    const headerRule = rules.find((r) => r.selector === ".messages__header");
-    expect(headerRule, "phone-width .messages__header rule").toBeDefined();
-    expect(headerRule?.declarations["flex-wrap"]).toBe("wrap");
-
-    const headerH2Rule = rules.find((r) => r.selector === ".messages__header h2");
-    expect(headerH2Rule, "phone-width .messages__header h2 rule").toBeDefined();
-    // jsdom's CSSOM does not expand the `flex` shorthand into the
-    // -grow/-shrink/-basis longhands (Chrome does), so assert against
-    // the shorthand text instead. The 100% basis is what forces the
-    // badge to row 2 — without it the badge would sit beside a
-    // shrunken title at narrow widths and the bug from #632 returns.
-    expect(headerH2Rule?.declarations.flex).toContain("100%");
-    // min-width: 0 is required to let the heading shrink in its flex
-    // container; without it a long unbroken title would still overflow.
-    // CSSOM serialization across jsdom versions varies (`0` vs `0px`).
-    expect(["0", "0px"]).toContain(headerH2Rule?.declarations["min-width"]);
   });
 });

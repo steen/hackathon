@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { WebSocketClient, type Event as WsEvent } from "@hackathon/api-client";
+import type { PresenceUser } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError } from "../lib/userFacingError.js";
 
-export interface PresenceUser {
-  id: string;
-  username: string;
-}
+export type { PresenceUser };
 
 export interface PresenceEvent {
   kind: "join" | "leave";
@@ -142,8 +140,22 @@ export function usePresence(enabled: boolean): UsePresence {
        as always-falsy. */
     void (async () => {
       try {
-        const seed = await getClient().http.request<PresenceListResponse>("GET", "/api/presence");
+        // Two parallel seeds:
+        //   /api/users    — full directory of registered users (used to
+        //                   resolve sender_user_id for offline senders).
+        //   /api/presence — currently-online subset, used as the
+        //                   `users` field of state for the "Online" list.
+        // The directory from /api/users is merged into knownUsernames so
+        // a message from a user who has since gone offline still renders
+        // their username instead of a raw ULID.
+        const [seed, dir] = await Promise.all([
+          getClient().http.request<PresenceListResponse>("GET", "/api/presence"),
+          getClient().http.request<PresenceListResponse>("GET", "/api/users"),
+        ]);
         if (tok.cancelled) return;
+        for (const u of dir.users) {
+          if (u.username.length > 0) knownUsernames.set(u.id, u.username);
+        }
         for (const u of seed.users) {
           if (u.username.length > 0) knownUsernames.set(u.id, u.username);
         }
