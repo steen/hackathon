@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WebSocketClient, type Event as WsEvent, type Message } from "@hackathon/api-client";
+import type { ConnectionStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
 
-export type ConnectionState = "idle" | "connecting" | "open" | "closed" | "reconnecting";
+/**
+ * Local alias for the canonical `ConnectionStatus` type owned by
+ * `@hackathon/chat-ui`. Existing callers that import `ConnectionState` from
+ * this hook keep compiling; new code should import directly from chat-ui.
+ */
+export type ConnectionState = ConnectionStatus;
 
 export type MessageStatus = "pending" | "failed";
 

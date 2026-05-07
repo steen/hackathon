@@ -9,9 +9,10 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { ConnectionBadge } from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
-import { useMessages, type ConnectionState } from "../hooks/useMessages.js";
+import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
 import { humanizeTimestamp } from "../utils/formatTimestamp.js";
 
@@ -30,24 +31,6 @@ const WARN_RATIO = 0.8;
 // values miss true near-bottom positions. Exported so tests can derive
 // boundary scrollTop values without re-encoding the literal.
 export const IS_AT_BOTTOM_TOLERANCE_PX = 8;
-
-function ConnectionBadge({ state }: { state: ConnectionState }): React.JSX.Element {
-  const label =
-    state === "open"
-      ? "Connected"
-      : state === "connecting"
-        ? "Connecting..."
-        : state === "reconnecting"
-          ? "Reconnecting..."
-          : state === "closed"
-            ? "Disconnected"
-            : "Idle";
-  return (
-    <span className={`conn conn--${state}`} role="status" aria-live="polite">
-      {label}
-    </span>
-  );
-}
 
 function byteLength(s: string): number {
   return new TextEncoder().encode(s).length;
