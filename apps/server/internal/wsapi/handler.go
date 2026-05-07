@@ -5,7 +5,9 @@ package wsapi
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -243,6 +245,16 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 		if err != nil {
 			var ce websocket.CloseError
 			if errors.As(err, &ce) || ctx.Err() != nil {
+				return
+			}
+			// Ungraceful disconnect (browser tab close, network drop,
+			// process kill) bubbles up as io.EOF or "use of closed network
+			// connection". The peer didn't send a close frame so the
+			// CloseError check above didn't catch it, but it's expected
+			// behavior — log at Debug level so prod logs aren't noisy
+			// on every page navigation.
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+				slog.Debug("ws read: peer disconnected without close frame", "err", err)
 				return
 			}
 			slog.Warn("ws read", "err", err)
