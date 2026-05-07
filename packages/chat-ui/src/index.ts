@@ -1,3 +1,4 @@
+export { ChannelHeader } from "./ChannelHeader/ChannelHeader.js";
 export { ConnectionBadge } from "./ConnectionBadge/ConnectionBadge.js";
 export { ChannelsList } from "./ChannelsList/ChannelsList.js";
 export { PresenceList } from "./PresenceList/PresenceList.js";

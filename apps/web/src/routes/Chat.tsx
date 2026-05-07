@@ -10,8 +10,8 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
+  ChannelHeader,
   ChannelsList,
-  ConnectionBadge,
   PresenceList,
   PresenceLiveRegion,
   Sidebar,
@@ -233,12 +233,11 @@ export function Chat(): React.JSX.Element {
         <PresenceLiveRegion text={presenceAnnouncement} />
       </Sidebar>
       <main className="messages" aria-label={activeChannelName ?? "Messages"}>
-        <header className="messages__header">
-          <h2 ref={headingRef} tabIndex={-1}>
-            {activeChannelName ?? "Select a channel"}
-          </h2>
-          <ConnectionBadge state={messagesState.connection} />
-        </header>
+        <ChannelHeader
+          channelName={activeChannelName}
+          connectionStatus={messagesState.connection}
+          headingRef={headingRef}
+        />
         {/* role="log" implies aria-live="polite" per ARIA 1.2 — single
             source of truth so a future flip to assertive only needs the
             role change. aria-relevant/aria-atomic stay explicit because

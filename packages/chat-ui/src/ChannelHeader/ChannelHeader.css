@@ -1,0 +1,20 @@
+.messages__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-app);
+}
+
+.messages__title {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--fg);
+  outline: none;
+}
+
+.messages__title-hash {
+  color: var(--fg-muted);
+  margin-right: 0.15rem;
+}
