@@ -149,13 +149,10 @@ export function usePresence(enabled: boolean): UsePresence {
         //                   `users` field of state for the "Online" list.
         // The directory from /api/users is merged into knownUsernames so
         // a message from a user who has since gone offline still renders
-        // their username. /api/users may 404 against pre-Phase-6 servers;
-        // swallow that fallback so the presence-only path still works.
+        // their username instead of a raw ULID.
         const [seed, dir] = await Promise.all([
           getClient().http.request<PresenceListResponse>("GET", "/api/presence"),
-          getClient()
-            .http.request<PresenceListResponse>("GET", "/api/users")
-            .catch((): PresenceListResponse => ({ users: [] })),
+          getClient().http.request<PresenceListResponse>("GET", "/api/users"),
         ]);
         if (tok.cancelled) return;
         for (const u of dir.users) {

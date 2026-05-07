@@ -10,7 +10,6 @@ import {
 import {
   ChannelHeader,
   ChannelsList,
-  IS_AT_BOTTOM_TOLERANCE_PX,
   MessageComposer,
   MessageList,
   PresenceList,
@@ -28,10 +27,6 @@ import { usePresence } from "../hooks/usePresence.js";
 // in raw bytes so paste-of-large-text gets a warning before the user hits
 // Enter rather than after a round-trip.
 const MAX_BODY_BYTES = 4 * 1024;
-
-// Re-exported from chat-ui so existing tests (`Chat.test.tsx`) keep their
-// import path. The constant itself lives in chat-ui/MessageList.
-export { IS_AT_BOTTOM_TOLERANCE_PX };
 
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();

@@ -60,7 +60,8 @@ vi.mock("../api.js", () => ({
 }));
 
 import { AuthProvider } from "../auth/AuthContext.js";
-import { Chat, IS_AT_BOTTOM_TOLERANCE_PX } from "./Chat.js";
+import { IS_AT_BOTTOM_TOLERANCE_PX } from "@hackathon/chat-ui";
+import { Chat } from "./Chat.js";
 
 beforeEach(() => {
   (globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket;
@@ -100,7 +101,7 @@ function happyPath(): void {
     return { ticket: `ticket-${String(n)}`, expires_at: "2026-01-01T01:00:00Z" };
   });
   httpRequestMock.mockImplementation((method: string, path: string) => {
-    if (method === "GET" && path === "/api/presence") {
+    if (method === "GET" && (path === "/api/presence" || path === "/api/users")) {
       return Promise.resolve({ users: [] });
     }
     return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
@@ -375,6 +376,9 @@ describe("test_web_presence_list_renders_seed_join_leave_and_dedupes", () => {
       if (method === "GET" && path === "/api/presence") {
         return Promise.resolve({ users: [{ id: "U1", username: "alice" }] });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -448,6 +452,9 @@ describe("test_web_presence_live_region_announces_join_with_known_username", () 
           ],
         });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -510,6 +517,9 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
       if (method === "GET" && path === "/api/presence") {
         return Promise.resolve({ users: [] });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -544,6 +554,9 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
     happyPath();
     httpRequestMock.mockImplementation((method: string, path: string) => {
       if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      if (method === "GET" && path === "/api/users") {
         return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
@@ -588,6 +601,9 @@ describe("test_web_presence_live_region_rebroadcasts_join_when_already_present",
             { id: "U2", username: "bob" },
           ],
         });
+      }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
@@ -1270,6 +1286,9 @@ describe("test_web_message_sender_renders_username_when_known", () => {
           ],
         });
       }
+      if (method === "GET" && path === "/api/users") {
+        return Promise.resolve({ users: [] });
+      }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
     });
 
@@ -1309,6 +1328,9 @@ describe("test_web_message_sender_falls_back_to_uuid_when_unknown", () => {
     // Empty seed — U-stranger never enters the directory.
     httpRequestMock.mockImplementation((method: string, path: string) => {
       if (method === "GET" && path === "/api/presence") {
+        return Promise.resolve({ users: [] });
+      }
+      if (method === "GET" && path === "/api/users") {
         return Promise.resolve({ users: [] });
       }
       return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
