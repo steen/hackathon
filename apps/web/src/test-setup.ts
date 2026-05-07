@@ -10,8 +10,24 @@ import { dirname, resolve as resolvePath } from "node:path";
 // off disk once and attach it as a permanent <style> tag — every test
 // gets jsdom CSSOM rules without each test re-implementing the workaround.
 const here = dirname(fileURLToPath(import.meta.url));
-const cssText = readFileSync(resolvePath(here, "styles.css"), "utf-8");
+
+const cssBundle = [
+  resolvePath(here, "styles.css"),
+  // Component CSS lives in @hackathon/chat-ui after the Phase 6 extraction;
+  // bundle every component stylesheet here so the same getComputedStyle
+  // selectors keep resolving in jsdom without per-test workarounds.
+  resolvePath(here, "../../../packages/chat-ui/src/tokens.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/ChannelsList/ChannelsList.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/ChannelHeader/ChannelHeader.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/ConnectionBadge/ConnectionBadge.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/MessageComposer/MessageComposer.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/MessageList/MessageList.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/PresenceList/PresenceList.css"),
+  resolvePath(here, "../../../packages/chat-ui/src/Sidebar/Sidebar.css"),
+]
+  .map((p) => readFileSync(p, "utf-8"))
+  .join("\n");
 const styleEl = document.createElement("style");
 styleEl.dataset.testInjected = "global-styles";
-styleEl.textContent = cssText;
+styleEl.textContent = cssBundle;
 document.head.appendChild(styleEl);

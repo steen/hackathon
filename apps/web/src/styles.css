@@ -1,12 +1,22 @@
+/* The vite alias for `@hackathon/chat-ui` is a simple string match and
+   collides with the package's own subpath exports (it would rewrite this
+   import to `.../src/index.ts/tokens.css`), so use the workspace-relative
+   path here. The package's `exports["./tokens.css"]` entry is the
+   contract for external consumers via Node module resolution. */
+@import "../../packages/chat-ui/src/tokens.css";
+
+/* Legacy token aliases kept while non-chat surfaces (login, register,
+   error banner) still reference the original variable names. Maps onto
+   the chat-ui dark palette so the whole app reads coherently. */
 :root {
-  --bg: #fafafa;
-  --fg: #1a1a1a;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #2563eb;
-  --error: #b91c1c;
-  --ok: #166534;
-  --warn: #92400e;
+  --bg: var(--bg-app);
+  --fg: var(--fg);
+  --muted: var(--fg-muted);
+  --border: var(--border);
+  --accent: var(--accent);
+  --error: var(--error);
+  --ok: var(--ok);
+  --warn: var(--warn);
 }
 
 * {
@@ -24,7 +34,7 @@ html,
     -apple-system,
     sans-serif;
   color: var(--fg);
-  background: var(--bg);
+  background: var(--bg-app);
 }
 
 button {
@@ -64,7 +74,8 @@ button.linklike {
   padding: 2rem;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--bg-panel);
+  color: var(--fg);
 }
 
 .auth-page form {
@@ -85,6 +96,8 @@ button.linklike {
   border: 1px solid var(--border);
   border-radius: 4px;
   font: inherit;
+  background: var(--bg-elevated);
+  color: var(--fg);
 }
 
 .auth-page button[type="submit"] {
@@ -92,7 +105,7 @@ button.linklike {
   border: 0;
   border-radius: 4px;
   background: var(--accent);
-  color: white;
+  color: var(--accent-fg);
   font: inherit;
 }
 
@@ -103,210 +116,37 @@ button.linklike {
   height: 100dvh;
 }
 
-.sidebar {
-  border-right: 1px solid var(--border);
-  padding: 1rem;
-  overflow-y: auto;
-  background: #fff;
-}
-
-.sidebar header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.sidebar h2 {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 1rem 0 0.25rem;
-}
-
-.sidebar ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.sidebar li button {
-  background: none;
-  border: 0;
-  padding: 0.4rem 0.5rem;
-  text-align: left;
-  width: 100%;
-  border-radius: 4px;
-  font: inherit;
-}
-
-.sidebar li button[aria-current="true"] {
-  background: var(--accent);
-  color: white;
-}
-
-.messages {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.messages__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--border);
-  background: #fff;
-}
-
-.messages__list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.msg {
-  border: 1px solid var(--border);
-  background: #fff;
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-
-.msg__meta {
-  display: flex;
-  gap: 0.5rem;
-  font-size: 0.75rem;
-  color: var(--muted);
-  margin-bottom: 0.25rem;
-}
-
-.msg__body {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.msg--pending .msg__body {
-  font-style: italic;
-}
-
 .empty-state {
-  color: var(--muted);
+  color: var(--fg-muted);
   font-style: italic;
   margin: 0;
   padding: 1rem 0;
   text-align: center;
 }
 
-.msg__badge--pending {
-  color: var(--muted);
-  font-style: italic;
-}
-
-/* `padding-bottom` adds the iOS home-indicator inset on top of the
-   existing 0.75rem so the Send button never sits under the indicator on
-   notched devices. `env()` resolves to 0px outside a safe-area context,
-   so desktop and non-notched mobile keep the original 0.75rem. */
-.composer {
+.messages {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  background: #fff;
-}
-
-.composer input {
-  flex: 1;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font: inherit;
-}
-
-.composer textarea {
-  flex: 1;
-  min-height: 2.5rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font: inherit;
-  resize: vertical;
-}
-
-.composer button {
-  padding: 0.5rem 1rem;
-  background: var(--accent);
-  border: 0;
-  color: white;
-  border-radius: 4px;
-}
-
-/* Counter occupies its own row below the textarea+button so it does not
-   shrink the Send button when it appears or changes width. */
-.composer__counter {
-  flex-basis: 100%;
-  font-size: 0.75rem;
-  color: var(--muted);
-}
-
-.composer__counter--warn {
-  color: var(--warn);
-}
-
-.composer__counter--error {
-  color: var(--error);
-  font-weight: 600;
-}
-
-.conn {
-  display: inline-block;
-  min-width: 7rem;
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  background: var(--border);
-  color: var(--fg);
-  text-align: center;
-}
-
-.conn--open {
-  background: #d1fae5;
-  color: var(--ok);
-}
-
-.conn--connecting,
-.conn--reconnecting {
-  background: #fef3c7;
-  color: var(--warn);
-}
-
-.conn--closed {
-  background: #fee2e2;
-  color: var(--error);
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-app);
 }
 
 .loading {
   padding: 2rem;
   text-align: center;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 /* Sits in normal flow above the routed body. ErrorBanner renders as a
    sibling of the route content (see App.tsx), so it scrolls with the
-   document rather than pinning — the inner `.messages__list` scroller
-   is not an ancestor and could not host sticky behavior anyway. */
+   document rather than pinning. */
 .error-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.6rem 1rem;
-  background: #fee2e2;
+  background: rgba(239, 68, 68, 0.12);
   color: var(--error);
   border-bottom: 1px solid var(--error);
   font-size: 0.9rem;
@@ -341,9 +181,10 @@ button.linklike {
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    width: auto;
   }
 
-  .sidebar li button {
+  .channels-list li button {
     min-height: 44px;
     padding: 0.6rem 0.75rem;
   }
@@ -364,7 +205,7 @@ button.linklike {
     min-height: 44px;
   }
 
-  .composer button {
+  .composer__send {
     min-height: 44px;
   }
 
@@ -404,13 +245,11 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-/* Accent-filled controls need a contrasting ring against the blue. The
-   double-ring (white inset gap + dark outer) keeps the focus indicator
-   visible against both the accent fill and the surrounding white surface. */
+/* Accent-filled controls need a contrasting ring against the purple. */
 .auth-page button[type="submit"]:focus-visible,
-.sidebar li button[aria-current="true"]:focus-visible,
-.composer button:focus-visible {
+.channels-list li button[aria-current="true"]:focus-visible,
+.composer__send:focus-visible {
   outline: 2px solid var(--fg);
   outline-offset: 0;
-  box-shadow: 0 0 0 2px #fff inset;
+  box-shadow: 0 0 0 2px var(--bg-app) inset;
 }
