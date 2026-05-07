@@ -142,8 +142,25 @@ export function usePresence(enabled: boolean): UsePresence {
        as always-falsy. */
     void (async () => {
       try {
-        const seed = await getClient().http.request<PresenceListResponse>("GET", "/api/presence");
+        // Two parallel seeds:
+        //   /api/users    — full directory of registered users (used to
+        //                   resolve sender_user_id for offline senders).
+        //   /api/presence — currently-online subset, used as the
+        //                   `users` field of state for the "Online" list.
+        // The directory from /api/users is merged into knownUsernames so
+        // a message from a user who has since gone offline still renders
+        // their username. /api/users may 404 against pre-Phase-6 servers;
+        // swallow that fallback so the presence-only path still works.
+        const [seed, dir] = await Promise.all([
+          getClient().http.request<PresenceListResponse>("GET", "/api/presence"),
+          getClient()
+            .http.request<PresenceListResponse>("GET", "/api/users")
+            .catch((): PresenceListResponse => ({ users: [] })),
+        ]);
         if (tok.cancelled) return;
+        for (const u of dir.users) {
+          if (u.username.length > 0) knownUsernames.set(u.id, u.username);
+        }
         for (const u of seed.users) {
           if (u.username.length > 0) knownUsernames.set(u.id, u.username);
         }

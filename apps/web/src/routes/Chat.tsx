@@ -147,6 +147,7 @@ export function Chat(): React.JSX.Element {
       <strong>{user?.username ?? "..."}</strong>
       <button
         type="button"
+        className="sidebar__signout"
         onClick={() => {
           void logout();
         }}

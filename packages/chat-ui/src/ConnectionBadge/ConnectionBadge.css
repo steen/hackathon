@@ -1,11 +1,11 @@
 .conn {
   display: inline-block;
   min-width: 7rem;
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.6rem;
   border-radius: 999px;
-  background: var(--border);
-  color: var(--fg);
+  background: var(--bg-elevated);
+  color: var(--fg-muted);
   text-align: center;
 }
 

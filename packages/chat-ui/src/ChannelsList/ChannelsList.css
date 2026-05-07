@@ -7,13 +7,15 @@
 .channels-list li button {
   background: none;
   border: 0;
-  padding: 0.45rem 0.6rem;
+  padding: 0.3rem 0.45rem;
   text-align: left;
   width: 100%;
   border-radius: 4px;
   font: inherit;
+  font-size: 0.95rem;
   color: var(--fg-muted);
   transition: background 0.08s ease;
+  cursor: pointer;
 }
 
 .channels-list li button:hover {
@@ -24,4 +26,5 @@
 .channels-list li button[aria-current="true"] {
   background: var(--bg-active);
   color: var(--fg);
+  font-weight: 600;
 }

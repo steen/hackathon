@@ -5,7 +5,7 @@
 }
 
 .presence li {
-  padding: 0.35rem 0.6rem;
+  padding: 0.25rem 0.45rem;
   color: var(--fg-muted);
   font-size: 0.95rem;
 }

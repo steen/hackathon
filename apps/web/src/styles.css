@@ -5,26 +5,16 @@
    contract for external consumers via Node module resolution. */
 @import "../../packages/chat-ui/src/tokens.css";
 
-/* Legacy token aliases kept while non-chat surfaces (login, register,
-   error banner) still reference the original variable names. Maps onto
-   the chat-ui dark palette so the whole app reads coherently. */
-:root {
-  --bg: var(--bg-app);
-  --fg: var(--fg);
-  --muted: var(--fg-muted);
-  --border: var(--border);
-  --accent: var(--accent);
-  --error: var(--error);
-  --ok: var(--ok);
-  --warn: var(--warn);
-}
-
 * {
   box-sizing: border-box;
 }
 
+html {
+  font-size: 14px; /* 1rem = 14px — tighter chat density per the mockup. Use rem for typographic
+                      scale; px-pinned elements (icons, focus rings, borders) keep px. */
+}
+
 body,
-html,
 #root {
   margin: 0;
   padding: 0;
@@ -33,8 +23,15 @@ html,
     system-ui,
     -apple-system,
     sans-serif;
+  font-size: 1rem; /* = 14px */
+  line-height: 1.45;
   color: var(--fg);
   background: var(--bg-app);
+}
+
+html,
+body {
+  height: 100%;
 }
 
 button {
@@ -44,9 +41,11 @@ button {
 button.linklike {
   background: none;
   border: 0;
-  color: var(--accent);
+  color: var(--accent-text);
   padding: 0;
   text-decoration: underline;
+  font: inherit; /* browsers default <button> to ~13px; force the surrounding text size */
+  cursor: pointer;
 }
 
 .error {
@@ -69,44 +68,73 @@ button.linklike {
 }
 
 .auth-page {
-  max-width: 360px;
+  max-width: 380px;
   margin: 4rem auto;
-  padding: 2rem;
+  padding: 1.75rem 2rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg-panel);
   color: var(--fg);
+}
+
+.auth-page h1 {
+  font-size: 1.5rem; /* 21px */
+  margin: 0 0 1.25rem;
+  font-weight: 700;
 }
 
 .auth-page form {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
 
 .auth-page label {
   display: flex;
   flex-direction: column;
-  font-size: 0.9rem;
-  gap: 0.25rem;
+  font-size: 0.875rem; /* 12.25px label */
+  gap: 0.3rem;
+  color: var(--fg-muted);
 }
 
 .auth-page input {
-  padding: 0.5rem 0.6rem;
+  padding: 0.55rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  font: inherit;
+  border-radius: 6px;
+  font-size: 1rem; /* 14px field */
+  font-family: inherit;
   background: var(--bg-elevated);
   color: var(--fg);
+}
+
+.auth-page input::placeholder {
+  color: var(--fg-subtle);
 }
 
 .auth-page button[type="submit"] {
   padding: 0.6rem 0.8rem;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--accent);
   color: var(--accent-fg);
   font: inherit;
+  font-weight: 600;
+  margin-top: 0.25rem;
+  cursor: pointer;
+}
+
+.auth-page button[type="submit"]:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.auth-page button[type="submit"]:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.auth-page p {
+  margin: 1rem 0 0;
+  color: var(--fg-muted);
 }
 
 .chat-layout {

@@ -37,8 +37,8 @@ button.top-bar__cluster:hover {
 }
 
 .top-bar__workspace-name {
-  font-weight: 600;
-  font-size: 0.95rem;
+  font-weight: 700;
+  font-size: 1.05rem;
 }
 
 .top-bar__chevron {
@@ -101,10 +101,10 @@ button.top-bar__cluster:hover {
 
 .top-bar__user-name {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 
 .top-bar__user-status {
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   color: var(--fg-muted);
 }
