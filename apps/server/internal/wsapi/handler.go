@@ -79,13 +79,15 @@ type Config struct {
 // close of the shutdown and done channels so concurrent Shutdown / handler
 // teardown can both run safely.
 type connSubscriber struct {
-	send       chan []byte
+	send chan []byte
+
+	closeMu    sync.Mutex
 	done       chan struct{}
 	shutdown   chan struct{}
 	closeFlush chan struct{}
-	closeMu    sync.Mutex
-	userID     string
-	channel    string
+
+	userID  string
+	channel string
 }
 
 func newConnSubscriber(userID, channel string) *connSubscriber {

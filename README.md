@@ -68,6 +68,10 @@ The CLI honours `$CHAT_SERVER` (default `http://localhost:8080`).
 
 For demo deploys the web app is embedded into the server binary, so `go build ./apps/server` produces a single executable that serves both the API/WS and the SPA. See [`specs/plans/phase-3/40-feature-single-binary-demo-verified.md`](specs/plans/phase-3/40-feature-single-binary-demo-verified.md) for the full path; the embed wiring lives in [`specs/plans/phase-3/20-feature-embedded-web-build.md`](specs/plans/phase-3/20-feature-embedded-web-build.md).
 
+## Production-style deploy (docker compose)
+
+For the full deploy story — `docker compose up --build -d`, first-user registration, daily ops, backup/restore, reverse-proxy topology, the single-instance constraint, and upgrade — see [`docs/ops/runbook.md`](docs/ops/runbook.md). The repo-root [`docker-compose.yml`](docker-compose.yml) is a one-service file (`chat-server`) with a named volume for the SQLite database.
+
 ## Server environment variables
 
 The server reads the following at startup (`apps/server/internal/config/config.go` + `apps/server/main.go`). Validation runs once at boot; failures abort the process before any port is opened. A copy-pasteable starter template lives at [`.env.example`](.env.example) — every variable below is documented inline with its failure mode. The drift-check script `node scripts/check-env-example.mjs` asserts the template stays in sync with the Go source (it scans every `Env*`-prefixed const in `config.go` and the legacy `*Env` const block in `main.go`).
