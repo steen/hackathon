@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"hackathon/apps/server/internal/auth"
+	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/repo"
 )
@@ -37,6 +39,21 @@ func openAndMigrate(dbPath string) (*sql.DB, *repo.Repo, error) {
 		return nil, nil, fmt.Errorf("repo init: %w", err)
 	}
 	return sqlDB, repository, nil
+}
+
+// applyBcryptCost reads CHAT_BCRYPT_COST, parses it through
+// config.ParseBcryptCost (defaults to auth.DefaultBcryptCost when unset,
+// rejects out-of-range or non-numeric input), and installs the result
+// via auth.SetBcryptCost. Must run before any goroutine that calls
+// auth.Hash; main.go invokes this between cfg.Validate() and the HTTP
+// listener start so the boot path aborts on a bad value before opening
+// a port.
+func applyBcryptCost(raw string) error {
+	cost, err := config.ParseBcryptCost(raw)
+	if err != nil {
+		return err
+	}
+	return auth.SetBcryptCost(cost)
 }
 
 // requireSecret reads env[name] and returns its bytes; errors if empty.

@@ -1,8 +1,11 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"hackathon/apps/server/internal/auth"
 )
 
 const validSecret = "kf8Q2nZx7vP1aLm3RbT9oYwH6sJgC4dE"
@@ -304,6 +307,79 @@ func TestLoad_LogLevel_UnknownFallsBackAndMarksInvalid(t *testing.T) {
 		}
 		if c.LogLevelInvalid != v {
 			t.Errorf("LogLevelInvalid(%q) = %q, want %q", v, c.LogLevelInvalid, v)
+		}
+	}
+}
+
+// TestParseBcryptCost_DefaultWhenUnset covers AC: an unset / empty
+// CHAT_BCRYPT_COST resolves to auth.DefaultBcryptCost (= 10).
+func TestParseBcryptCost_DefaultWhenUnset(t *testing.T) {
+	for _, raw := range []string{"", "   ", "\t\n"} {
+		got, err := ParseBcryptCost(raw)
+		if err != nil {
+			t.Fatalf("ParseBcryptCost(%q): unexpected error: %v", raw, err)
+		}
+		if got != auth.DefaultBcryptCost {
+			t.Errorf("ParseBcryptCost(%q) = %d, want %d", raw, got, auth.DefaultBcryptCost)
+		}
+	}
+}
+
+// TestParseBcryptCost_AcceptsValidOverride covers AC: a numeric value
+// inside the accepted range is returned unchanged.
+func TestParseBcryptCost_AcceptsValidOverride(t *testing.T) {
+	for _, c := range []int{auth.MinBcryptCost, 11, 12, 14, auth.MaxBcryptCost} {
+		raw := strconv.Itoa(c)
+		got, err := ParseBcryptCost(raw)
+		if err != nil {
+			t.Fatalf("ParseBcryptCost(%q): unexpected error: %v", raw, err)
+		}
+		if got != c {
+			t.Errorf("ParseBcryptCost(%q) = %d, want %d", raw, got, c)
+		}
+	}
+}
+
+// TestParseBcryptCost_RejectsBelowFloor covers AC: values < OWASP floor
+// are refused with an error naming the env var.
+func TestParseBcryptCost_RejectsBelowFloor(t *testing.T) {
+	for _, c := range []int{auth.MinBcryptCost - 1, 0, -5} {
+		raw := strconv.Itoa(c)
+		_, err := ParseBcryptCost(raw)
+		if err == nil {
+			t.Fatalf("ParseBcryptCost(%q): expected error, got nil", raw)
+		}
+		if !strings.Contains(err.Error(), EnvBcryptCost) {
+			t.Errorf("ParseBcryptCost(%q): error %q should name %s", raw, err, EnvBcryptCost)
+		}
+	}
+}
+
+// TestParseBcryptCost_RejectsAboveCeiling covers AC: values above
+// bcrypt's hard upper bound (31) are refused.
+func TestParseBcryptCost_RejectsAboveCeiling(t *testing.T) {
+	for _, c := range []int{auth.MaxBcryptCost + 1, 50, 999} {
+		raw := strconv.Itoa(c)
+		_, err := ParseBcryptCost(raw)
+		if err == nil {
+			t.Fatalf("ParseBcryptCost(%q): expected error, got nil", raw)
+		}
+		if !strings.Contains(err.Error(), EnvBcryptCost) {
+			t.Errorf("ParseBcryptCost(%q): error %q should name %s", raw, err, EnvBcryptCost)
+		}
+	}
+}
+
+// TestParseBcryptCost_RejectsNonNumeric covers AC: a value that doesn't
+// parse as an integer (typo, hex, embedded suffix) is refused.
+func TestParseBcryptCost_RejectsNonNumeric(t *testing.T) {
+	for _, raw := range []string{"abc", "10x", "0x10", "12.5", "ten"} {
+		_, err := ParseBcryptCost(raw)
+		if err == nil {
+			t.Fatalf("ParseBcryptCost(%q): expected error, got nil", raw)
+		}
+		if !strings.Contains(err.Error(), EnvBcryptCost) {
+			t.Errorf("ParseBcryptCost(%q): error %q should name %s", raw, err, EnvBcryptCost)
 		}
 	}
 }
