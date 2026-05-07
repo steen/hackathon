@@ -1,0 +1,29 @@
+# Single-service compose for hackathon/homelab deploys.
+#
+# `build: .` (not `image:`): every `docker compose up --build` rebuilds from
+# the local source tree. Trade-off: no registry to set up, but a code change
+# adds 30-60s to startup. Acceptable for hackathon scope; see
+# docs/ops/runbook.md for the rationale and the upgrade flow.
+#
+# No `healthcheck:` block on purpose. The production image (Dockerfile stage 3)
+# is `gcr.io/distroless/static-debian12:nonroot` — no shell, no `wget`, no
+# `curl`, no `sqlite3` — so there is no in-container probe binary today.
+# Liveness in the recommended deploy is the reverse proxy's upstream health
+# check hitting `/healthz`. A self-contained `--health-probe` flag for the
+# server binary, which would let compose run `CMD-SHELL`-free, is filed as
+# https://github.com/steen/Hackathon/issues/796.
+
+services:
+  chat-server:
+    build: .
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - chat-data:/data
+    environment:
+      CHAT_DB_PATH: /data/chat.db
+    restart: unless-stopped
+
+volumes:
+  chat-data:
