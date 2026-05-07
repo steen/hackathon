@@ -1,0 +1,3 @@
+### Fixed
+
+- `scripts/check-env-example.mjs`: harden the `extractFirstConstBlock` walker against string literals and comments. Paren-depth counting now skips over interpreted strings (`"..."`), raw strings (`` `...` ``), rune literals (`'...'`), line comments (`// ...`), and block comments (`/* ... */`), so a future `var foo = "(legacy)"` inside the const block can't truncate the slice. The const-block body is also passed through `stripGoComments` before the legacy `<lowercase>Env` regex runs, dropping false positives from commented-out bindings like `// fooEnv = "CHAT_..."`. Tests covering both edge cases land alongside under `tests/check-env-example/`.
