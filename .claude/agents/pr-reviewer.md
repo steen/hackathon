@@ -144,6 +144,14 @@ Write the review in your scratch — sections in this order:
 - **Overview** (1-2 sentences): what the PR does.
 - **Code quality**: CLAUDE.md convention compliance, comment hygiene, error handling, footprint discipline.
 - **Tests**: coverage of new code, regression risk on existing tests.
+- **Deferred-unskip guard.** If the PR body or the linked issue body mentions "unskip" (or `.skip`, `t.Skip`, `it.skip`, `describe.skip`), AND the PR does not itself remove all relevant skip markers, do this before posting the review:
+
+  1. Identify the named test(s) from the issue's "What's needed" / "Tests" section.
+  2. In your worktree copy, temporarily remove the `.skip` (or `t.Skip`), run the test (e.g. `rtk pnpm --filter @hackathon/e2e run e2e:changelog-entry` for vitest packages under `tests/e2e/` — check `tests/e2e/package.json` for the actual script name; or `rtk go -C "$WORKTREE" test -run <Name> <pkg>` for Go), and paste the output into your review under "Deferred-unskip smoke-check".
+  3. If the test fails, classify as a **blocker**: the PR ships a production change that does not satisfy the criterion the test guards. Do not merge.
+  4. If the test passes, note `SKIP-GUARD: passed — AC-N passes against this diff; unskip can land cleanly in follow-up.`
+
+  PRs that don't mention "unskip" in PR or linked-issue body, and don't touch files containing skip markers, skip this step entirely.
 - **Security**: any new auth surface, sinks, secrets, deserialization, header / origin changes. (You don't need a separate /security-review skill; inspect the diff against PRD §9 yourself.)
 - **Minor observations / nitpicks** (non-blocking).
 - **Verdict**: ready to merge, or a list of blockers.
