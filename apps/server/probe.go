@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net"
@@ -54,21 +53,18 @@ func runHealthProbe() int {
 	port := probePort(os.Getenv(config.EnvListenAddr))
 	url := fmt.Sprintf("http://127.0.0.1:%s/healthz", port)
 
-	ctx, cancel := context.WithTimeout(context.Background(), healthProbeTimeout)
-	defer cancel()
-
 	// gosec G107/G704 false positive: the URL host is the hardcoded
 	// loopback literal and the path is constant. The only env-derived
 	// component is the port, which is extracted via net.SplitHostPort
 	// and falls back to the default when unparseable. No user input
 	// enters the request, so there is no SSRF vector.
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) //nolint:gosec // see comment above
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:gosec,noctx // see comment above; deadline is enforced by client.Timeout
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "health-probe: build request: %v\n", err)
 		return 1
 	}
 	client := &http.Client{Timeout: healthProbeTimeout}
-	resp, err := client.Do(req) //nolint:gosec // see comment on http.NewRequestWithContext above
+	resp, err := client.Do(req) //nolint:gosec // see comment on http.NewRequest above
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "health-probe: %v\n", err)
 		return 1
