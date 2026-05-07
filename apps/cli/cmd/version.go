@@ -5,14 +5,15 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"runtime"
 	"runtime/debug"
+
+	"hackathon/internal/buildinfo"
 )
 
 // DevVersion is the placeholder reported when no module version is
 // embedded — i.e. binaries built outside `go install module@vX.Y.Z`
 // or a tagged release. Tests pin against this constant.
-const DevVersion = "dev"
+const DevVersion = buildinfo.DevVersion
 
 // Version implements `chatd version` and `chatd --version` / `-v`.
 // Output is a single line: `chatd <version> [(<vcs.revision>[ dirty])] <go-version> <GOOS>/<GOARCH>`.
@@ -44,34 +45,5 @@ func WriteVersion(w io.Writer) error {
 type readBuildInfoFn func() (*debug.BuildInfo, bool)
 
 func formatVersion(read readBuildInfoFn) string {
-	version := DevVersion
-	revision := ""
-	dirty := false
-	if info, ok := read(); ok {
-		if info.Main.Version != "" && info.Main.Version != "(devel)" {
-			version = info.Main.Version
-		}
-		for _, s := range info.Settings {
-			switch s.Key {
-			case "vcs.revision":
-				revision = s.Value
-			case "vcs.modified":
-				dirty = s.Value == "true"
-			}
-		}
-	}
-	rev := ""
-	if revision != "" {
-		short := revision
-		if len(short) > 7 {
-			short = short[:7]
-		}
-		if dirty {
-			rev = fmt.Sprintf(" (%s dirty)", short)
-		} else {
-			rev = fmt.Sprintf(" (%s)", short)
-		}
-	}
-	return fmt.Sprintf("chatd %s%s %s %s/%s",
-		version, rev, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	return buildinfo.ReadWith(buildinfo.ReadBuildInfoFn(read)).FormatLine()
 }
