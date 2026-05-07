@@ -1,6 +1,6 @@
 ---
 name: cold-pass-gap-finder
-description: Fresh-context full-cold-pass reviewer. Re-reads every lt ticket and every relevant code path, walks every layer the feature touches, and pressure-tests every decision in the log — not just the latest. Returns a structured report of gaps. Invoked by the feature-spec skill after every user answer, no exceptions.
+description: Fresh-context full-cold-pass reviewer. Re-reads every lt ticket and every relevant code path, walks every layer the feature touches, and pressure-tests every decision in the log — not just the latest. Returns a structured report of gaps. Invoked by the feature-spec skill at the end of each Q&A cycle (a seed question plus all the sub-questions it spawned, run to ground), no exceptions — never per individual answer.
 tools: Bash, Read, Grep, Glob
 model: sonnet
 ---
