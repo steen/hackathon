@@ -9,6 +9,37 @@
   color: var(--fg);
 }
 
+/* Day-divider sits in the messages list with the same left-edge as
+   the time column on each row, so the eye reads "Today" / "Mon" /
+   "Mar 4" in the same gutter as "12:01". A trailing horizontal rule
+   stretches the rest of the way to the right edge so the divider
+   reads as a separator, not just a label. */
+.msg-day-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0 0.25rem;
+  margin-top: 0.25rem;
+  color: var(--fg-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-day-divider__label {
+  flex: 0 0 auto;
+  /* Width slot matches the time column on the meta line so "Today" /
+     "Mon" sit directly above "12:01" / "13:23" timestamps. */
+  min-width: var(--msg-col-time, 2.75rem);
+}
+
+.msg-day-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .messages__load-older {
   align-self: center;
   background: none;
@@ -27,11 +58,18 @@
   text-align: center;
 }
 
+/* No horizontal padding on the row; the parent `.messages__list`
+   already pads the panel by 1rem and adding more here would push the
+   timestamp column past the channel-header text's left edge. The
+   hover swap uses negative margin + matching padding on the inline
+   axis so the highlight bleeds into the panel padding instead of
+   creating a visible inset around the message. */
 .msg {
   border: 0;
   background: transparent;
   border-radius: 4px;
-  padding: 0.2rem 0.4rem;
+  padding: 0.2rem 1rem;
+  margin: 0 -1rem;
 }
 
 .msg:hover {
@@ -74,18 +112,9 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace;
 }
 
-.msg__sender--user-blue {
-  color: var(--user-blue);
-}
-.msg__sender--user-green {
-  color: var(--user-green);
-}
-.msg__sender--user-purple {
-  color: var(--user-purple);
-}
-.msg__sender--user-yellow {
-  color: var(--user-yellow);
-}
+/* Sender colors are no longer driven by class — `userColor(sender)`
+   in MessageItem.tsx assigns an inline `color: hsl(...)` derived from
+   the username so every distinct user gets a distinct hue. */
 
 .msg__body {
   white-space: pre-wrap;

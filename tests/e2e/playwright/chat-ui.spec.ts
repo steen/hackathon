@@ -133,11 +133,14 @@ test.describe("Phase 6: chat-ui extraction regression guards", () => {
     expect(positions.timeIdx).toBeLessThan(positions.senderIdx);
   });
 
-  // Senders are color-coded via userColorClass(senderId) → one of
-  // four `msg__sender--user-{blue|green|purple|yellow}` classes.
-  // We assert that every sender span carries one — a regression
-  // that drops the userColorClass call leaves senders uncolored.
-  test("AC: every sender span carries one msg__sender--user-* color class", async ({ page }) => {
+  // Senders render in distinct inline colors via `userColor(name)`
+  // — an OKLCH hash of the visible username. Two distinct authors
+  // must produce two distinct rendered colors. Regressions to watch:
+  //   - dropping the inline style entirely (every sender becomes the
+  //     default text color on the panel)
+  //   - reverting to a small fixed-class palette (users >palette-size
+  //     collide on the same color)
+  test("AC: distinct senders render in distinct inline colors", async ({ page }) => {
     const author1 = uniqueUsername("u-color-A");
     const author2 = uniqueUsername("u-color-B");
     const reg1 = await registerViaApi(author1);
@@ -149,16 +152,48 @@ test.describe("Phase 6: chat-ui extraction regression guards", () => {
     await postViaApi(reg1.token, channel.id, body1);
     await postViaApi(reg2.token, channel.id, body2);
 
-    // View through author1 — pulls history including author2's row,
-    // exercising the same color-class branch on a non-self sender.
     await loginViaToken(page, reg1.token, author1);
     await page.getByRole("button", { name: `#${channel.name}` }).click();
 
+    const colors = new Set<string>();
     for (const body of [body1, body2]) {
       const row = page.locator('[data-testid="msg"]', { hasText: body });
       await expect(row).toBeVisible({ timeout: 10_000 });
-      const classes = (await row.locator(".msg__sender").getAttribute("class")) ?? "";
-      expect(classes).toMatch(/\bmsg__sender--user-(blue|green|purple|yellow)\b/);
+      const style = (await row.locator(".msg__sender").getAttribute("style")) ?? "";
+      // userColor() writes `color: oklch(...)` inline. Empty style would
+      // mean the function isn't being called at all.
+      expect(style).toMatch(/color:\s*oklch\(/);
+      colors.add(style);
     }
+    // Two unique usernames → two unique colors. cyrb53 % 360 collides
+    // ~3% of the time for a randomly-picked pair; uniqueUsername adds
+    // ~9 chars of entropy on each side, so collisions are essentially
+    // never the cause of a real test failure.
+    expect(colors.size).toBe(2);
+  });
+
+  // Day-divider rule: a banner separates messages whose local dates
+  // differ. The very first message also gets a divider so the reader
+  // can anchor "what day am I reading?". The cross-midnight branch is
+  // covered by a unit test in apps/web/src/routes/Chat.test.tsx that
+  // pins three messages spanning a real local-day boundary; this
+  // browser test pins only the integration shape: a single message
+  // produces exactly one visible day divider.
+  test("AC: day-divider renders above the first history message", async ({ page }) => {
+    const author = uniqueUsername("u-div");
+    const reg = await registerViaApi(author);
+    const channel = await createChannelViaApi(reg.token, uniqueUsername("ch"));
+
+    const body = `today-${String(Date.now())}`;
+    await postViaApi(reg.token, channel.id, body);
+
+    await loginViaToken(page, reg.token, author);
+    await page.getByRole("button", { name: `#${channel.name}` }).click();
+
+    await expect(page.locator('[data-testid="msg"]', { hasText: body })).toBeVisible({
+      timeout: 10_000,
+    });
+    const dividers = page.locator('[data-testid="day-divider"]');
+    await expect(dividers).toHaveCount(1);
   });
 });

@@ -1261,6 +1261,136 @@ describe("test_web_message_timestamp_renders_humanized_form_not_raw_iso", () => 
   });
 });
 
+describe("test_web_message_list_inserts_day_divider_between_messages_spanning_midnight", () => {
+  it("renders one [data-testid=day-divider] above each new local-day group", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Three messages: two on 2026-05-04, one on 2026-05-05. Built in
+    // local-time so the test is portable across CI timezones — the
+    // divider rule keys off `getFullYear/Month/Date` which read the
+    // local zone. ISO output uses an offset suffix so the server
+    // round-trip would survive intact.
+    function localIso(y: number, mo: number, d: number, h: number, mi: number): string {
+      const date = new Date(y, mo - 1, d, h, mi, 0);
+      const tzMin = date.getTimezoneOffset();
+      const sign = tzMin > 0 ? "-" : "+";
+      const abs = Math.abs(tzMin);
+      const tz = `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+      const pad = (n: number): string => String(n).padStart(2, "0");
+      return `${String(y)}-${pad(mo)}-${pad(d)}T${pad(h)}:${pad(mi)}:00${tz}`;
+    }
+    // listMessages returns newest-first (server convention);
+    // useMessages reverses to oldest→newest in state (see line ~156).
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M3",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "day-2 first (across midnight)",
+        created_at: localIso(2026, 5, 5, 0, 5),
+      },
+      {
+        id: "M2",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "day-1 second",
+        created_at: localIso(2026, 5, 4, 23, 50),
+      },
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "day-1 first",
+        created_at: localIso(2026, 5, 4, 9, 0),
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("day-2 first (across midnight)")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const dividers = list.querySelectorAll('[data-testid="day-divider"]');
+    // First message always gets a divider so the reader anchors "what
+    // day am I reading?" — that's one. A second divider must appear
+    // between M2 and M3 because they cross local midnight. Total: 2.
+    expect(dividers).toHaveLength(2);
+
+    // Children of .messages__list, in order, must be:
+    //   [divider, M1, M2, divider, M3]
+    // Walk visible children and check that the divider at index 3
+    // (zero-based) sits immediately before the article carrying the
+    // day-2 body. Filter to article + divider only — the load-older
+    // button + empty-state nodes are absent in this fixture.
+    const interesting = Array.from(list.children).filter(
+      (n) =>
+        (n.tagName === "ARTICLE" && n.getAttribute("data-testid") === "msg") ||
+        n.getAttribute("data-testid") === "day-divider",
+    );
+    expect(interesting).toHaveLength(5);
+    expect(interesting[0]?.getAttribute("data-testid")).toBe("day-divider");
+    expect(interesting[1]?.querySelector(".msg__body")?.textContent).toBe("day-1 first");
+    expect(interesting[2]?.querySelector(".msg__body")?.textContent).toBe("day-1 second");
+    expect(interesting[3]?.getAttribute("data-testid")).toBe("day-divider");
+    expect(interesting[4]?.querySelector(".msg__body")?.textContent).toBe(
+      "day-2 first (across midnight)",
+    );
+  });
+
+  it("does not insert a divider between two messages on the same local day", async () => {
+    meMock.mockResolvedValue({ id: "U1", username: "alice" });
+    listChannelsMock.mockResolvedValue([
+      { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
+    ]);
+    // Newest-first per server convention; useMessages reverses to
+    // oldest→newest. M2 (afternoon) is later, so it leads here.
+    listMessagesMock.mockResolvedValue([
+      {
+        id: "M2",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "afternoon",
+        // 5 hours later, same local day
+        created_at: new Date(Date.now() + 5 * 60 * 60_000).toISOString(),
+      },
+      {
+        id: "M1",
+        channel_id: "C1",
+        sender_user_id: "U2",
+        body: "morning",
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
+    httpRequestMock.mockResolvedValue({ users: [] });
+
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("afternoon")).toBeInTheDocument();
+    });
+
+    const list = screen.getByTestId("message-list");
+    const dividers = list.querySelectorAll('[data-testid="day-divider"]');
+    // Only one divider — the leading anchor before the first message.
+    expect(dividers).toHaveLength(1);
+  });
+});
+
 describe("test_web_message_sender_renders_username_when_known", () => {
   it("a sender id present in the /api/presence seed renders as the username, not the UUID", async () => {
     meMock.mockResolvedValue({ id: "U1", username: "alice" });
@@ -2010,4 +2140,3 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
     expect(list.scrollTop).toBe(scrollTop);
   });
 });
-

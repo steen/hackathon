@@ -1,9 +1,24 @@
 import type * as React from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { Fragment, useCallback, useEffect, useRef } from "react";
 import { MessageItem } from "../MessageItem/MessageItem.js";
 import { setRef } from "../setRef.js";
 import type { ChatMessage } from "../types.js";
+import { DayDivider } from "./DayDivider.js";
 import "./MessageList.css";
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function parseDate(iso: string): Date | null {
+  if (iso.length === 0) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 // Max distance from the bottom (px) that still counts as "at bottom" for
 // the auto-scroll-on-new-message effect. Absorbs subpixel rounding from
@@ -137,7 +152,7 @@ export function MessageList(props: Props): React.JSX.Element {
           ) : null}
         </>
       ) : null}
-      {messages.map((m) => {
+      {messages.map((m, i) => {
         // Suppress SR announcement of the user's own messages — the optimistic-
         // send path appends them immediately on submit, and SR users typed them
         // so the polite-log readback is annoying (#139, #468). Failed-status
@@ -145,25 +160,43 @@ export function MessageList(props: Props): React.JSX.Element {
         const isSelf =
           selfUserId !== null && selfUserId !== undefined && m.sender_user_id === selfUserId;
         const ariaHidden = isSelf && m.status !== "failed";
+        // Day-divider rule: render between two consecutive messages whose
+        // local dates differ. The first message in the list always gets a
+        // divider so the reader can anchor "what day am I reading?". An
+        // unparseable `created_at` (optimistic-send pre-server-stamp rows
+        // carry `""`) is treated as "same day as the previous row" so the
+        // divider doesn't flicker around an in-flight send.
+        const ts = parseDate(m.created_at);
+        let showDivider = false;
+        if (ts !== null) {
+          if (i === 0) {
+            showDivider = true;
+          } else {
+            const prevDate = parseDate(messages[i - 1]?.created_at ?? "");
+            showDivider = prevDate === null || !isSameLocalDay(prevDate, ts);
+          }
+        }
+        const tsValid = ts !== null;
         return (
-          <MessageItem
-            key={m.id}
-            sender={resolveSender(m.sender_user_id)}
-            senderId={m.sender_user_id}
-            body={m.body}
-            createdAt={m.created_at}
-            status={m.status}
-            failureReason={m.failureReason}
-            ariaHidden={ariaHidden}
-            reasonId={`msg-failed-reason-${m.id}`}
-            onRetry={
-              onRetry !== undefined
-                ? () => {
-                    onRetry(m.id);
-                  }
-                : undefined
-            }
-          />
+          <Fragment key={m.id}>
+            {showDivider && tsValid ? <DayDivider iso={m.created_at} /> : null}
+            <MessageItem
+              sender={resolveSender(m.sender_user_id)}
+              body={m.body}
+              createdAt={m.created_at}
+              status={m.status}
+              failureReason={m.failureReason}
+              ariaHidden={ariaHidden}
+              reasonId={`msg-failed-reason-${m.id}`}
+              onRetry={
+                onRetry !== undefined
+                  ? () => {
+                      onRetry(m.id);
+                    }
+                  : undefined
+              }
+            />
+          </Fragment>
         );
       })}
     </div>

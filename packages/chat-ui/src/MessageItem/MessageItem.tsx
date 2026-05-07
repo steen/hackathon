@@ -1,11 +1,10 @@
 import type * as React from "react";
-import { userColorClass } from "../colorize.js";
+import { userColor } from "../colorize.js";
 import type { MessageStatus } from "../types.js";
 import { humanizeTimestamp } from "./humanizeTimestamp.js";
 
 interface Props {
   sender: string;
-  senderId: string;
   body: string;
   createdAt: string;
   /** Optimistic-send state. Absent ≡ the message was successfully sent
@@ -38,7 +37,6 @@ interface Props {
 // `[data-testid=msg]`, `[data-status]`, etc.) — preserve verbatim.
 export function MessageItem({
   sender,
-  senderId,
   body,
   createdAt,
   status,
@@ -50,7 +48,11 @@ export function MessageItem({
   const cls =
     status === "pending" ? "msg msg--pending" : status === "failed" ? "msg msg--failed" : "msg";
   const dataStatus = status ?? "sent";
-  const senderColor = userColorClass(senderId);
+  // Color is keyed off the visible username so a future username
+  // rename re-colors the row the way the reader expects, and so
+  // distinct senderIds never collide on the same color (the previous
+  // 4-class palette wrapped at the 5th distinct user).
+  const senderStyle: React.CSSProperties = { color: userColor(sender) };
   const showTime = status !== "pending" && createdAt.length > 0;
   const reasonRendered = failureReason !== undefined && failureReason.length > 0;
 
@@ -63,7 +65,9 @@ export function MessageItem({
     >
       <div className="msg__meta">
         {showTime ? <time dateTime={createdAt}>{humanizeTimestamp(createdAt)}</time> : null}
-        <span className={`msg__sender ${senderColor}`}>{sender}</span>
+        <span className="msg__sender" style={senderStyle}>
+          {sender}
+        </span>
         {status === "pending" ? (
           <span className="msg__badge msg__badge--pending" role="status">
             Sending…
