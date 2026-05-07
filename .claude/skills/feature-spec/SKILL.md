@@ -1,6 +1,6 @@
 ---
 name: feature-spec
-description: Run a one-question-at-a-time exploratory session for a new feature. Codebase grounding → lt scratchpad → iterative Q&A with devil's-advocate framing → full hard cold-pass after every answer → GitHub epic + implementation-ready sub-issues. Invoke when the user asks to "investigate", "explore", "design", "spec", or "plan" a feature, especially when they mention devil's advocate / PM framing, lt as a scratchpad, or want the output as a GitHub epic with sub-issues.
+description: Run a one-question-at-a-time exploratory session for a new feature. Codebase grounding → lt scratchpad → iterative Q&A with devil's-advocate framing → full hard cold-pass at the end of each cycle (a seed question and all the sub-questions it spawned) → GitHub epic + implementation-ready sub-issues. Invoke when the user asks to "investigate", "explore", "design", "spec", or "plan" a feature, especially when they mention devil's advocate / PM framing, lt as a scratchpad, or want the output as a GitHub epic with sub-issues.
 ---
 
 # feature-spec
@@ -64,11 +64,15 @@ After each user answer, update the **Decision log** ticket:
 
 The decision log replaces conversation memory. Future agents read it, not the chat. Sub-issue bodies cite it by ticket number, not by copy.
 
-### 6. Full hard cold-pass after EVERY answer — non-negotiable
+### 6. Full hard cold-pass at the end of each cycle — non-negotiable
+
+A **cycle** = one seed question (taken from the top-level Open questions) plus every sub-question that chasing it spawns, run to ground until the working set is empty (every spawned item answered, locked-as-default, or explicitly deferred). The cycle's size is structural, not numerical — a broad seed spawns many sub-questions; a narrow seed spawns few. Do not cold-pass after each individual answer, and do not pick a fixed batch size.
+
+Track the cycle in the **Open questions** ticket: when chasing a seed surfaces a sub-question, add it under the seed and mark it as part of the current cycle. The cycle ends when nothing under the current seed is still labelled "Open". At that point, before reaching for the next top-level seed:
 
 Spawn the `cold-pass-gap-finder` agent with the lt project name and the current list of relevant code paths. The agent re-reads every lt ticket, walks every layer the feature touches (schema → repo → handler → wiring → middleware → client libs → UI → CLI → tests → docs), pressure-tests every decision (not just the latest), and verifies every code claim by reading the file fresh.
 
-No shortcuts. Quick rounds — one-word answers like "yes" or "B" — are exactly when wrong defaults silently compound. Run the pass anyway.
+No shortcuts inside a cycle either: locked-as-default items are recorded but do not trigger a cold-pass mid-cycle. The cold-pass fires once, on cycle close.
 
 After receiving the agent's report:
 
@@ -104,8 +108,10 @@ When the user signals readiness AND the most recent cold-pass returned no blocki
 
 - Asking three questions in one message because "they're related". They're never related enough.
 - Deciding scope-shaping things as "defaults" without asking. Big calls (real-time vs polled, schema migration yes/no, web-only vs both clients) are always questions.
-- Dropping or downgrading the cold-pass when the rhythm gets fast. Quick answers are when the most rot accumulates.
+- Dropping or downgrading the end-of-cycle cold-pass when the rhythm gets fast. Quick answers are when the most rot accumulates.
 - Skipping the cold-pass for "obvious" answers. The point of a fresh-context audit is that *your* sense of obvious is the polluted one.
+- Cold-passing mid-cycle on every answer. The cold-pass is a per-cycle audit, not a per-answer reflex — running it more often does not catch more drift, it just burns the relevant-code-paths re-read on a working set that is still mid-flight.
+- Stretching a cycle by quietly adding unrelated seeds to the working set so the cold-pass keeps getting deferred. A new top-level question is a new cycle; close the current one first.
 - Drafting the epic from memory instead of from the decision log fresh. The conversation is a lossy summary of the log.
 - Letting the relevant-code-paths list balloon. Update it deliberately; prune it when a layer is settled.
 - Editing `MEMORY.md`, `.claude/agents/`, `.claude/skills/`, or other standing-rule files mid-flow. Out of scope.
@@ -118,8 +124,8 @@ Before declaring done, every one of these is true:
 
 - Decision log has every numbered decision answered or explicitly deferred.
 - Open questions ticket has no items still labelled "Open" without a corresponding decision-log entry.
-- The most recent cold-pass returned **zero blocking gaps**.
-- The most recent cold-pass returned no stale-claim alerts (or each was addressed).
+- The current cycle is closed (working set drained) and the cold-pass that closed it returned **zero blocking gaps**.
+- That same cold-pass returned no stale-claim alerts (or each was addressed).
 - The user has explicitly approved drafting the epic + sub-issues.
 - The relevant-code-paths list has been audited once at the end (the cold-pass agent reads from it; if it's stale, the final pass is unsound).
 
@@ -127,4 +133,4 @@ If any of these is false, the session is not done — name what's missing and co
 
 ## Cost note
 
-Every answer cycle triggers a full cold-pass. A 12-round session means 12 full cold-passes. That's the deliberate trade: catch drift early at the cost of repeated work. Keep it bounded by maintaining a tight relevant-code-paths list (add deliberately, prune when a layer is settled).
+Each Q&A cycle (seed + all spawned sub-questions) triggers exactly one full cold-pass — not one per answer. Cycle size is structural: a broad seed runs many sub-questions before the cold-pass, a narrow seed runs few. Keep total cost bounded by maintaining a tight relevant-code-paths list (add deliberately, prune when a layer is settled).
