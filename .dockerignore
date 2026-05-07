@@ -1,0 +1,60 @@
+# Build context exclusions for the chat-server Dockerfile.
+#
+# Inputs the Dockerfile actually needs from the repo root:
+#   - go.mod, go.sum
+#   - pnpm-lock.yaml, pnpm-workspace.yaml, package.json, tsconfig.json
+#   - apps/, packages/
+#   - migrations/
+#   - top-level internal/  (introduced by #789 — must NOT be excluded)
+#
+# scripts/ is intentionally NOT in the input set: scripts/build-single-binary.sh
+# is the host build path, not used inside the Docker build.
+
+# Node / JS build outputs
+node_modules
+**/node_modules
+dist
+**/dist
+.pnpm-store
+
+# Go build outputs
+bin
+*.exe
+*.test
+*.out
+
+# Local dev SQLite databases
+.dev.db
+.dev.db-*
+
+# VCS / CI / agent state
+.git
+.gitignore
+.github
+.claude
+.claude/worktrees
+
+# Tests / e2e artefacts (Playwright report + raw test trees not needed in image)
+tests
+playwright-report
+test-results
+.last-run.json
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+
+# Linkedin / planning artefacts (out of image scope)
+linkedin-posts
+specs
+diary
+CHANGELOG.d
+
+# Documentation / repo metadata not needed at build time
+README.md
+CHANGELOG.md
+CLAUDE.md
+
+# NOTE: do not exclude `internal/` — sub-issue #789 introduces a top-level
+# internal/buildinfo/ package the go-build stage must see.
