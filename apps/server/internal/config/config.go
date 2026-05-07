@@ -96,6 +96,18 @@ type Config struct {
 	// or already valid. Bootstrap reads this to emit a single warn line
 	// naming the bad value before slog.Default is replaced.
 	LogLevelInvalid string
+	// BcryptCostRaw is the unparsed CHAT_BCRYPT_COST env value as Load
+	// found it. Validate runs ParseBcryptCost on this and writes the
+	// result to BcryptCost; keeping the raw form on the struct avoids
+	// a second os.Getenv at the call site, which would let env mutations
+	// between Load and Validate silently change what's validated.
+	BcryptCostRaw string
+	// BcryptCost is the parsed CHAT_BCRYPT_COST value, populated by
+	// Validate. Zero before Validate runs; after a successful Validate
+	// it equals auth.DefaultBcryptCost when the env var was unset, or
+	// the in-range override otherwise. The boot path passes this to
+	// auth.SetBcryptCost before the HTTP listener starts.
+	BcryptCost int
 }
 
 // Load reads configuration from the environment. It applies defaults
@@ -114,6 +126,7 @@ func Load() Config {
 		TrustedProxy:    os.Getenv(EnvTrustedProxy) == "1",
 		LogLevel:        level,
 		LogLevelInvalid: invalid,
+		BcryptCostRaw:   os.Getenv(EnvBcryptCost),
 	}
 }
 
@@ -176,8 +189,10 @@ type CheckResult struct {
 
 // Validate runs every startup check in a fixed order and returns the
 // list of checks performed. On the first failure it returns a non-nil
-// error whose message is safe to print (no secret material).
-func (c Config) Validate() ([]CheckResult, error) {
+// error whose message is safe to print (no secret material). Pointer
+// receiver because the bcrypt check writes the parsed cost back to the
+// Config so the boot path can install it without re-parsing.
+func (c *Config) Validate() ([]CheckResult, error) {
 	var checks []CheckResult
 
 	if err := validateJWTSecret(c.JWTSecret); err != nil {
@@ -194,6 +209,13 @@ func (c Config) Validate() ([]CheckResult, error) {
 		return checks, err
 	}
 	checks = append(checks, CheckResult{Name: "bind_address_loopback_or_overridden", OK: true})
+
+	cost, err := ParseBcryptCost(c.BcryptCostRaw)
+	if err != nil {
+		return checks, err
+	}
+	c.BcryptCost = cost
+	checks = append(checks, CheckResult{Name: "bcrypt_cost_within_range", OK: true})
 
 	return checks, nil
 }

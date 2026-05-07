@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"hackathon/apps/server/internal/auth"
-	"hackathon/apps/server/internal/config"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/repo"
 )
@@ -41,18 +40,14 @@ func openAndMigrate(dbPath string) (*sql.DB, *repo.Repo, error) {
 	return sqlDB, repository, nil
 }
 
-// applyBcryptCost reads CHAT_BCRYPT_COST, parses it through
-// config.ParseBcryptCost (defaults to auth.DefaultBcryptCost when unset,
-// rejects out-of-range or non-numeric input), and installs the result
-// via auth.SetBcryptCost. Must run before any goroutine that calls
-// auth.Hash; main.go invokes this between cfg.Validate() and the HTTP
-// listener start so the boot path aborts on a bad value before opening
-// a port.
-func applyBcryptCost(raw string) error {
-	cost, err := config.ParseBcryptCost(raw)
-	if err != nil {
-		return err
-	}
+// applyBcryptCost installs the bcrypt cost on the auth package. The
+// value is the one cfg.Validate parsed from CHAT_BCRYPT_COST and stored
+// on Config; Validate already enforced the [MinBcryptCost, MaxBcryptCost]
+// range, so SetBcryptCost's re-check here is defensive. Must run before
+// any goroutine that calls auth.Hash; main.go invokes this between
+// cfg.Validate() and the HTTP listener start so the boot path aborts
+// on an unexpected error before opening a port.
+func applyBcryptCost(cost int) error {
 	return auth.SetBcryptCost(cost)
 }
 

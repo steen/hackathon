@@ -20,7 +20,8 @@ func baseValid() Config {
 }
 
 func TestValidate_AcceptsBaseline(t *testing.T) {
-	checks, err := baseValid().Validate()
+	c := baseValid()
+	checks, err := c.Validate()
 	if err != nil {
 		t.Fatalf("baseline config rejected: %v", err)
 	}
@@ -28,6 +29,7 @@ func TestValidate_AcceptsBaseline(t *testing.T) {
 		"jwt_secret_present_and_strong",
 		"invite_code_present",
 		"bind_address_loopback_or_overridden",
+		"bcrypt_cost_within_range",
 	}
 	if len(checks) != len(want) {
 		t.Fatalf("want %d checks, got %d (%v)", len(want), len(checks), checks)
@@ -36,6 +38,9 @@ func TestValidate_AcceptsBaseline(t *testing.T) {
 		if checks[i].Name != name || !checks[i].OK {
 			t.Errorf("check[%d] = %+v, want name=%q ok=true", i, checks[i], name)
 		}
+	}
+	if c.BcryptCost != auth.DefaultBcryptCost {
+		t.Errorf("BcryptCost after Validate = %d, want default %d", c.BcryptCost, auth.DefaultBcryptCost)
 	}
 }
 
@@ -382,6 +387,100 @@ func TestParseBcryptCost_RejectsNonNumeric(t *testing.T) {
 			t.Errorf("ParseBcryptCost(%q): error %q should name %s", raw, err, EnvBcryptCost)
 		}
 	}
+}
+
+// TestValidate_BcryptCost_DefaultWhenUnset covers the route-1 fold of
+// CHAT_BCRYPT_COST into Validate: an empty BcryptCostRaw must populate
+// cfg.BcryptCost with auth.DefaultBcryptCost and pass without error.
+func TestValidate_BcryptCost_DefaultWhenUnset(t *testing.T) {
+	c := baseValid()
+	c.BcryptCostRaw = ""
+	checks, err := c.Validate()
+	if err != nil {
+		t.Fatalf("expected acceptance, got %v", err)
+	}
+	if c.BcryptCost != auth.DefaultBcryptCost {
+		t.Errorf("BcryptCost = %d, want default %d", c.BcryptCost, auth.DefaultBcryptCost)
+	}
+	if !hasCheck(checks, "bcrypt_cost_within_range") {
+		t.Errorf("expected bcrypt_cost_within_range in checks, got %v", checks)
+	}
+}
+
+// TestValidate_BcryptCost_AcceptsValidOverride covers acceptance of an
+// in-range override, with the parsed value written back to cfg.BcryptCost.
+func TestValidate_BcryptCost_AcceptsValidOverride(t *testing.T) {
+	for _, cost := range []int{auth.MinBcryptCost, 11, 14, auth.MaxBcryptCost} {
+		c := baseValid()
+		c.BcryptCostRaw = strconv.Itoa(cost)
+		if _, err := c.Validate(); err != nil {
+			t.Fatalf("Validate(BcryptCostRaw=%q): unexpected error: %v", c.BcryptCostRaw, err)
+		}
+		if c.BcryptCost != cost {
+			t.Errorf("BcryptCost = %d, want %d", c.BcryptCost, cost)
+		}
+	}
+}
+
+// TestValidate_BcryptCost_RejectsOutOfRange covers the failure path: an
+// out-of-range value must fail Validate with an error naming the env var,
+// matching the rest of Validate's deferred-error style.
+func TestValidate_BcryptCost_RejectsOutOfRange(t *testing.T) {
+	for _, raw := range []string{
+		strconv.Itoa(auth.MinBcryptCost - 1),
+		strconv.Itoa(auth.MaxBcryptCost + 1),
+		"abc",
+		"",
+	} {
+		// Skip the empty case which is the success path covered above.
+		if raw == "" {
+			continue
+		}
+		c := baseValid()
+		c.BcryptCostRaw = raw
+		_, err := c.Validate()
+		if err == nil {
+			t.Fatalf("Validate(BcryptCostRaw=%q): expected error, got nil", raw)
+		}
+		if !strings.Contains(err.Error(), EnvBcryptCost) {
+			t.Errorf("Validate(BcryptCostRaw=%q): error %q should name %s", raw, err, EnvBcryptCost)
+		}
+	}
+}
+
+// TestValidate_BcryptCost_AfterPriorChecks covers AC of issue #830: the
+// bcrypt check must run AFTER the existing JWT/invite/bind checks so a
+// bcrypt-cost failure surfaces alongside their successful CheckResult
+// entries (operators see "config check ok name=…" before the error).
+func TestValidate_BcryptCost_AfterPriorChecks(t *testing.T) {
+	c := baseValid()
+	c.BcryptCostRaw = "abc"
+	checks, err := c.Validate()
+	if err == nil {
+		t.Fatal("expected error on non-numeric bcrypt cost")
+	}
+	want := []string{
+		"jwt_secret_present_and_strong",
+		"invite_code_present",
+		"bind_address_loopback_or_overridden",
+	}
+	if len(checks) != len(want) {
+		t.Fatalf("want %d prior checks, got %d (%v)", len(want), len(checks), checks)
+	}
+	for i, name := range want {
+		if checks[i].Name != name || !checks[i].OK {
+			t.Errorf("check[%d] = %+v, want name=%q ok=true", i, checks[i], name)
+		}
+	}
+}
+
+func hasCheck(checks []CheckResult, name string) bool {
+	for _, ch := range checks {
+		if ch.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestErrorsNeverContainSecret(t *testing.T) {

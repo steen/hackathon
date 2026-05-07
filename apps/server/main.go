@@ -68,7 +68,7 @@ func run() error {
 			"using", cfg.LogLevel,
 		)
 	}
-	if err := applyBcryptCost(os.Getenv(config.EnvBcryptCost)); err != nil {
+	if err := applyBcryptCost(cfg.BcryptCost); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
 	for _, ch := range checks {
