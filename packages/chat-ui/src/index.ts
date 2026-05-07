@@ -1,6 +1,7 @@
 export { ChannelHeader } from "./ChannelHeader/ChannelHeader.js";
 export { ConnectionBadge } from "./ConnectionBadge/ConnectionBadge.js";
 export { ChannelsList } from "./ChannelsList/ChannelsList.js";
+export { MessageComposer } from "./MessageComposer/MessageComposer.js";
 export { MessageItem } from "./MessageItem/MessageItem.js";
 export { MessageList, IS_AT_BOTTOM_TOLERANCE_PX } from "./MessageList/MessageList.js";
 export { PresenceList } from "./PresenceList/PresenceList.js";

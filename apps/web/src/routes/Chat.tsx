@@ -6,13 +6,12 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent,
-  type KeyboardEvent,
 } from "react";
 import {
   ChannelHeader,
   ChannelsList,
   IS_AT_BOTTOM_TOLERANCE_PX,
+  MessageComposer,
   MessageList,
   PresenceList,
   PresenceLiveRegion,
@@ -28,17 +27,10 @@ import { usePresence } from "../hooks/usePresence.js";
 // in raw bytes so paste-of-large-text gets a warning before the user hits
 // Enter rather than after a round-trip.
 const MAX_BODY_BYTES = 4 * 1024;
-// Above this fraction of the cap, show the user the live byte counter so
-// they can see the limit approach. Below it, the chrome stays out of the way.
-const WARN_RATIO = 0.8;
 
 // Re-exported from chat-ui so existing tests (`Chat.test.tsx`) keep their
 // import path. The constant itself lives in chat-ui/MessageList.
 export { IS_AT_BOTTOM_TOLERANCE_PX };
-
-function byteLength(s: string): number {
-  return new TextEncoder().encode(s).length;
-}
 
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
@@ -47,7 +39,6 @@ export function Chat(): React.JSX.Element {
   const messagesState = useMessages(activeChannel, user?.id ?? null);
   const presenceState = usePresence(true);
   const [draft, setDraft] = useState("");
-  const composingRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -127,12 +118,6 @@ export function Chat(): React.JSX.Element {
     return channelsState.channels.find((c) => c.id === activeChannel)?.name ?? null;
   }, [activeChannel, channelsState.channels]);
 
-  const draftBytes = useMemo(() => byteLength(draft), [draft]);
-  const overCap = draftBytes > MAX_BODY_BYTES;
-  const showCounter = draftBytes >= Math.floor(MAX_BODY_BYTES * WARN_RATIO);
-  const trimmedEmpty = draft.trim().length === 0;
-  const sendDisabled = activeChannel === null || trimmedEmpty || overCap;
-
   // Empty-state surfaces only after the initial channel fetch settles (no
   // loading, no error). Showing the "no channels" copy mid-load would race
   // the eventual list and flash for SR users.
@@ -149,30 +134,11 @@ export function Chat(): React.JSX.Element {
     messagesState.messages.length === 0;
 
   async function submitDraft(): Promise<void> {
-    if (sendDisabled) return;
+    if (activeChannel === null) return;
     const body = draft.trim();
     if (body.length === 0) return;
     setDraft("");
     await messagesState.send(body);
-  }
-
-  function onSend(e: FormEvent<HTMLFormElement>): void {
-    e.preventDefault();
-    void submitDraft();
-  }
-
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
-    // Enter sends; Shift+Enter inserts a newline. IME composition (Japanese,
-    // Chinese, Korean) fires Enter to commit a candidate — never treat that
-    // as a send.
-    if (e.key !== "Enter") return;
-    if (e.shiftKey) return;
-    if (composingRef.current) return;
-    // `isComposing` is the canonical flag for browsers that emit it; the
-    // ref handles older fallbacks. Keep both.
-    if (e.nativeEvent.isComposing) return;
-    e.preventDefault();
-    void submitDraft();
   }
 
   const sidebarHeader = (
@@ -237,51 +203,19 @@ export function Chat(): React.JSX.Element {
           }}
           listRef={listRef}
         />
-        <form
-          className="composer"
-          onSubmit={onSend}
-          aria-describedby={showCounter && !overCap ? "composer-counter" : undefined}
-        >
-          <textarea
-            ref={composerRef}
-            value={draft}
-            onChange={(e) => {
-              setDraft(e.target.value);
-            }}
-            onKeyDown={onKeyDown}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
-            onCompositionEnd={() => {
-              composingRef.current = false;
-            }}
-            placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
-            disabled={activeChannel === null}
-            aria-label="message"
-            aria-invalid={overCap || undefined}
-            aria-errormessage={overCap ? "composer-counter" : undefined}
-            rows={2}
-            data-testid="composer-textarea"
-          />
-          <button type="submit" disabled={sendDisabled}>
-            Send
-          </button>
-          {showCounter ? (
-            <span
-              id="composer-counter"
-              className={
-                overCap
-                  ? "composer__counter composer__counter--error"
-                  : "composer__counter composer__counter--warn"
-              }
-              role="status"
-              data-testid="composer-counter"
-            >
-              {draftBytes} / {MAX_BODY_BYTES} bytes
-              {overCap ? " — too long to send" : ""}
-            </span>
-          ) : null}
-        </form>
+        <MessageComposer
+          value={draft}
+          onChange={setDraft}
+          onSubmit={() => {
+            void submitDraft();
+          }}
+          disabled={activeChannel === null}
+          maxBytes={MAX_BODY_BYTES}
+          placeholder={
+            activeChannel === null ? "Select a channel first" : "Write a message..."
+          }
+          composerRef={composerRef}
+        />
       </main>
     </div>
   );

@@ -1,0 +1,67 @@
+.composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--bg-app);
+}
+
+.composer textarea {
+  flex: 1;
+  min-height: 2.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  resize: vertical;
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.composer textarea::placeholder {
+  color: var(--fg-muted);
+}
+
+.composer textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.composer__send {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  padding: 0 1.1rem;
+  min-height: 2.6rem;
+  cursor: pointer;
+}
+
+.composer__send:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.composer__send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer__counter {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.composer__counter--warn {
+  color: var(--warn);
+}
+
+.composer__counter--error {
+  color: var(--error);
+  font-weight: 600;
+}
