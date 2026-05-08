@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type WebSocketClient, type Message } from "@hackathon/api-client";
+import { type Message } from "@hackathon/api-client";
 import type { ConnectionStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
 import { type CancelToken, connectChannel } from "./useMessages.connect.js";
+import { BACKOFF_MS, useChatSocket } from "./useChatSocket.js";
 import {
-  BACKOFF_MS,
   CATCHUP_LIMIT,
   makePendingRow,
   markPendingFailed,
@@ -39,15 +39,13 @@ interface UseMessages {
 
 export function useMessages(channelId: string | null, currentUserId?: string | null): UseMessages {
   const [messages, setMessages] = useState<MessageView[]>([]);
-  const [connection, setConnection] = useState<ConnectionStatus>("idle");
-  const [error, setError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [canLoadOlder, setCanLoadOlder] = useState<boolean>(false);
   const [isLoadingOlder, setIsLoadingOlder] = useState<boolean>(false);
   const [loadOlderError, setLoadOlderError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const loadingOlderRef = useRef<boolean>(false);
   const messagesRef = useRef<MessageView[]>([]);
-  const wsRef = useRef<WebSocketClient | null>(null);
   // Per-pendingId submit timestamps drive the WS-echo reconcile window
   // without leaking timestamps into MessageView rows.
   const pendingMetaRef = useRef<Map<string, PendingMeta>>(new Map());
@@ -59,6 +57,8 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     messagesRef.current = messages;
   }, [messages]);
 
+  const { connection, error: socketError, socket } = useChatSocket(channelId);
+
   useEffect(() => {
     setMessages([]);
     setCanLoadOlder(false);
@@ -66,39 +66,31 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     setLoadOlderError(null);
     pendingMetaRef.current.clear();
     if (channelId === null) {
-      setConnection("idle");
       setHistoryLoading(false);
       return;
     }
     const tok: CancelToken = { cancelled: false };
-    setError(null);
-    setConnection("connecting");
+    setHistoryError(null);
     setHistoryLoading(true);
     loadingOlderRef.current = false;
 
-    void connectChannel({
+    const detach = connectChannel({
       channelId,
       tok,
+      socket,
       setMessages,
-      setConnection,
-      setError,
+      setError: setHistoryError,
       setCanLoadOlder,
       setHistoryLoading,
-      wsRef,
       pendingMetaRef,
       userIdRef,
     });
 
     return () => {
       tok.cancelled = true;
-      const ws = wsRef.current;
-      if (ws !== null) {
-        ws.close();
-        wsRef.current = null;
-      }
-      setConnection("closed");
+      detach();
     };
-  }, [channelId]);
+  }, [channelId, socket]);
 
   const submitPending = useCallback(async (id: string, ch: string, body: string): Promise<void> => {
     pendingMetaRef.current.set(id, { submittedAt: Date.now() });
@@ -127,7 +119,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       const id = newPendingId();
       const synthetic = makePendingRow(id, ch, userIdRef.current ?? "", trimmed);
       setMessages((prev) => [...prev, synthetic]);
-      setError(null);
+      setHistoryError(null);
       await submitPending(id, ch, trimmed);
     },
     [submitPending],
@@ -144,7 +136,7 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
         return next;
       });
       if (captured.body === undefined) return;
-      setError(null);
+      setHistoryError(null);
       await submitPending(pendingId, ch, captured.body);
     },
     [submitPending],
@@ -180,6 +172,12 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
       setIsLoadingOlder(false);
     }
   }, []);
+
+  // History-error and socket-error share one banner slot to the consumer.
+  // historyError takes priority because it indicates a missing initial
+  // page (user sees no rows); socket failures surface only when no
+  // history banner is up.
+  const error = historyError ?? socketError;
 
   return {
     messages,
