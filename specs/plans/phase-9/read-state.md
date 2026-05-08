@@ -169,6 +169,7 @@ interface Channel {                           // existing fields kept
   last_message_id: string | null;
   last_message_at: string | null;
   unread_count: number;
+  last_read_message_id: string | null;
 }
 ```
 
