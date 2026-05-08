@@ -59,7 +59,7 @@ func (h *ChannelsHandlers) List(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	uid, _, ok := userFromContext(r)
+	uid, ok := userFromContext(r)
 	if !ok {
 		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "missing user context")
 		return
@@ -225,21 +225,9 @@ func channelIDFromPath(r *stdhttp.Request) (string, bool) {
 	return ids.NormalizeChannelID(r.PathValue("id"))
 }
 
-// userFromContext is the small accessor that maps RequireJWT's context
-// values onto the (id, username) pair the handlers need together. The
-// username return value is currently discarded by every caller (the
-// channels/messages/reads handlers route on user id only); kept on the
-// signature so a future handler that needs the display name doesn't
-// have to reach back through the auth package directly. unparam
-// suppression: drift detection here would mask the deliberate
-// no-callers-yet shape.
-//
-//nolint:unparam // username preserved for future callers, see comment.
-func userFromContext(r *stdhttp.Request) (string, string, bool) {
-	uid, ok := auth.UserIDFromContext(r.Context())
-	if !ok {
-		return "", "", false
-	}
-	uname, _ := auth.UsernameFromContext(r.Context())
-	return uid, uname, true
+// userFromContext returns the authenticated user id from RequireJWT's
+// context values. Callers that also need the display name should call
+// auth.UsernameFromContext directly.
+func userFromContext(r *stdhttp.Request) (string, bool) {
+	return auth.UserIDFromContext(r.Context())
 }
