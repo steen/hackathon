@@ -108,6 +108,7 @@ Each story has an ID (`US-N`) used to tag tests and demo steps. A story is "cove
 - **US-10** — As the host, I want a single binary with env-var config, so deploying for friends is trivial.
 - **US-11** — As the host, I want registration gated by an invite code, so a publicly reachable instance is not joinable by strangers.
 - **US-12** — As a user, I want logout to actually invalidate my token server-side, so a stolen token stops working when I notice.
+- **US-13** — As a user, I want to rename a channel (other than `#general`), so we can fix typos and reorganize topics without losing history.
 
 ## 6. Core Architecture & Patterns
 
@@ -195,7 +196,8 @@ Built on stdlib `flag`. A small `splitFlagsAndPositional` helper (see `apps/cli/
 | `chatd login <username>` | Prompts for password; stores token |
 | `chatd whoami` | Prints current user |
 | `chatd channels` | Lists channels |
-| `chatd channels create <name>` | Creates a channel |
+| `chatd channels create <name>` | Creates a channel; prints `<id>\t<name>` |
+| `chatd channels rename <current-name> <new-name>` | Renames a channel; prints `<id>\t<name>` |
 | `chatd send <channel> <msg>` | Sends a message (`-` reads stdin) |
 | `chatd history <channel> [--limit N]` | Prints recent messages |
 | `chatd watch <channel>` | Live tail of a channel (used in Phase 0 system test) |
@@ -341,6 +343,8 @@ This is a security-critical app — a friend-group chat that may eventually sit 
 | `CHAT_ALLOWED_ORIGINS` | *(same-origin)* | Comma-separated; for reverse-proxy deploys |
 | `CHAT_TRUSTED_PROXY` | `0` | If `1`, honor `X-Forwarded-For` for rate-limit IP |
 | `CHAT_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `CHAT_CHANNEL_WRITE_BURST` | `10` | Per-user token-bucket burst for channel-write endpoints (`POST /api/channels`, `PATCH /api/channels/{id}`) |
+| `CHAT_CHANNEL_WRITE_REFILL` | `1m` | Per-user token-bucket refill interval for channel-write endpoints; one token per interval |
 
 ### Security explicitly out of MVP scope
 
@@ -380,9 +384,12 @@ POST /api/auth/ws-ticket  (Bearer)
 ### Channels
 
 ```
-GET  /api/channels                      → { "channels": [ { "id", "name", "created_at" } ] }
-POST /api/channels        { "name" }    → { "id", "name", "created_at" }
+GET   /api/channels                      → { "channels": [ { "id", "name", "created_at" } ] }
+POST  /api/channels        { "name" }    → { "id", "name", "created_at" }   # 200; 400 invalid name; 409 duplicate; 429 per-user rate limit
+PATCH /api/channels/{id}   { "name" }    → { "id", "name", "created_at" }   # 200; 400 invalid name; 403 on the seeded `#general` channel; 409 duplicate; 429 per-user rate limit
 ```
+
+`POST` and `PATCH` share a per-user token-bucket rate limit (`CHAT_CHANNEL_WRITE_BURST` / `CHAT_CHANNEL_WRITE_REFILL`, defaults `10` / `1m`). The seeded `#general` channel cannot be renamed. Name validation reuses the same shape rules as create (lowercase, hyphenated, length cap; see `feature-channels-and-messages.md`).
 
 ### Messages
 
@@ -417,10 +424,13 @@ Outbound (server → client):
 ```json
 { "type": "message",  "data": { "id", "channel_id", "sender_user_id", "body", "created_at" } }
 { "type": "presence", "data": { "kind": "join" | "leave", "user_id": "..." } }
+{ "type": "channel",  "data": { "kind": "create" | "rename", "channel": { "id", "name", "created_at" } } }
 { "type": "error",    "data": { "code", "message" } }
 ```
 
 `presence` frames are global join/leave deltas; clients seed the full set from `GET /api/presence` on (re)connect.
+
+`channel` frames are global broadcasts emitted after a successful `POST /api/channels` or `PATCH /api/channels/{id}`; every connected client receives them regardless of which channel their WS connection is scoped to (channel listings live outside the per-WS channel scope). Inbound channel frames remain forbidden — the sender-spoofing rule from §"Design deviations" is unchanged; clients never write channel events into the WS.
 
 ### Design deviations from earlier PRD revisions
 
@@ -446,7 +456,8 @@ Phase 2 implementation locked in several divergences from the original spec. Eac
 | US-1 | Register creates a user, returns a valid token |
 | US-2 | Login with correct credentials returns a token; wrong creds return generic error |
 | US-3 | `GET /api/channels` returns at least the seeded `#general` |
-| US-4 | `POST /api/channels` creates and lists |
+| US-4 | `POST /api/channels` creates and lists; web Playwright covers the create-channel UI happy path; CLI `chatd channels create <name>` happy path round-trips through `GET /api/channels` |
+| US-13 | `PATCH /api/channels/{id}` happy path renames an existing channel; rename of `#general` returns 403; rename to a name already in use returns 409; the `CHAT_CHANNEL_WRITE_BURST + 1`-th channel write inside one `CHAT_CHANNEL_WRITE_REFILL` window from one user returns 429; web Playwright covers the rename-channel UI happy path; CLI `chatd channels rename <current> <new>` happy path round-trips through `GET /api/channels` |
 | US-5 | A message sent on one WS connection arrives on a second connection subscribed to the same channel within 500 ms |
 | US-6 | History endpoint returns messages in created-at order with paging |
 | US-7 | Connecting and disconnecting a client updates `presence` events within 2 s |
