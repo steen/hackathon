@@ -201,6 +201,69 @@ describe("HttpClient", () => {
     expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ name: "lobby" });
   });
 
+  it("renameChannel PATCHes /api/channels/{id} with {name} and unwraps the channel", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        status: 200,
+        body: {
+          ok: true,
+          data: { id: "C1", name: "renamed", created_at: "2026-01-01T00:00:00Z" },
+          error: null,
+        },
+      },
+    ]);
+    const c = new HttpClient({
+      baseUrl: "http://srv",
+      fetch,
+      getToken: () => FAKE_TOKEN,
+    });
+    const ch = await c.renameChannel("C1", "renamed");
+    expect(ch.name).toBe("renamed");
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(calls[0]?.url).toBe("http://srv/api/channels/C1");
+    expect(calls[0]?.headers["Content-Type"]).toBe("application/json");
+    expect(calls[0]?.headers.Authorization).toBe(`Bearer ${FAKE_TOKEN}`);
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ name: "renamed" });
+  });
+
+  it("renameChannel percent-encodes the channel id in the path", async () => {
+    const { fetch, calls } = makeFetch([
+      {
+        status: 200,
+        body: {
+          ok: true,
+          data: { id: "C/1", name: "ok", created_at: "2026-01-01T00:00:00Z" },
+          error: null,
+        },
+      },
+    ]);
+    const c = new HttpClient({ baseUrl: "http://srv", fetch });
+    await c.renameChannel("C/1", "ok");
+    expect(calls[0]?.url).toBe("http://srv/api/channels/C%2F1");
+  });
+
+  it.each([
+    [400, "invalid_name", "channel name must be 1..64 chars"],
+    [403, "forbidden", "not the channel owner"],
+    [404, "not_found", "no such channel"],
+    [409, "conflict", "channel name already taken"],
+    [429, "rate_limited", "too many rename requests"],
+    [500, "internal", "internal error"],
+  ])("renameChannel maps %i → typed ApiError(%s)", async (status, code, message) => {
+    const { fetch } = makeFetch([
+      {
+        status,
+        body: { ok: false, data: null, error: { code, message } },
+      },
+    ]);
+    const c = new HttpClient({ baseUrl: "http://srv", fetch });
+    await expect(c.renameChannel("C1", "anything")).rejects.toMatchObject({
+      status,
+      code,
+      message,
+    });
+  });
+
   it("listMessages forwards before+limit and unwraps {messages:[]}", async () => {
     const { fetch, calls } = makeFetch([
       { status: 200, body: { ok: true, data: { messages: [] }, error: null } },

@@ -7,7 +7,7 @@ import {
   type WebSocketLike,
   type WSConnectionState,
 } from "./ws.js";
-import type { Event as WsEvent } from "./types.js";
+import type { ChannelEvent, Event as WsEvent } from "./types.js";
 
 class FakeSocket implements WebSocketLike {
   static instances: FakeSocket[] = [];
@@ -80,6 +80,59 @@ describe("decodeFrame", () => {
       JSON.stringify({ type: "presence", data: { kind: "join", user_id: "U1" } }),
     );
     expect(f.type).toBe("presence");
+  });
+
+  it("round-trips a channel:create frame with the ChannelEvent payload shape", () => {
+    const f = decodeFrame(
+      JSON.stringify({
+        type: "channel",
+        data: {
+          kind: "create",
+          channel: { id: "C1", name: "lobby", created_at: "2026-01-01T00:00:00Z" },
+        },
+      }),
+    );
+    expect(f.type).toBe("channel");
+    const data = f.data as { kind: string; channel: { id: string; name: string } };
+    expect(data.kind).toBe("create");
+    expect(data.channel.id).toBe("C1");
+    expect(data.channel.name).toBe("lobby");
+  });
+
+  it("round-trips a channel:rename frame with the ChannelEvent payload shape", () => {
+    const f = decodeFrame(
+      JSON.stringify({
+        type: "channel",
+        data: {
+          kind: "rename",
+          channel: { id: "C1", name: "renamed", created_at: "2026-01-01T00:00:00Z" },
+        },
+      }),
+    );
+    expect(f.type).toBe("channel");
+    const data = f.data as { kind: string; channel: { id: string; name: string } };
+    expect(data.kind).toBe("rename");
+    expect(data.channel.name).toBe("renamed");
+  });
+
+  it("ChannelEvent constrains kind to create|rename and carries a Channel", () => {
+    const create: ChannelEvent = {
+      type: "channel",
+      data: {
+        kind: "create",
+        channel: { id: "C1", name: "lobby", created_at: "2026-01-01T00:00:00Z" },
+      },
+    };
+    const rename: ChannelEvent = {
+      type: "channel",
+      data: {
+        kind: "rename",
+        channel: { id: "C1", name: "renamed", created_at: "2026-01-01T00:00:00Z" },
+      },
+    };
+    expect(create.data.kind).toBe("create");
+    expect(rename.data.kind).toBe("rename");
+    expect(rename.data.channel.id).toBe(create.data.channel.id);
   });
 });
 
