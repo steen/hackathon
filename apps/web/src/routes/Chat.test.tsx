@@ -394,9 +394,11 @@ describe("test_web_presence_list_renders_seed_join_leave_and_dedupes", () => {
     });
 
     // The presence hook opens its own WebSocket connection in addition
-    // to the messages hook's connection — find the presence socket by
-    // url query (no `channel=` param).
-    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    // to the messages hook's connection. Both now carry ?channel=C1
+    // (production handler requires it); useChatSocket constructs the
+    // first socket, usePresence the second, so the presence sock is
+    // instances[1].
+    const presenceSock = FakeSocket.instances[1];
     expect(presenceSock).toBeDefined();
 
     await act(async () => {
@@ -476,7 +478,7 @@ describe("test_web_presence_live_region_announces_join_with_known_username", () 
     await waitFor(() => {
       expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
     });
-    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    const presenceSock = FakeSocket.instances[1];
     expect(presenceSock).toBeDefined();
 
     // U2 leaves first so U2's later rejoin lands as a known username (the
@@ -531,9 +533,9 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
 
     const live = await screen.findByTestId("presence-live-region");
     await waitFor(() => {
-      expect(FakeSocket.instances.some((s) => !s.url.includes("channel="))).toBe(true);
+      expect(FakeSocket.instances.length).toBeGreaterThanOrEqual(2);
     });
-    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    const presenceSock = FakeSocket.instances[1];
 
     await act(async () => {
       presenceSock?.open();
@@ -570,9 +572,9 @@ describe("test_web_presence_live_region_falls_back_when_id_unknown", () => {
 
     const live = await screen.findByTestId("presence-live-region");
     await waitFor(() => {
-      expect(FakeSocket.instances.some((s) => !s.url.includes("channel="))).toBe(true);
+      expect(FakeSocket.instances.length).toBeGreaterThanOrEqual(2);
     });
-    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    const presenceSock = FakeSocket.instances[1];
 
     await act(async () => {
       presenceSock?.open();
@@ -622,7 +624,7 @@ describe("test_web_presence_live_region_rebroadcasts_join_when_already_present",
       expect(screen.getByTestId("presence-user-U2")).toBeInTheDocument();
     });
 
-    const presenceSock = FakeSocket.instances.find((s) => !s.url.includes("channel="));
+    const presenceSock = FakeSocket.instances[1];
     expect(presenceSock).toBeDefined();
 
     // First join for U1, who is already seeded into the list. Without the

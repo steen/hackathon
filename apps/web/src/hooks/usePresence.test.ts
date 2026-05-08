@@ -73,7 +73,7 @@ describe("usePresence", () => {
         { id: "U2", username: "bob" },
       ],
     });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -83,7 +83,7 @@ describe("usePresence", () => {
 
   it("appends a user on a presence join frame", async () => {
     requestMock.mockResolvedValue({ users: [{ id: "U1", username: "alice" }] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(FakeSocket.instances).toHaveLength(1);
     });
@@ -104,7 +104,7 @@ describe("usePresence", () => {
         { id: "U2", username: "bob" },
       ],
     });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(FakeSocket.instances).toHaveLength(1);
     });
@@ -120,7 +120,7 @@ describe("usePresence", () => {
 
   it("collapses duplicate joins for the same user_id (multi-connection dedupe)", async () => {
     requestMock.mockResolvedValue({ users: [] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(FakeSocket.instances).toHaveLength(1);
     });
@@ -138,7 +138,7 @@ describe("usePresence", () => {
 
   it("ignores non-presence frames", async () => {
     requestMock.mockResolvedValue({ users: [] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(FakeSocket.instances).toHaveLength(1);
     });
@@ -166,7 +166,7 @@ describe("usePresence", () => {
         { id: "U2", username: "bob" },
       ],
     });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -191,7 +191,7 @@ describe("usePresence", () => {
 
   it("preserves the usernames reference when a remount seeds an identical empty directory", async () => {
     requestMock.mockResolvedValue({ users: [] });
-    const { result, rerender } = renderHook(({ on }: { on: boolean }) => usePresence(on), {
+    const { result, rerender } = renderHook(({ on }: { on: boolean }) => usePresence(on, "C1"), {
       initialProps: { on: true },
     });
     await waitFor(() => {
@@ -209,7 +209,7 @@ describe("usePresence", () => {
 
   it("uses the frame-carried username for an unseen user (#490 join)", async () => {
     requestMock.mockResolvedValue({ users: [] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(FakeSocket.instances).toHaveLength(1);
     });
@@ -233,7 +233,7 @@ describe("usePresence", () => {
 
   it("prefers the frame-carried username over the seeded directory (#490)", async () => {
     requestMock.mockResolvedValue({ users: [{ id: "U1", username: "stale-name" }] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -253,7 +253,7 @@ describe("usePresence", () => {
 
   it("falls back to the seeded directory when the server omits username (#490 backwards compat)", async () => {
     requestMock.mockResolvedValue({ users: [{ id: "U1", username: "alice" }] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
@@ -271,7 +271,7 @@ describe("usePresence", () => {
 
   it("emits the frame-carried username on a leave for a never-seeded id (#490)", async () => {
     requestMock.mockResolvedValue({ users: [] });
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(FakeSocket.instances).toHaveLength(1);
     });
@@ -293,7 +293,7 @@ describe("usePresence", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const raw = new Error("seed boom");
     requestMock.mockRejectedValue(raw);
-    const { result: hook } = renderHook(() => usePresence(true));
+    const { result: hook } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(hook.current.loading).toBe(false);
     });
@@ -308,7 +308,7 @@ describe("usePresence", () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const raw = new Error("seed boom internal-trace-xyz");
     requestMock.mockRejectedValue(raw);
-    const { result } = renderHook(() => usePresence(true));
+    const { result } = renderHook(() => usePresence(true, "C1"));
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
     });
