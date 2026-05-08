@@ -7,6 +7,7 @@
     "e2e:cli": "vitest run --project=cli-package",
     "e2e:ts-api-client": "vitest run --project=ts-api-client-package",
     "e2e:changelog-entry": "vitest run --project=changelog-entry",
+    "e2e:channel-ws-drift": "vitest run --project=channel-ws-drift",
     "test": "vitest run"
   },
   "dependencies": {
