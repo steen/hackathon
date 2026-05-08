@@ -3,7 +3,6 @@ package wiring
 import (
 	"log/slog"
 	"net/http"
-	"time"
 
 	"hackathon/apps/server/internal/config"
 	httpapi "hackathon/apps/server/internal/http"
@@ -59,7 +58,7 @@ func registerChannels(mux *http.ServeMux, deps Deps, require func(http.Handler) 
 	// one writer + one event kind. trustedProxy comes from the same env
 	// flag wiring.Build reads, so the audit IP matches the access-log IP.
 	auditSink := httpapi.NewRateLimitAuditSink(deps.Repo.DB())
-	writeLimit := httpapi.UserRateLimit(writeLimiter, time.Minute, auditSink, config.LoadTrustedProxy())
+	writeLimit := httpapi.UserRateLimit(writeLimiter, writeCfg.Refill, auditSink, config.LoadTrustedProxy())
 
 	ch.Routes(mux, require, writeLimit, msg)
 }
