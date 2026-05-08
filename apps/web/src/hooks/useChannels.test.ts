@@ -1,21 +1,53 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
-import { ApiError } from "@hackathon/api-client";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { ApiError, type Event as WsEvent } from "@hackathon/api-client";
 
 const listChannelsMock = vi.fn();
 const createChannelMock = vi.fn();
+const renameChannelMock = vi.fn();
 
 vi.mock("../api.js", () => ({
   getClient: () => ({
     listChannels: listChannelsMock,
     createChannel: createChannelMock,
+    renameChannel: renameChannelMock,
   }),
 }));
 
 import { useChannels } from "./useChannels.js";
+import type { ChatSocket, ChatSocketEventName, ChatSocketListener } from "./useChatSocket.js";
 import { _resetAppErrorSinkForTests, useAppError } from "../lib/userFacingError.js";
 
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+interface FakeSocket extends ChatSocket {
+  emitMessage: (ev: WsEvent) => void;
+  emitOpen: () => void;
+}
+
+function makeFakeSocket(): FakeSocket {
+  const listeners = {
+    open: new Set<ChatSocketListener<"open">>(),
+    close: new Set<ChatSocketListener<"close">>(),
+    error: new Set<ChatSocketListener<"error">>(),
+    message: new Set<ChatSocketListener<"message">>(),
+  };
+  return {
+    subscribe: <E extends ChatSocketEventName>(event: E, fn: ChatSocketListener<E>) => {
+      const set = listeners[event] as Set<ChatSocketListener<E>>;
+      set.add(fn);
+      return () => {
+        set.delete(fn);
+      };
+    },
+    emitOpen: () => {
+      for (const fn of listeners.open) fn(undefined);
+    },
+    emitMessage: (ev) => {
+      for (const fn of listeners.message) fn(ev);
+    },
+  };
+}
 
 beforeEach(() => {
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -26,6 +58,7 @@ afterEach(() => {
   cleanup();
   listChannelsMock.mockReset();
   createChannelMock.mockReset();
+  renameChannelMock.mockReset();
   consoleErrorSpy.mockRestore();
   _resetAppErrorSinkForTests();
 });
@@ -86,5 +119,136 @@ describe("useChannels", () => {
     );
     expect(result.current.error).not.toContain("xyz-internal-detail");
     expect(result.current.error).not.toContain("Failed to fetch");
+  });
+
+  it("create() POSTs and merges the new channel without a redundant reload()", async () => {
+    listChannelsMock.mockResolvedValueOnce([{ id: "C1", name: "general" }]);
+    const created = { id: "C2", name: "books", created_at: "2026-01-01T00:00:00Z" };
+    createChannelMock.mockResolvedValueOnce(created);
+    const { result } = renderHook(() => useChannels(true));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(1);
+    });
+    let returned: { id: string; name: string } | undefined;
+    await act(async () => {
+      returned = await result.current.create("books");
+    });
+    expect(createChannelMock).toHaveBeenCalledWith("books");
+    expect(returned?.id).toBe("C2");
+    expect(result.current.channels.map((c) => c.id)).toEqual(["C1", "C2"]);
+    // Only the mount-effect reload — no extra refetch on create.
+    expect(listChannelsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rename() PATCHes and updates the channel name in place", async () => {
+    listChannelsMock.mockResolvedValueOnce([
+      { id: "C1", name: "general" },
+      { id: "C2", name: "books" },
+    ]);
+    const renamed = { id: "C2", name: "reading", created_at: "2026-01-01T00:00:00Z" };
+    renameChannelMock.mockResolvedValueOnce(renamed);
+    const { result } = renderHook(() => useChannels(true));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(2);
+    });
+    await act(async () => {
+      await result.current.rename("C2", "reading");
+    });
+    expect(renameChannelMock).toHaveBeenCalledWith("C2", "reading");
+    expect(result.current.channels.map((c) => c.name)).toEqual(["general", "reading"]);
+    expect(result.current.channels.map((c) => c.id)).toEqual(["C1", "C2"]);
+  });
+
+  it("WS channel:create event upserts; duplicate event is a no-op", async () => {
+    listChannelsMock.mockResolvedValueOnce([{ id: "C1", name: "general" }]);
+    const sock = makeFakeSocket();
+    const { result } = renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(1);
+    });
+
+    const created = { id: "C2", name: "books", created_at: "2026-01-01T00:00:00Z" };
+    act(() => {
+      sock.emitMessage({ type: "channel", data: { kind: "create", channel: created } });
+    });
+    expect(result.current.channels.map((c) => c.id)).toEqual(["C1", "C2"]);
+
+    // Duplicate frame — same id — must not append a second row.
+    act(() => {
+      sock.emitMessage({ type: "channel", data: { kind: "create", channel: created } });
+    });
+    expect(result.current.channels.map((c) => c.id)).toEqual(["C1", "C2"]);
+  });
+
+  it("WS channel:rename event updates name in place", async () => {
+    listChannelsMock.mockResolvedValueOnce([
+      { id: "C1", name: "general" },
+      { id: "C2", name: "books" },
+    ]);
+    const sock = makeFakeSocket();
+    const { result } = renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(2);
+    });
+    act(() => {
+      sock.emitMessage({
+        type: "channel",
+        data: {
+          kind: "rename",
+          channel: { id: "C2", name: "reading", created_at: "2026-01-01T00:00:00Z" },
+        },
+      });
+    });
+    expect(result.current.channels.map((c) => c.name)).toEqual(["general", "reading"]);
+    expect(result.current.channels.map((c) => c.id)).toEqual(["C1", "C2"]);
+  });
+
+  it("ignores non-channel WS frames", async () => {
+    listChannelsMock.mockResolvedValueOnce([{ id: "C1", name: "general" }]);
+    const sock = makeFakeSocket();
+    const { result } = renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(1);
+    });
+    act(() => {
+      sock.emitMessage({
+        type: "message",
+        data: {
+          id: "M1",
+          channel_id: "C1",
+          sender_user_id: "U1",
+          body: "hi",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      });
+    });
+    expect(result.current.channels).toHaveLength(1);
+  });
+
+  it("calls reload() on every WS open (initial + reconnect) for catchup", async () => {
+    listChannelsMock.mockResolvedValue([{ id: "C1", name: "general" }]);
+    const sock = makeFakeSocket();
+    renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      // mount-effect reload is the first call.
+      expect(listChannelsMock).toHaveBeenCalledTimes(1);
+    });
+
+    await act(async () => {
+      sock.emitOpen();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(listChannelsMock).toHaveBeenCalledTimes(2);
+    });
+
+    // Reconnect: another open event.
+    await act(async () => {
+      sock.emitOpen();
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(listChannelsMock).toHaveBeenCalledTimes(3);
+    });
   });
 });

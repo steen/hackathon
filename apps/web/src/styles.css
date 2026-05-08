@@ -264,6 +264,130 @@ button.linklike {
   }
 }
 
+/* Channel sidebar header: side-by-side title + "+ New channel" button. */
+.channels-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.channels-header h2 {
+  margin: 0;
+}
+
+.channels-header__create {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.channels-header__create:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
+/* Active-channel header row: title + Rename trigger. */
+.messages__header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.messages__rename {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.85rem;
+  margin-right: 1rem;
+}
+
+.messages__rename:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}
+
+/* Channel create/rename modal form scaffolding. The Modal primitive owns
+   the panel/backdrop; these rules style only the form content. */
+.channel-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.channel-modal-form__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+}
+
+.channel-modal-form__label input {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+  background: var(--bg-elevated);
+  color: var(--fg);
+}
+
+.channel-modal-form__helper {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+.channel-modal-form__error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--error);
+}
+
+.channel-modal-form__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.channel-modal-form__buttons button {
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  font: inherit;
+}
+
+.channel-modal-form__buttons button[type="button"] {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+}
+
+.channel-modal-form__buttons button[type="submit"] {
+  background: var(--accent);
+  border: 0;
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.channel-modal-form__buttons button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 767px) {
+  .channels-header__create,
+  .messages__rename {
+    min-height: 44px;
+  }
+}
+
 /* Modal primitive (apps/web/src/components/Modal.tsx). Backdrop covers the
    viewport; the panel is centered with a desktop max-width. Below the
    shared phone breakpoint (767px — see the mobile sidebar rules above) the
