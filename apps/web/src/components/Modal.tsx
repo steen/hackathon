@@ -5,11 +5,13 @@ import { useCallback, useEffect, useId, useRef } from "react";
 // channel-create / channel-rename flows in their own tickets ("introduce
 // dead code" pattern). Behavior contract:
 //   - role=dialog + aria-modal + aria-labelledby pointing at the title <h2>.
-//   - Focus moves to the first focusable element inside the panel on open;
+//   - Focus moves to the first focusable element inside the panel on open
+//     (or to `initialFocusRef.current` when set and inside the panel);
 //     focus is restored to the previously-focused element on close.
 //   - Tab/Shift-Tab cycle within the panel (focus trap).
-//   - Escape closes; backdrop click closes; clicks inside the panel do not
-//     bubble out and trigger the backdrop close.
+//   - Escape closes; backdrop click closes by default; pass
+//     `closeOnBackdrop={false}` to make backdrop clicks a no-op. Clicks
+//     inside the panel do not bubble out and trigger the backdrop close.
 //   - document.body scroll lock while open; the prior overflow value is
 //     restored on close/unmount.
 
@@ -37,10 +39,19 @@ export interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  // Default true. Set false where backdrop clicks must be a no-op (e.g. a
+  // destructive-confirm flow) so users don't lose a half-typed action.
+  // Escape still closes regardless.
+  closeOnBackdrop?: boolean;
+  // When set and the ref points at an element inside the panel, that element
+  // receives initial focus instead of the first focusable. Falls back to the
+  // first-focusable behavior when unset, when current is null, or when the
+  // element is outside the panel.
+  initialFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 export function Modal(props: ModalProps): React.JSX.Element | null {
-  const { open, onClose, title, children } = props;
+  const { open, onClose, title, children, closeOnBackdrop = true, initialFocusRef } = props;
   const panelRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -51,6 +62,19 @@ export function Modal(props: ModalProps): React.JSX.Element | null {
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  // Mirror the latest closeOnBackdrop / initialFocusRef so the open effect and
+  // the backdrop-click callback can read them without re-subscribing.
+  const closeOnBackdropRef = useRef(closeOnBackdrop);
+  useEffect(() => {
+    closeOnBackdropRef.current = closeOnBackdrop;
+  }, [closeOnBackdrop]);
+  const initialFocusRefRef = useRef<React.RefObject<HTMLElement | null> | undefined>(
+    initialFocusRef,
+  );
+  useEffect(() => {
+    initialFocusRefRef.current = initialFocusRef;
+  }, [initialFocusRef]);
 
   // Capture trigger focus + apply scroll lock + initial focus when opening;
   // restore both when closing or unmounting.
@@ -65,8 +89,10 @@ export function Modal(props: ModalProps): React.JSX.Element | null {
 
     const panel = panelRef.current;
     if (panel !== null) {
+      const requested = initialFocusRefRef.current?.current ?? null;
+      const useRequested = requested !== null && panel.contains(requested);
       const focusable = getFocusable(panel);
-      const target = focusable[0] ?? panel;
+      const target = useRequested ? requested : (focusable[0] ?? panel);
       target.focus();
     }
 
@@ -121,6 +147,7 @@ export function Modal(props: ModalProps): React.JSX.Element | null {
   }, [open]);
 
   const onBackdropClick = useCallback(() => {
+    if (!closeOnBackdropRef.current) return;
     onCloseRef.current();
   }, []);
 
