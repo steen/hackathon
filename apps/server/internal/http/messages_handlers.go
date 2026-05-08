@@ -105,7 +105,7 @@ func (h *MessagesHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid channel id")
 		return
 	}
-	uid, _, ok := userFromContext(r)
+	uid, ok := userFromContext(r)
 	if !ok {
 		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "missing user context")
 		return
