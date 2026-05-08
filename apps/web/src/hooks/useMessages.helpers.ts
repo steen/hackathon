@@ -21,10 +21,6 @@ export interface PendingMatch {
   pendingId: string;
 }
 
-// Reconnect backoff in ms — same shape useMessages and usePresence both
-// consume. Re-exported by the hook for tests that observe reconnect timing.
-export const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
-
 export const CATCHUP_LIMIT = 50;
 
 // Reconcile window: a WS frame must land within this many ms of the
