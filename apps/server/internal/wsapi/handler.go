@@ -20,12 +20,14 @@ import (
 )
 
 // testDefaultChannel is the channel a /ws upgrade lands on when the
-// caller omits ?channel= AND the handler has no cfg.ChannelLookup
-// wired. Production wiring always supplies a ChannelLookup (the SQLite
-// repo's ChannelExists), so production rejects an upgrade missing
-// ?channel= with HTTP 400 — this fallback exists only for the unit
-// tests in apps/server/internal/wsapi/* that exercise hub fan-out
-// without standing up a DB.
+// caller omits ?channel= AND the handler has neither cfg.ChannelLookup
+// nor cfg.DefaultChannelResolver wired. Production wiring supplies
+// both (ChannelLookup is the SQLite repo's ChannelExists; the
+// resolver returns the seeded `general` channel id per the L15
+// default-channel fallback in specs/plans/phase-9/ws-routing.md), so
+// this constant only fires for the unit tests in
+// apps/server/internal/wsapi/* that exercise hub fan-out without
+// standing up a DB.
 const testDefaultChannel = "#test-default"
 
 const sendBuffer = 64
@@ -68,9 +70,23 @@ const MessageBodyLimit = wsproto.MessageBodyLimit
 // On a non-nil error the upgrade is rejected with HTTP 500 and the
 // error is logged. Production wiring always supplies this; nil is a
 // test-only path.
+//
+// DefaultChannelResolver, when non-nil, supplies the channel id a
+// connection lands on when the caller omits ?channel=. Production
+// wiring resolves the seeded `general` channel id once at boot and
+// returns it from the closure; the L15 default-channel fallback in
+// specs/plans/phase-9/ws-routing.md mandates this behavior so legacy
+// callers (go-client, CLI, `chatd watch`) that historically opened
+// /ws without a channel param do not regress when ChannelLookup is
+// wired. The resolved id flows through the same ChannelLookup arm as
+// an explicit ?channel= so a misconfigured wiring (resolver returns
+// an id ChannelLookup rejects) surfaces as HTTP 404 rather than a
+// silent subscribe-to-nothing. A non-nil error from the resolver is
+// reported as HTTP 500.
 type Config struct {
-	OriginPatterns []string
-	ChannelLookup  func(ctx context.Context, id string) (bool, error)
+	OriginPatterns         []string
+	ChannelLookup          func(ctx context.Context, id string) (bool, error)
+	DefaultChannelResolver func(ctx context.Context) (string, error)
 }
 
 // connSubscriber bridges hub.Subscriber to a websocket.Conn via a buffered
@@ -189,10 +205,14 @@ func (c *connSubscriber) signalCloseFlushed() {
 //
 // Each authenticated connection subscribes to TWO Hub topics for its
 // lifetime: the channel topic (upper-folded ULID supplied via
-// ?channel=<id>; ?channel= is required when cfg.ChannelLookup is wired;
-// the test-only no-lookup path falls back to testDefaultChannel when
-// the param is absent) AND the inbox topic `user:<viewer>` derived
-// from the redeemed ws-ticket. Decision log §10 / L15.
+// ?channel=<id>; the L15 default-channel fallback in
+// specs/plans/phase-9/ws-routing.md resolves an absent ?channel= to
+// the id returned by cfg.DefaultChannelResolver when set, or rejects
+// with HTTP 400 when neither resolver nor lookup is wired by tests
+// that need an absent param to fail; the no-lookup-and-no-resolver
+// test path falls back to testDefaultChannel) AND the inbox topic
+// `user:<viewer>` derived from the redeemed ws-ticket. Decision log
+// §10 / L15.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
@@ -201,11 +221,26 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		raw := r.URL.Query().Get("channel")
 		var channel string
 		if raw == "" {
-			if cfg.ChannelLookup != nil {
+			switch {
+			case cfg.DefaultChannelResolver != nil:
+				// L15: resolve the seeded default-channel id at upgrade
+				// time. The resolved id is fed through the existing
+				// ChannelLookup arm below so a misconfigured wiring
+				// (resolver returns an id ChannelLookup rejects) surfaces
+				// as 404 rather than a silent subscribe-to-nothing.
+				resolved, err := cfg.DefaultChannelResolver(r.Context())
+				if err != nil {
+					slog.Error("ws default channel resolve", "err", err)
+					http.Error(w, "default channel resolve failed", http.StatusInternalServerError)
+					return
+				}
+				channel = resolved
+			case cfg.ChannelLookup != nil:
 				http.Error(w, "channel parameter required", http.StatusBadRequest)
 				return
+			default:
+				channel = testDefaultChannel
 			}
-			channel = testDefaultChannel
 		} else {
 			// Cap the channel-key length — a 1 MB query string would
 			// otherwise sit in the subscriber map for the lifetime of
