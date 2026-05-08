@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"hackathon/apps/server/internal/config"
 	httpapi "hackathon/apps/server/internal/http"
 	"hackathon/apps/server/internal/ratelimit"
 )
@@ -46,8 +47,19 @@ func registerChannels(mux *http.ServeMux, deps Deps, require func(http.Handler) 
 			"default_refill", writeDefault.Refill,
 		)
 	}
+	slog.Info("per-user channel-write rate limit active",
+		"burst", writeCfg.Burst,
+		"refill", writeCfg.Refill,
+	)
 	writeLimiter := ratelimit.NewIPLimiter(writeCfg)
-	writeLimit := httpapi.UserRateLimit(writeLimiter, time.Minute)
+	// Mirror IPRateLimit's audit story for the per-user channel-write
+	// limiter: rejected attempts append a row to auth_events keyed on
+	// the user id (#883). Reuse the same RateLimitAuditSink the auth
+	// feature constructs from its own *sql.DB so both 429 paths share
+	// one writer + one event kind. trustedProxy comes from the same env
+	// flag wiring.Build reads, so the audit IP matches the access-log IP.
+	auditSink := httpapi.NewRateLimitAuditSink(deps.Repo.DB())
+	writeLimit := httpapi.UserRateLimit(writeLimiter, time.Minute, auditSink, config.LoadTrustedProxy())
 
 	ch.Routes(mux, require, writeLimit, msg)
 }

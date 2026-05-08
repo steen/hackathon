@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -148,5 +148,61 @@ describe("test_web_modal_body_scroll_lock", () => {
       rerender(<Harness open={false} />);
     });
     expect(document.body.style.overflow).toBe("auto");
+  });
+});
+
+describe("test_web_modal_close_on_backdrop_prop", () => {
+  it("closeOnBackdrop is true by default — backdrop click closes", () => {
+    const onClose = vi.fn();
+    render(
+      <Modal open={true} onClose={onClose} title="T">
+        <button type="button">inner</button>
+      </Modal>,
+    );
+    fireEvent.click(screen.getByTestId("modal-backdrop"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closeOnBackdrop=false suppresses onClose on backdrop click but Escape still closes", async () => {
+    const onClose = vi.fn();
+    render(
+      <Modal open={true} onClose={onClose} title="T" closeOnBackdrop={false}>
+        <button type="button">inner</button>
+      </Modal>,
+    );
+    fireEvent.click(screen.getByTestId("modal-backdrop"));
+    expect(onClose).not.toHaveBeenCalled();
+
+    const u = userEvent.setup();
+    await u.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("test_web_modal_initial_focus_ref", () => {
+  it("focuses initialFocusRef target on open instead of the first focusable", () => {
+    function Harness(): React.JSX.Element {
+      const ref = useRef<HTMLButtonElement | null>(null);
+      return (
+        <Modal open={true} onClose={vi.fn()} title="T" initialFocusRef={ref}>
+          <button type="button">first-btn</button>
+          <button ref={ref} type="button">
+            second-btn
+          </button>
+        </Modal>
+      );
+    }
+    render(<Harness />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "second-btn" }));
+  });
+
+  it("falls back to first-focusable when initialFocusRef is unset", () => {
+    render(
+      <Modal open={true} onClose={vi.fn()} title="T">
+        <button type="button">first-btn</button>
+        <button type="button">second-btn</button>
+      </Modal>,
+    );
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "first-btn" }));
   });
 });

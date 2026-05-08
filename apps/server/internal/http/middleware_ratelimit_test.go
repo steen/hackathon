@@ -304,7 +304,7 @@ func TestIPRateLimitIgnoresXFFWhenTrustedProxyFalse(t *testing.T) {
 // id's exhaustion does not block another.
 func TestUserRateLimitKeysOnUserID(t *testing.T) {
 	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
-	rl := UserRateLimit(limiter, time.Minute)
+	rl := UserRateLimit(limiter, time.Minute, nil, false)
 	mux := stdhttp.NewServeMux()
 	mux.Handle("/x", rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		w.WriteHeader(stdhttp.StatusOK)
@@ -333,7 +333,7 @@ func TestUserRateLimitKeysOnUserID(t *testing.T) {
 // Phase 8 — UserRateLimit returns the standard envelope on rejection.
 func TestUserRateLimitEnvelopeOnRejection(t *testing.T) {
 	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
-	rl := UserRateLimit(limiter, time.Minute)
+	rl := UserRateLimit(limiter, time.Minute, nil, false)
 	h := rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		w.WriteHeader(stdhttp.StatusOK)
 	}))
@@ -368,7 +368,7 @@ func TestUserRateLimitEnvelopeOnRejection(t *testing.T) {
 // 401); without this gate the limiter would reject the empty key.
 func TestUserRateLimitPassesThroughWithoutUserID(t *testing.T) {
 	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
-	rl := UserRateLimit(limiter, time.Minute)
+	rl := UserRateLimit(limiter, time.Minute, nil, false)
 	h := rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
 		w.WriteHeader(stdhttp.StatusOK)
 	}))
