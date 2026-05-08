@@ -13,16 +13,25 @@ import {
 } from "@hackathon/chat-ui";
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
+import { useChatSocket } from "../hooks/useChatSocket.js";
 import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
+import { ChannelCreateModal } from "../components/ChannelCreateModal.js";
+import { ChannelRenameModal } from "../components/ChannelRenameModal.js";
 
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
-  const channelsState = useChannels(true);
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
-  const messagesState = useMessages(activeChannel, user?.id ?? null);
+  // Single chat-page socket. Both useMessages (message frames + reconnect
+  // catchup) and useChannels (channel-create/rename frames + reload-on-open)
+  // attach listeners to the same WebSocketClient.
+  const sharedSocket = useChatSocket(activeChannel);
+  const channelsState = useChannels(true, { socket: sharedSocket.socket });
+  const messagesState = useMessages(activeChannel, user?.id ?? null, sharedSocket);
   const presenceState = usePresence(true);
   const [draft, setDraft] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -139,7 +148,18 @@ export function Chat(): React.JSX.Element {
       ) : null}
       <div className="chat-layout__body">
         <Sidebar>
-          <h2>Channels</h2>
+          <div className="channels-header">
+            <h2>Channels</h2>
+            <button
+              type="button"
+              className="channels-header__create"
+              onClick={() => {
+                setCreateOpen(true);
+              }}
+            >
+              + New channel
+            </button>
+          </div>
           <ChannelsList
             channels={channelsState.channels}
             activeId={activeChannel}
@@ -157,7 +177,21 @@ export function Chat(): React.JSX.Element {
           <PresenceLiveRegion text={presenceAnnouncement} />
         </Sidebar>
         <main className="messages" aria-label={activeChannelName ?? "Messages"}>
-          <ChannelHeader channelName={activeChannelName} headingRef={headingRef} />
+          <div className="messages__header-row">
+            <ChannelHeader channelName={activeChannelName} headingRef={headingRef} />
+            {activeChannelName !== null && activeChannelName !== "general" ? (
+              <button
+                type="button"
+                className="messages__rename"
+                aria-label={`Rename channel ${activeChannelName}`}
+                onClick={() => {
+                  setRenameOpen(true);
+                }}
+              >
+                Rename
+              </button>
+            ) : null}
+          </div>
           <MessageList
             messages={messagesState.messages}
             resolveSender={resolveSender}
@@ -194,6 +228,29 @@ export function Chat(): React.JSX.Element {
           />
         </main>
       </div>
+      <ChannelCreateModal
+        open={createOpen}
+        onClose={() => {
+          setCreateOpen(false);
+        }}
+        onCreate={channelsState.create}
+        onCreated={(ch) => {
+          setActiveChannel(ch.id);
+          // Reset the composer-focus latch so the layout effect re-runs
+          // and lands focus on the composer of the freshly-selected
+          // channel rather than wherever Modal restored it.
+          composerFocusedRef.current = false;
+        }}
+      />
+      <ChannelRenameModal
+        open={renameOpen}
+        onClose={() => {
+          setRenameOpen(false);
+        }}
+        channelId={activeChannel}
+        currentName={activeChannelName}
+        onRename={channelsState.rename}
+      />
     </div>
   );
 }

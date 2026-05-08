@@ -4,7 +4,7 @@ import type { ConnectionStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError, userFacingMessage } from "../lib/userFacingError.js";
 import { type CancelToken, connectChannel } from "./useMessages.connect.js";
-import { BACKOFF_MS, useChatSocket } from "./useChatSocket.js";
+import { BACKOFF_MS, type UseChatSocket, useChatSocket } from "./useChatSocket.js";
 import {
   CATCHUP_LIMIT,
   makePendingRow,
@@ -37,7 +37,11 @@ interface UseMessages {
   loadOlderError: string | null;
 }
 
-export function useMessages(channelId: string | null, currentUserId?: string | null): UseMessages {
+export function useMessages(
+  channelId: string | null,
+  currentUserId?: string | null,
+  externalSocket?: UseChatSocket | null,
+): UseMessages {
   const [messages, setMessages] = useState<MessageView[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [canLoadOlder, setCanLoadOlder] = useState<boolean>(false);
@@ -57,7 +61,13 @@ export function useMessages(channelId: string | null, currentUserId?: string | n
     messagesRef.current = messages;
   }, [messages]);
 
-  const { connection, error: socketError, socket } = useChatSocket(channelId);
+  // When the caller supplies an external socket (Chat.tsx lifts the
+  // chat-page socket so useChannels can subscribe to channel-events on
+  // the same WebSocketClient), park the internal hook idle by passing
+  // null. Hooks rules: useChatSocket must always run, so swap the input
+  // rather than the call.
+  const internalSock = useChatSocket(externalSocket != null ? null : channelId);
+  const { connection, error: socketError, socket } = externalSocket ?? internalSock;
 
   useEffect(() => {
     setMessages([]);
