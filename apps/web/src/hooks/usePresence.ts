@@ -82,7 +82,7 @@ function sortUsers(users: PresenceUser[]): PresenceUser[] {
   });
 }
 
-export function usePresence(enabled: boolean): UsePresence {
+export function usePresence(enabled: boolean, channelId: string | null): UsePresence {
   const [state, setState] = useState<PresenceState>({
     users: [],
     usernames: new Map<string, string>(),
@@ -92,7 +92,7 @@ export function usePresence(enabled: boolean): UsePresence {
   });
 
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || channelId === null || channelId.length === 0) {
       setState((s) => ({
         users: [],
         // Preserve the existing reference when the directory is already
@@ -199,8 +199,13 @@ export function usePresence(enabled: boolean): UsePresence {
       // on useMessages — both deferred. Server-side AddPresence is
       // ref-counted on userID, so two sockets from the same user still
       // fire only one join/leave pair.
+      // Subscribe to the active channel so the WS upgrade carries
+      // ?channel=<id> (the server requires it). presence frames fan out
+      // via Hub.BroadcastAll to every subscriber regardless of channel,
+      // so any valid channelId here delivers the join/leave events.
       ws = new WebSocketClient({
         http: getClient().http,
+        channelId,
         backoffMs: BACKOFF_MS,
       });
       ws.on("message", (ev: WsEvent) => {
@@ -292,7 +297,7 @@ export function usePresence(enabled: boolean): UsePresence {
         ws = null;
       }
     };
-  }, [enabled]);
+  }, [enabled, channelId]);
 
   return state;
 }

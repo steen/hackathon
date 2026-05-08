@@ -31,12 +31,6 @@ import (
 	"github.com/coder/websocket"
 )
 
-// defaultChannel is the bootstrap channel every freshly-started server
-// seeds (per Phase 0/3 plans). Tests against the default WS subscription
-// route through it; centralizing the literal here keeps a future rename
-// to a single edit.
-const defaultChannel = "#general"
-
 type runningServer struct {
 	httpURL    string
 	wsURL      string
@@ -44,8 +38,13 @@ type runningServer struct {
 	dbPath     string
 	jwtSecret  string
 	inviteCode string
-	cancel     context.CancelFunc
-	wait       chan struct{}
+	// generalChannelID is the ULID of the seeded "general" channel,
+	// looked up once after server boot. Phase-2 presence tests dial /ws
+	// against this ULID; the WS handler requires ?channel= now that
+	// phase-0 boot mode is gone.
+	generalChannelID string
+	cancel           context.CancelFunc
+	wait             chan struct{}
 }
 
 type envelope struct {
@@ -158,7 +157,7 @@ func startServer(t *testing.T) *runningServer {
 		<-wait
 	})
 
-	return &runningServer{
+	srv := &runningServer{
 		httpURL:    fmt.Sprintf("http://127.0.0.1:%d", port),
 		wsURL:      fmt.Sprintf("ws://127.0.0.1:%d/ws", port),
 		port:       port,
@@ -168,6 +167,41 @@ func startServer(t *testing.T) *runningServer {
 		cancel:     cancel,
 		wait:       wait,
 	}
+	srv.generalChannelID = lookupSeededGeneralChannelID(t, srv)
+	return srv
+}
+
+// lookupSeededGeneralChannelID registers a throwaway probe user, lists
+// channels, and returns the ULID of the seeded "general" channel. Run
+// once per server boot from startServer because /api/channels requires
+// auth and the WS handler requires a real ULID via ?channel=.
+func lookupSeededGeneralChannelID(t *testing.T, srv *runningServer) string {
+	t.Helper()
+	probeName := "probe-" + randomSecret(t, 4)
+	_, tok := register(t, srv, probeName, randomSecret(t, 12))
+	status, env, raw := getJSON(t, srv, "/api/channels", tok)
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/channels: status %d body %s", status, raw)
+	}
+	if !env.OK || env.Data == nil {
+		t.Fatalf("GET /api/channels: envelope ok=%v data=%v", env.OK, env.Data)
+	}
+	var data struct {
+		Channels []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"channels"`
+	}
+	if err := json.Unmarshal(*env.Data, &data); err != nil {
+		t.Fatalf("decode channels list: %v body=%s", err, raw)
+	}
+	for _, c := range data.Channels {
+		if c.Name == "general" {
+			return c.ID
+		}
+	}
+	t.Fatalf("GET /api/channels: no seeded 'general' channel in %s", raw)
+	return ""
 }
 
 func postJSON(t *testing.T, srv *runningServer, path, bearer string, body any) (int, envelope, []byte) {
@@ -273,14 +307,16 @@ func mintTicket(t *testing.T, srv *runningServer, bearer string) string {
 }
 
 // dialAuthenticatedWS mints a one-shot ticket for `bearer` and dials
-// /ws (default channel #general). On success the returned conn is
-// already subscribed; on failure the test is failed via t.Fatalf.
+// /ws against the seeded general channel ULID. On success the returned
+// conn is already subscribed; on failure the test is failed via
+// t.Fatalf.
 func dialAuthenticatedWS(t *testing.T, srv *runningServer, bearer string) *websocket.Conn {
 	t.Helper()
 	ticket := mintTicket(t, srv, bearer)
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket, nil)
+	wsURL := fmt.Sprintf("%s?ticket=%s&channel=%s", srv.wsURL, ticket, srv.generalChannelID)
+	c, resp, err := websocket.Dial(dialCtx, wsURL, nil)
 	if err != nil {
 		body := ""
 		if resp != nil {
@@ -294,11 +330,11 @@ func dialAuthenticatedWS(t *testing.T, srv *runningServer, bearer string) *webso
 	return c
 }
 
-// fetchSubscriberCount queries /debug/subs?channel=<defaultChannel>
+// fetchSubscriberCount queries /debug/subs?channel=<seeded general id>
 // and parses "<n>\n" into an int. The endpoint is unauthenticated.
 func fetchSubscriberCount(t *testing.T, srv *runningServer) int {
 	t.Helper()
-	u := fmt.Sprintf("%s/debug/subs?channel=%s", srv.httpURL, url.QueryEscape(defaultChannel))
+	u := fmt.Sprintf("%s/debug/subs?channel=%s", srv.httpURL, url.QueryEscape(srv.generalChannelID))
 	req, err := http.NewRequest(http.MethodGet, u, nil)
 	if err != nil {
 		t.Fatalf("new GET /debug/subs: %v", err)

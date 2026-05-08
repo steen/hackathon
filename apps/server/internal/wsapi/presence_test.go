@@ -23,7 +23,7 @@ func TestPresenceJoinFiresOnFirstConnection(t *testing.T) {
 	srv := httptest.NewServer(Handler(h, ts, Config{}))
 	defer srv.Close()
 
-	// Observer connects first (#general, no auth needed) so we can see
+	// Observer connects first (test default channel) so we can see
 	// the join event for the next user. Using nil ticket store is not
 	// possible here because we want to test the auth path; instead
 	// observer uses its own ticket so we can isolate user IDs.
@@ -39,7 +39,7 @@ func TestPresenceJoinFiresOnFirstConnection(t *testing.T) {
 	}
 	defer observer.CloseNow()
 
-	if err := waitForSubscribers(h, "#general", 1, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -242,7 +242,7 @@ func TestPresenceDoesNotFireWithoutAuth(t *testing.T) {
 	defer c.CloseNow()
 
 	// Confirm subscribed.
-	if err := waitForSubscribers(h, "#general", 1, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	if h.PresenceCount() != 0 {

@@ -258,12 +258,14 @@ func startServerWithDB(t *testing.T) *runningServer {
 
 	port := freePort(t)
 	dbPath := filepath.Join(tmpDir, "chatd.sqlite")
+	jwtSecret := randomSecret(t, 32)
+	invite := randomSecret(t, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Env = append(os.Environ(),
 		fmt.Sprintf("CHAT_LISTEN_ADDR=127.0.0.1:%d", port),
-		"CHAT_JWT_SECRET="+randomSecret(t, 32),
-		"CHAT_INVITE_CODE="+randomSecret(t, 8),
+		"CHAT_JWT_SECRET="+jwtSecret,
+		"CHAT_INVITE_CODE="+invite,
 		"CHAT_DB_PATH="+dbPath,
 	)
 	cmd.Stdout = os.Stderr
@@ -290,10 +292,13 @@ func startServerWithDB(t *testing.T) *runningServer {
 	})
 
 	return &runningServer{
-		httpURL: fmt.Sprintf("http://127.0.0.1:%d", port),
-		wsURL:   fmt.Sprintf("ws://127.0.0.1:%d/ws", port),
-		port:    port,
-		cancel:  cancel,
-		wait:    wait,
+		httpURL:    fmt.Sprintf("http://127.0.0.1:%d", port),
+		wsURL:      fmt.Sprintf("ws://127.0.0.1:%d/ws", port),
+		port:       port,
+		dbPath:     dbPath,
+		jwtSecret:  jwtSecret,
+		inviteCode: invite,
+		cancel:     cancel,
+		wait:       wait,
 	}
 }

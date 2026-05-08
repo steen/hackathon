@@ -28,7 +28,7 @@ export function Chat(): React.JSX.Element {
   const sharedSocket = useChatSocket(activeChannel);
   const channelsState = useChannels(true, { socket: sharedSocket.socket });
   const messagesState = useMessages(activeChannel, user?.id ?? null, sharedSocket);
-  const presenceState = usePresence(true);
+  const presenceState = usePresence(true, activeChannel);
   const [draft, setDraft] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);

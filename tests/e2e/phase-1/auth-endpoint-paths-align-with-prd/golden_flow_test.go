@@ -235,7 +235,27 @@ func TestAC4_PathRenameIsBehaviourPreserving(t *testing.T) {
 	}
 
 	// --- 5. /ws upgrade redeems the ticket ---------------------------
-	wsURL := "ws" + strings.TrimPrefix(srv.httpURL, "http") + "/ws?ticket=" + ticket
+	// Look up the seeded "general" channel ULID; the WS handler now
+	// requires ?channel= against a real ULID.
+	channelsStatus, channelsEnv := doJSON(t, client, http.MethodGet,
+		srv.httpURL+"/api/channels", nil, loginToken)
+	if channelsStatus != http.StatusOK {
+		t.Fatalf("/api/channels: status=%d body=%s", channelsStatus, mustJSON(channelsEnv))
+	}
+	channelsData, _ := channelsEnv["data"].(map[string]any)
+	channelsList, _ := channelsData["channels"].([]any)
+	channelID := ""
+	for _, raw := range channelsList {
+		row, _ := raw.(map[string]any)
+		if name, _ := row["name"].(string); name == "general" {
+			channelID, _ = row["id"].(string)
+			break
+		}
+	}
+	if channelID == "" {
+		t.Fatalf("seeded 'general' channel not found in /api/channels: %s", mustJSON(channelsEnv))
+	}
+	wsURL := "ws" + strings.TrimPrefix(srv.httpURL, "http") + "/ws?ticket=" + ticket + "&channel=" + channelID
 	wsCtx, wsCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer wsCancel()
 	conn, resp, err := websocket.Dial(wsCtx, wsURL, nil)

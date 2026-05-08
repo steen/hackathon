@@ -35,19 +35,6 @@ func TestRemovePresenceUnknownIsNoop(t *testing.T) {
 	}
 }
 
-func TestPresenceEmptyUserIDIgnored(t *testing.T) {
-	h := New()
-	if first := h.AddPresence(""); first {
-		t.Fatalf("empty userID must be a no-op (got first=true)")
-	}
-	if last := h.RemovePresence(""); last {
-		t.Fatalf("empty userID remove must be a no-op (got last=true)")
-	}
-	if h.PresenceCount() != 0 {
-		t.Fatalf("empty userID must not occupy a presence slot")
-	}
-}
-
 func TestOnlineUserIDsReflectsLiveSet(t *testing.T) {
 	h := New()
 	h.AddPresence("u1")

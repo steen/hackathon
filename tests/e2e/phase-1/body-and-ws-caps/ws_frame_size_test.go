@@ -43,10 +43,13 @@ func TestAC1_WSFrameOver64KiBClosesConnection(t *testing.T) {
 	srv := startServer(t)
 
 	t.Run("over_limit_closes_1009", func(t *testing.T) {
+		bearer, ticket := registerAndMintTicket(t, srv)
+		channelID := seededChannelID(t, srv, bearer)
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		conn, resp, err := websocket.Dial(ctx, srv.wsURL, nil)
+		conn, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}
@@ -62,6 +65,12 @@ func TestAC1_WSFrameOver64KiBClosesConnection(t *testing.T) {
 		// Lift the client read limit so a long server-side close
 		// reason is never truncated before we observe the code.
 		conn.SetReadLimit(-1)
+
+		// Drain the self-join presence frame the server emits to the
+		// authenticated subscriber on first connect.
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatalf("read self-join: %v", err)
+		}
 
 		oversize := bytes.Repeat([]byte("x"), 64*1024+1)
 		// Write may succeed (frame goes onto the wire before the
@@ -86,10 +95,13 @@ func TestAC1_WSFrameOver64KiBClosesConnection(t *testing.T) {
 	})
 
 	t.Run("at_limit_64KiB_not_closed_by_read_limit", func(t *testing.T) {
+		bearer, ticket := registerAndMintTicket(t, srv)
+		channelID := seededChannelID(t, srv, bearer)
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		conn, resp, err := websocket.Dial(ctx, srv.wsURL, nil)
+		conn, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 		if err != nil {
 			t.Fatalf("dial: %v", err)
 		}
@@ -100,6 +112,11 @@ func TestAC1_WSFrameOver64KiBClosesConnection(t *testing.T) {
 		}()
 		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(-1)
+
+		// Drain the self-join presence frame.
+		if _, _, err := conn.Read(ctx); err != nil {
+			t.Fatalf("read self-join: %v", err)
+		}
 
 		atLimit := bytes.Repeat([]byte("x"), 64*1024)
 		if err := conn.Write(ctx, websocket.MessageBinary, atLimit); err != nil {

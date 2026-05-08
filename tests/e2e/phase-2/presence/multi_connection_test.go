@@ -61,7 +61,7 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 1
 	}) {
-		t.Fatalf("debug/subs#general did not reach 1 subscriber within 2s before alice dials")
+		t.Fatalf("debug/subs (seeded general channel) did not reach 1 subscriber within 2s before alice dials")
 	}
 
 	// Alice opens three connections. Track each so the test can close
@@ -76,7 +76,7 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if !waitFor(3*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 4
 	}) {
-		t.Fatalf("debug/subs#general did not reach 4 subscribers within 3s (got %d)", fetchSubscriberCount(t, srv))
+		t.Fatalf("debug/subs (seeded general channel) did not reach 4 subscribers within 3s (got %d)", fetchSubscriberCount(t, srv))
 	}
 
 	// Step 1: only one join event must have fired for alice across
@@ -120,7 +120,7 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 3
 	}) {
-		t.Fatalf("debug/subs#general did not drop to 3 subscribers within 2s after closing aliceConn1 (got %d)", fetchSubscriberCount(t, srv))
+		t.Fatalf("debug/subs (seeded general channel) did not drop to 3 subscribers within 2s after closing aliceConn1 (got %d)", fetchSubscriberCount(t, srv))
 	}
 	if !containsID(fetchPresenceUsers(t, srv, bobTok), aliceID) {
 		t.Errorf("/api/presence dropped alice (id=%s) after closing 1 of 3 connections — AC-5 requires online while ≥1 connection open", aliceID)
@@ -139,7 +139,7 @@ func TestPresenceAC5_SameUserMultipleConnectionsCountedOnceUntilLastCloses(t *te
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 2
 	}) {
-		t.Fatalf("debug/subs#general did not drop to 2 subscribers within 2s after closing aliceConn2 (got %d)", fetchSubscriberCount(t, srv))
+		t.Fatalf("debug/subs (seeded general channel) did not drop to 2 subscribers within 2s after closing aliceConn2 (got %d)", fetchSubscriberCount(t, srv))
 	}
 	if !containsID(fetchPresenceUsers(t, srv, bobTok), aliceID) {
 		t.Errorf("/api/presence dropped alice (id=%s) after closing 2 of 3 connections — AC-5 requires online while ≥1 connection open", aliceID)

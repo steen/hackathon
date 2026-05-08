@@ -27,28 +27,21 @@ type healthEnvelope struct {
 }
 
 func TestHealthz_Always200(t *testing.T) {
-	for _, name := range []string{"with-repo", "without-repo"} {
-		t.Run(name, func(t *testing.T) {
-			deps := Deps{Hub: hub.New()}
-			if name == "with-repo" {
-				deps.Repo = newHealthRepo(t)
-			}
+	deps := Deps{Hub: hub.New(), Repo: newHealthRepo(t)}
 
-			mux := http.NewServeMux()
-			registerHealth(mux, deps)
+	mux := http.NewServeMux()
+	registerHealth(mux, deps)
 
-			req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
-			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, req)
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
 
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status: got %d want 200, body=%s", rec.Code, rec.Body.String())
-			}
-			env := decodeHealthEnvelope(t, rec.Body.Bytes())
-			if !env.OK || env.Data == nil || env.Data.Status != "ok" || env.Error != nil {
-				t.Fatalf("envelope: got %+v, want ok=true data.status=ok error=nil", env)
-			}
-		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d want 200, body=%s", rec.Code, rec.Body.String())
+	}
+	env := decodeHealthEnvelope(t, rec.Body.Bytes())
+	if !env.OK || env.Data == nil || env.Data.Status != "ok" || env.Error != nil {
+		t.Fatalf("envelope: got %+v, want ok=true data.status=ok error=nil", env)
 	}
 }
 
@@ -100,25 +93,6 @@ func TestReadyz_PingFailure503(t *testing.T) {
 	}
 	if env.Data != nil {
 		t.Fatalf("data: got %+v want nil", env.Data)
-	}
-}
-
-func TestReadyz_NilRepo200(t *testing.T) {
-	deps := Deps{Hub: hub.New()} // Repo nil — phase-0 no-DB boot path
-
-	mux := http.NewServeMux()
-	registerHealth(mux, deps)
-
-	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status: got %d want 200, body=%s", rec.Code, rec.Body.String())
-	}
-	env := decodeHealthEnvelope(t, rec.Body.Bytes())
-	if !env.OK || env.Data == nil || env.Data.Status != "ok" || env.Error != nil {
-		t.Fatalf("envelope: got %+v, want ok=true data.status=ok error=nil", env)
 	}
 }
 

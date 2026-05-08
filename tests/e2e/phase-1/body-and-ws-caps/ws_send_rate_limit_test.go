@@ -28,11 +28,13 @@ import (
 // surfaces here instead of silently passing.
 func TestAC2_WSSendRateLimitClosesPolicyViolation(t *testing.T) {
 	srv := startServer(t)
+	bearer, ticket := registerAndMintTicket(t, srv)
+	channelID := seededChannelID(t, srv, bearer)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	conn, resp, err := websocket.Dial(ctx, srv.wsURL, nil)
+	conn, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

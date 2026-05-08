@@ -14,6 +14,7 @@ func baseValid() Config {
 	return Config{
 		JWTSecret:       validSecret,
 		InviteCode:      "team-invite-2026",
+		DBPath:          "/tmp/test.db",
 		ListenAddr:      "127.0.0.1:8080",
 		AllowPublicBind: false,
 	}
@@ -28,6 +29,7 @@ func TestValidate_AcceptsBaseline(t *testing.T) {
 	want := []string{
 		"jwt_secret_present_and_strong",
 		"invite_code_present",
+		"db_path_present",
 		"bind_address_loopback_or_overridden",
 		"bcrypt_cost_within_range",
 	}
@@ -214,6 +216,19 @@ func TestUS11_RejectsMissingInviteCode(t *testing.T) {
 	}
 }
 
+// CHAT_DB_PATH is required at startup; phase-0 boot mode (no DB) is gone.
+func TestValidate_RejectsMissingDBPath(t *testing.T) {
+	c := baseValid()
+	c.DBPath = ""
+	_, err := c.Validate()
+	if err == nil {
+		t.Fatal("expected rejection for missing db path")
+	}
+	if !strings.Contains(err.Error(), EnvDBPath) {
+		t.Errorf("error should mention %s, got %q", EnvDBPath, err.Error())
+	}
+}
+
 func TestLoad_AppliesDefaults(t *testing.T) {
 	t.Setenv(EnvJWTSecret, "")
 	t.Setenv(EnvInviteCode, "")
@@ -231,6 +246,7 @@ func TestLoad_AppliesDefaults(t *testing.T) {
 func TestLoad_ReadsEnv(t *testing.T) {
 	t.Setenv(EnvJWTSecret, validSecret)
 	t.Setenv(EnvInviteCode, "abc")
+	t.Setenv(EnvDBPath, "/tmp/x.db")
 	t.Setenv(EnvListenAddr, "0.0.0.0:9000")
 	t.Setenv(EnvAllowPublicBind, "1")
 	c := Load()
@@ -239,6 +255,9 @@ func TestLoad_ReadsEnv(t *testing.T) {
 	}
 	if c.InviteCode != "abc" {
 		t.Errorf("InviteCode = %q, want %q", c.InviteCode, "abc")
+	}
+	if c.DBPath != "/tmp/x.db" {
+		t.Errorf("DBPath = %q, want %q", c.DBPath, "/tmp/x.db")
 	}
 	if c.ListenAddr != "0.0.0.0:9000" {
 		t.Errorf("ListenAddr = %q", c.ListenAddr)
@@ -462,6 +481,7 @@ func TestValidate_BcryptCost_AfterPriorChecks(t *testing.T) {
 	want := []string{
 		"jwt_secret_present_and_strong",
 		"invite_code_present",
+		"db_path_present",
 		"bind_address_loopback_or_overridden",
 	}
 	if len(checks) != len(want) {

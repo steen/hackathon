@@ -20,6 +20,7 @@ func TestAC5_WSTicket_OneShot_BoundToUser(t *testing.T) {
 	password := randomSecret(t, 12)
 	register(t, srv, username, password)
 	tok := login(t, srv, username, password)
+	channelID := seededGeneralChannelID(t, srv, tok)
 
 	// /ws-ticket → 200 envelope with non-empty ticket.
 	ticket := mintTicket(t, srv, tok)
@@ -30,7 +31,7 @@ func TestAC5_WSTicket_OneShot_BoundToUser(t *testing.T) {
 	// Dial /ws with the ticket → 101.
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket, nil)
+	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err != nil {
 		body := ""
 		if resp != nil {
@@ -48,7 +49,7 @@ func TestAC5_WSTicket_OneShot_BoundToUser(t *testing.T) {
 	// the upgrade is refused.
 	dialCtx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
-	c2, resp2, err := websocket.Dial(dialCtx2, srv.wsURL+"?ticket="+ticket, nil)
+	c2, resp2, err := websocket.Dial(dialCtx2, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err == nil {
 		c2.CloseNow()
 		t.Fatalf("dial /ws with reused ticket succeeded; want failure")
@@ -77,7 +78,7 @@ func TestAC5_WSTicket_OneShot_BoundToUser(t *testing.T) {
 
 	dialCtx3, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel3()
-	c3, resp3, err := websocket.Dial(dialCtx3, srv.wsURL+"?ticket="+otherTicket, nil)
+	c3, resp3, err := websocket.Dial(dialCtx3, srv.wsURL+"?ticket="+otherTicket+"&channel="+channelID, nil)
 	if err != nil {
 		t.Fatalf("dial /ws with bob's ticket: %v (resp=%v)", err, resp3)
 	}
@@ -100,6 +101,7 @@ func TestAC5_WSTicket_ExpiresAfter30Seconds(t *testing.T) {
 	password := randomSecret(t, 12)
 	register(t, srv, username, password)
 	tok := login(t, srv, username, password)
+	channelID := seededGeneralChannelID(t, srv, tok)
 	ticket := mintTicket(t, srv, tok)
 
 	// TicketTTL is 30s in the production code (apps/server/internal/auth/tickets.go).
@@ -107,7 +109,7 @@ func TestAC5_WSTicket_ExpiresAfter30Seconds(t *testing.T) {
 
 	dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket, nil)
+	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err == nil {
 		c.CloseNow()
 		t.Fatalf("dial /ws with expired ticket succeeded; want failure (resp=%v)", resp)

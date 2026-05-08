@@ -74,9 +74,9 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 
 | Var | Required | Default | Purpose |
 |-----|----------|---------|---------|
-| `CHAT_JWT_SECRET` | yes | — | JWT signing key. ≥32 ASCII bytes, ≥5 distinct bytes, not a single repeated char, not on the dev-default denylist (`change-me`, `secret`, `password`, `dev`, `test`, `placeholder`, `hackathon`, …). Validated unconditionally at startup, even when `CHAT_DB_PATH` is unset. |
+| `CHAT_JWT_SECRET` | yes | — | JWT signing key. ≥32 ASCII bytes, ≥5 distinct bytes, not a single repeated char, not on the dev-default denylist (`change-me`, `secret`, `password`, `dev`, `test`, `placeholder`, `hackathon`, …). Validated unconditionally at startup. |
 | `CHAT_INVITE_CODE` | yes | — | Gate code for registration. Any non-empty string. Validated unconditionally at startup. |
-| `CHAT_DB_PATH` | for the auth/persistence boot path | — | SQLite file path. When set, the server mounts the auth + channels + messages handlers and boots the migration runner. When unset, the server runs in **phase-0 mode** with the WS hub and `/debug/subs` only (no auth, no SQLite); not used by `scripts/smoke.sh` (which sets a `$WORK_DIR`-scoped DB path) and not intended for real use. |
+| `CHAT_DB_PATH` | yes | — | SQLite file path. The server opens it at boot, runs the migration runner, and mounts the auth + channels + messages handlers. Validated unconditionally at startup. |
 | `CHAT_LISTEN_ADDR` | no | `127.0.0.1:8080` | `host:port` to bind. Non-loopback hosts are rejected unless `CHAT_ALLOW_PUBLIC_BIND=1`. |
 | `CHAT_ALLOW_PUBLIC_BIND` | no | unset | Set to `1` to allow a non-loopback bind (e.g. `0.0.0.0:8080`). Without `CHAT_TRUSTED_PROXY=1`, the server logs a `WARN` because per-IP rate limits collapse onto the proxy IP behind a reverse proxy (PRD §9). |
 | `CHAT_ALLOWED_ORIGINS` | no | same-origin only | Comma-separated WebSocket `Origin` allowlist. Stray empty entries are dropped. |
@@ -98,7 +98,6 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 - **Web app loads but registration fails with a 4xx** — the invite code in the browser must match `$CHAT_INVITE_CODE` in the server's shell.
 - **Web app loads but WebSocket doesn't connect** — check the server is on `127.0.0.1:8080` (Vite proxies there); if you moved it, set `CHAT_ALLOWED_ORIGINS=http://localhost:5173` and adjust the Vite proxy.
 - **`port 5173 is already in use` / `port 8080 is already in use`** — kill the stragglers, or set `CHAT_LISTEN_ADDR=127.0.0.1:<port>` (server) and rerun `pnpm dev` after editing `apps/web/vite.config.ts`'s proxy target.
-- **Phase-0 mode (no auth, no DB)** — happens when `CHAT_DB_PATH` is unset. Register/login endpoints are not mounted; use it only for the smoke harness.
 
 ## Tests and CI mirror
 

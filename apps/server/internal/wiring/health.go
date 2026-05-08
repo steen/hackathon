@@ -20,20 +20,12 @@ const healthPingTimeout = time.Second
 // fallback never shadows the healthz/readyz patterns. ServeMux
 // longest-prefix matching protects us either way for these explicit
 // patterns, but the ordering keeps the dependency obvious.
-//
-// In the no-DB phase-0 boot path (Deps.Repo == nil) /readyz returns
-// 200: there is no DB to be unready against, and a 503 there would
-// break smoke.sh's no-DB modes.
 func registerHealth(mux *http.ServeMux, deps Deps) {
 	mux.Handle("GET /healthz", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		httpapi.WriteOK(w, http.StatusOK, map[string]any{"status": "ok"})
 	}))
 
 	mux.Handle("GET /readyz", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if deps.Repo == nil {
-			httpapi.WriteOK(w, http.StatusOK, map[string]any{"status": "ok"})
-			return
-		}
 		ctx, cancel := context.WithTimeout(r.Context(), healthPingTimeout)
 		defer cancel()
 		if err := deps.Repo.DB().PingContext(ctx); err != nil {

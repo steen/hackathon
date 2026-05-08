@@ -154,10 +154,25 @@ func TestAC3_GoClientAuthTransport(t *testing.T) {
 		// upgrade. The sniffer captures the upgrade GET regardless of
 		// which ticket value Watch uses, so the assertion below is on
 		// the redemption shape — `?ticket=<hex>` — not on the literal
-		// ticket the test minted above.
+		// ticket the test minted above. The server now requires
+		// ?channel=<id>, so look up the seeded "general" channel first.
+		channels, err := client.ListChannels(ctx)
+		if err != nil {
+			t.Fatalf("ListChannels: %v", err)
+		}
+		var channelID string
+		for _, ch := range channels {
+			if ch.Name == "general" {
+				channelID = string(ch.ID)
+				break
+			}
+		}
+		if channelID == "" {
+			t.Fatalf("seeded 'general' channel not found")
+		}
 		watchCtx, watchCancel := context.WithCancel(ctx)
 		defer watchCancel()
-		events, err := client.Watch(watchCtx, goclient.WatchOptions{})
+		events, err := client.Watch(watchCtx, goclient.WatchOptions{ChannelID: channelID})
 		if err != nil {
 			t.Fatalf("Watch: %v", err)
 		}
@@ -199,9 +214,23 @@ func TestAC3_GoClientAuthTransport(t *testing.T) {
 			t.Fatalf("Login did not store a token; AC-3 invariant is unobservable without one")
 		}
 
+		channels, err := client.ListChannels(ctx)
+		if err != nil {
+			t.Fatalf("ListChannels: %v", err)
+		}
+		var channelID string
+		for _, ch := range channels {
+			if ch.Name == "general" {
+				channelID = string(ch.ID)
+				break
+			}
+		}
+		if channelID == "" {
+			t.Fatalf("seeded 'general' channel not found")
+		}
 		watchCtx, watchCancel := context.WithCancel(ctx)
 		defer watchCancel()
-		events, err := client.Watch(watchCtx, goclient.WatchOptions{})
+		events, err := client.Watch(watchCtx, goclient.WatchOptions{ChannelID: channelID})
 		if err != nil {
 			t.Fatalf("Watch: %v", err)
 		}

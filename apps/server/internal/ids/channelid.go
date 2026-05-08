@@ -12,10 +12,6 @@ import "strings"
 // Crockford-base32 ULIDs use 0-9 and A-Z; the validator accepts that
 // alphabet rather than re-validating against the stricter ULID checksum,
 // matching the prior in-tree check at channels_handlers.go.
-//
-// The legacy `defaultChannel` sentinel ("#general") is NOT a ULID and is
-// not normalized here — callers gate the sentinel separately and only
-// invoke this helper for non-sentinel ids.
 func NormalizeChannelID(raw string) (string, bool) {
 	id := strings.ToUpper(raw)
 	if len(id) != 26 {

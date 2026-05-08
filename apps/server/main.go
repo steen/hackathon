@@ -89,22 +89,18 @@ func run() error {
 		"count", len(deps.AllowedOrigins),
 	)
 
-	// openAndMigrate, requireSecret and other bootstrap helpers live in boot.go.
-	sqlDB, repository, err := openAndMigrate(os.Getenv(config.EnvDBPath))
+	// openAndMigrate and other bootstrap helpers live in boot.go.
+	// CHAT_DB_PATH is required (config.Validate enforces it above) so
+	// openAndMigrate always returns a non-nil sqlDB on success.
+	sqlDB, repository, err := openAndMigrate(cfg.DBPath)
 	if err != nil {
 		return err
 	}
-	if sqlDB != nil {
-		defer func() { _ = sqlDB.Close() }()
-		jwtSecret, err := requireSecret(config.EnvJWTSecret, config.EnvDBPath)
-		if err != nil {
-			return err
-		}
-		deps.Repo = repository
-		deps.JWTSecret = jwtSecret
-		deps.InviteCode = os.Getenv(config.EnvInviteCode)
-		slog.Info("db ready", "path", os.Getenv(config.EnvDBPath))
-	}
+	defer func() { _ = sqlDB.Close() }()
+	deps.Repo = repository
+	deps.JWTSecret = []byte(cfg.JWTSecret)
+	deps.InviteCode = cfg.InviteCode
+	slog.Info("db ready", "path", cfg.DBPath)
 
 	srv := &http.Server{
 		Addr:              listenAddr,

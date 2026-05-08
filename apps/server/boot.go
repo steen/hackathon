@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"time"
 
 	"hackathon/apps/server/internal/auth"
@@ -16,12 +15,10 @@ import (
 // migrations, and returns the connection plus a fresh repo bound to it.
 // The caller owns the *sql.DB and must Close it on shutdown.
 //
-// Returns (nil, nil, nil) if dbPath is empty — the phase-0 boot path
-// used by scripts/smoke.sh's no-DB modes runs without a SQLite file.
+// CHAT_DB_PATH is required at startup (config.Validate enforces it
+// before this function is called); an empty path here is a programmer
+// error and surfaces as the underlying db.Open failure.
 func openAndMigrate(dbPath string) (*sql.DB, *repo.Repo, error) {
-	if dbPath == "" {
-		return nil, nil, nil
-	}
 	sqlDB, err := appdb.Open(dbPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("db open: %w", err)
@@ -49,15 +46,4 @@ func openAndMigrate(dbPath string) (*sql.DB, *repo.Repo, error) {
 // on an unexpected error before opening a port.
 func applyBcryptCost(cost int) error {
 	return auth.SetBcryptCost(cost)
-}
-
-// requireSecret reads env[name] and returns its bytes; errors if empty.
-// Used for CHAT_JWT_SECRET, which is mandatory whenever CHAT_DB_PATH
-// is set (the auth feature refuses to start without it).
-func requireSecret(name, whenSet string) ([]byte, error) {
-	v := os.Getenv(name)
-	if v == "" {
-		return nil, fmt.Errorf("config: %s must be set when %s is set", name, whenSet)
-	}
-	return []byte(v), nil
 }

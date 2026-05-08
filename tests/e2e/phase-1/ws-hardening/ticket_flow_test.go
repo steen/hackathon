@@ -26,12 +26,13 @@ import (
 func TestAC2_WSHardening_TicketRequired_SingleUse(t *testing.T) {
 	srv := startServer(t, startServerOpts{})
 
+	channelID := seededChannelID(t, srv)
 	ticket := mintTicket(t, srv)
 
 	// First redemption: must succeed (101).
 	ctx1, cancel1 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel1()
-	c1, resp1, err := websocket.Dial(ctx1, srv.wsURL+"?ticket="+ticket, nil)
+	c1, resp1, err := websocket.Dial(ctx1, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err != nil {
 		body := ""
 		if resp1 != nil {
@@ -54,7 +55,7 @@ func TestAC2_WSHardening_TicketRequired_SingleUse(t *testing.T) {
 	// server's 401 body when the upgrade is refused.
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
-	c2, resp2, err := websocket.Dial(ctx2, srv.wsURL+"?ticket="+ticket, nil)
+	c2, resp2, err := websocket.Dial(ctx2, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err == nil {
 		c2.CloseNow()
 		t.Fatalf("second dial with reused ticket succeeded; want failure")
@@ -86,13 +87,14 @@ func TestAC2_WSHardening_TicketExpiresAfter30Seconds(t *testing.T) {
 
 	srv := startServer(t, startServerOpts{})
 
+	channelID := seededChannelID(t, srv)
 	ticket := mintTicket(t, srv)
 
 	time.Sleep(31 * time.Second)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	c, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket, nil)
+	c, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 	if err == nil {
 		c.CloseNow()
 		t.Fatalf("dial with expired ticket succeeded; want failure (resp=%v)", resp)

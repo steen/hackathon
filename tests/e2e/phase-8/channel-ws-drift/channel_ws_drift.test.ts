@@ -43,9 +43,13 @@ import {
   type Channel,
   type ChannelEvent,
   type Event as WsEvent,
+  type WebSocketCtor,
 } from "@hackathon/api-client";
 
-const WSCtor = NodeWebSocket as unknown as new (url: string) => WebSocket;
+// Cast through `unknown` because the `ws` package's WebSocket types
+// `onopen` against the DOM `Event`, while api-client's WebSocketLike
+// uses `(ev: unknown) => void`. The runtime shapes match.
+const WSCtor = NodeWebSocket as unknown as WebSocketCtor;
 
 interface ObserverLine {
   event: string;
@@ -201,22 +205,29 @@ function startTsSubscription(): TsSubscription {
     openReject = rej;
   });
 
-  const ws = client.websocket();
-  ws.on("open", () => {
-    openResolve();
-  });
-  ws.on("error", (err) => {
-    openReject(err instanceof Error ? err : new Error(String(err)));
-  });
-  ws.on("message", (ev: WsEvent) => {
-    if (!isChannelEvent(ev)) return;
-    channels.push(ev);
-    const w = waiters.shift();
-    if (w) w(ev);
-  });
-
+  let ws: ReturnType<typeof client.websocket>;
   const setup = (async (): Promise<void> => {
     await client.register(username, password, inviteCode());
+    // The WS handler now requires ?channel=<id>; subscribe to the
+    // seeded "general" channel. channel:create / channel:rename events
+    // fan out via Hub.BroadcastAll, so the observer still sees them
+    // regardless of which channel it's on.
+    const list = await client.listChannels();
+    const general = list.find((ch) => ch.name === "general");
+    if (!general) throw new Error("seeded 'general' channel not found");
+    ws = client.websocket(general.id);
+    ws.on("open", () => {
+      openResolve();
+    });
+    ws.on("error", (err) => {
+      openReject(err instanceof Error ? err : new Error(String(err)));
+    });
+    ws.on("message", (ev: WsEvent) => {
+      if (!isChannelEvent(ev)) return;
+      channels.push(ev);
+      const w = waiters.shift();
+      if (w) w(ev);
+    });
     await ws.connect();
     await opened;
   })();

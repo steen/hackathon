@@ -322,36 +322,12 @@ func dialWSChannel(t *testing.T, srv *runningServer, ticket, channel string) (*w
 	return websocket.Dial(ctx, url, nil)
 }
 
-// AC-3: WS dial succeeds for the legacy `#general` sentinel and for a
-// freshly created ULID channel. The verbatim AC reads:
-//
-//	"For the legacy `#general` and the seeded ULID channels, validation
-//	 passes."
-//
-// We use a created (rather than seeded) ULID because the seeded set
-// depends on bootstrap state we do not own here; the lookup path is
-// the same — repository.ChannelExists returns true for any row in
-// `channels`.
+// AC-3: WS dial succeeds for a freshly created ULID channel. The
+// historical `#general` sentinel arm was removed when the phase-0 boot
+// mode was retired; only ULID channels are valid on the wire now.
 func TestAC3_WSUpgrade_KnownChannels_Pass(t *testing.T) {
 	srv := startServer(t)
 	bearer := register(t, srv)
-
-	// `#general` legacy sentinel.
-	t.Run("legacy #general", func(t *testing.T) {
-		ticket := mintWSTicket(t, srv, bearer)
-		conn, resp, err := dialWSChannel(t, srv, ticket, "%23general")
-		if err != nil {
-			body := ""
-			if resp != nil {
-				body = resp.Status
-			}
-			t.Fatalf("AC-3: dial #general: %v (resp=%s)", err, body)
-		}
-		defer conn.CloseNow()
-		if resp == nil || resp.StatusCode != http.StatusSwitchingProtocols {
-			t.Fatalf("AC-3: #general status=%v, want 101", resp)
-		}
-	})
 
 	// Freshly created ULID channel.
 	t.Run("created ULID channel", func(t *testing.T) {
