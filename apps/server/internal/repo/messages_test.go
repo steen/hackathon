@@ -30,14 +30,14 @@ func mustUser(t *testing.T, r *repo.Repo) string {
 	return id
 }
 
-// US-5 — InsertMessage persists and returns the row.
-func TestInsertMessagePersistsRow(t *testing.T) {
+// US-5 — InsertMessageTx persists and returns the row.
+func TestInsertMessageTxPersistsRow(t *testing.T) {
 	r, db := newRepo(t)
 	chID := mustChannel(t, r, "general")
 	uid := mustUser(t, r)
 
 	id := ids.NewULID()
-	m, err := r.InsertMessage(context.Background(), id, chID, uid, "hi", time.Now())
+	m, err := r.InsertMessageTx(context.Background(), id, chID, uid, "hi", time.Now())
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestListMessagesReturnsNewestFirstAndPaginates(t *testing.T) {
 	var ids26 [5]string
 	for i := range ids26 {
 		id := ids.NewULID()
-		if _, err := r.InsertMessage(context.Background(), id, chID, uid, "m", time.Now()); err != nil {
+		if _, err := r.InsertMessageTx(context.Background(), id, chID, uid, "m", time.Now()); err != nil {
 			t.Fatalf("Insert[%d]: %v", i, err)
 		}
 		ids26[i] = id
@@ -99,7 +99,7 @@ func TestListMessagesCapsLimit(t *testing.T) {
 	chID := mustChannel(t, r, "general")
 	uid := mustUser(t, r)
 	for i := 0; i < 5; i++ {
-		_, _ = r.InsertMessage(context.Background(), ids.NewULID(), chID, uid, "m", time.Now())
+		_, _ = r.InsertMessageTx(context.Background(), ids.NewULID(), chID, uid, "m", time.Now())
 	}
 	got, err := r.ListMessages(context.Background(), chID, "", 9999)
 	if err != nil {
