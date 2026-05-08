@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import type { Channel } from "@hackathon/api-client";
+import type { Channel, Event as WsEvent, ChannelEvent } from "@hackathon/api-client";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError } from "../lib/userFacingError.js";
 import type { ChatSocket } from "./useChatSocket.js";
+
+// Narrow the WS event union against ChannelEvent. The `Event` union
+// includes `UnknownEvent` (type: string), so `ev.type === "channel"`
+// alone leaves `ev.data` as `unknown`; this guard isolates the safe
+// projection so a future field rename in ChannelEvent.data fails type
+// checking here instead of slipping past a hand-written cast.
+function isChannelEvent(ev: WsEvent): ev is ChannelEvent {
+  return ev.type === "channel";
+}
 
 interface ChannelsState {
   channels: Channel[];
@@ -73,12 +82,11 @@ export function useChannels(enabled: boolean, opts: UseChannelsOpts = {}): UseCh
   useEffect(() => {
     if (!enabled || socket === undefined) return;
     const offMessage = socket.subscribe("message", (ev) => {
-      if (ev.type !== "channel") return;
-      const data = ev.data as { kind: "create" | "rename"; channel: Channel };
-      const next = data.channel;
+      if (!isChannelEvent(ev)) return;
+      const next = ev.data.channel;
       setState((s) => {
         const existing = s.channels.find((c) => c.id === next.id);
-        if (data.kind === "create") {
+        if (ev.data.kind === "create") {
           if (existing !== undefined) return s;
           return { ...s, channels: [...s.channels, next] };
         }
