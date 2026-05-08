@@ -41,7 +41,17 @@ func (r *Repo) UpsertChannelRead(ctx context.Context, channelID, userID, lastRea
 // channel_reads.last_read_message_id column is NOT NULL per migration
 // 0005, so writing NULL would violate the schema.
 //
-// The whole sweep runs inside one BeginTx → ExecContext → Commit
+// Hot-path pre-check: every GET /api/channels lands here, but after
+// the first listing the viewer is fully materialized and the INSERT
+// would write zero rows. Compare two cheap counts (viewer's
+// channel_reads rows vs. channels with a tip). When they match, skip
+// the BEGIN/COMMIT entirely — issue #937. The race window where a new
+// channel's first message lands between the two SELECTs is harmless:
+// the next GET resolves the gap, and unread_count for an
+// un-materialized channel still computes correctly via COALESCE in
+// the listing SELECT.
+//
+// The sweep runs inside one BeginTx → ExecContext → Commit
 // transaction, mirroring auth_store.go:81 (decision log L21). The
 // transaction makes the materialization atomic with a future listing
 // SELECT that joins channel_reads in the same tx (G2), but it is also
@@ -49,6 +59,19 @@ func (r *Repo) UpsertChannelRead(ctx context.Context, channelID, userID, lastRea
 // because the WHERE NOT EXISTS clause filters out already-materialized
 // rows.
 func (r *Repo) MaterializeChannelReadsTx(ctx context.Context, viewerUserID string) error {
+	var readsCount, channelsWithTipCount int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT
+		     (SELECT COUNT(*) FROM channel_reads WHERE user_id = ?),
+		     (SELECT COUNT(*) FROM channels WHERE last_message_id IS NOT NULL)`,
+		viewerUserID,
+	).Scan(&readsCount, &channelsWithTipCount); err != nil {
+		return err
+	}
+	if readsCount >= channelsWithTipCount {
+		return nil
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
