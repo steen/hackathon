@@ -134,3 +134,87 @@ func TestChannelWriteUserConfigFromEnvIgnoresInvalid(t *testing.T) {
 		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
 	}
 }
+
+func TestDMWriteUserConfigDefaults(t *testing.T) {
+	got := DMWriteUserConfig()
+	if got.Burst != 10 {
+		t.Errorf("Burst: got %d, want 10 (decision log L17 default)", got.Burst)
+	}
+	if got.Refill != time.Minute {
+		t.Errorf("Refill: got %v, want 1m (decision log L17 default)", got.Refill)
+	}
+}
+
+func TestDMWriteUserConfigFromEnvDefaultsWhenUnset(t *testing.T) {
+	t.Setenv(EnvDMWriteBurst, "")
+	t.Setenv(EnvDMWriteRefill, "")
+	got := DMWriteUserConfigFromEnv()
+	want := DMWriteUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestDMWriteUserConfigFromEnvOverrides(t *testing.T) {
+	t.Setenv(EnvDMWriteBurst, "3")
+	t.Setenv(EnvDMWriteRefill, "5s")
+	got := DMWriteUserConfigFromEnv()
+	if got.Burst != 3 {
+		t.Errorf("Burst: got %d want 3", got.Burst)
+	}
+	if got.Refill != 5*time.Second {
+		t.Errorf("Refill: got %v want 5s", got.Refill)
+	}
+}
+
+func TestDMWriteUserConfigFromEnvIgnoresInvalid(t *testing.T) {
+	t.Setenv(EnvDMWriteBurst, "abc")
+	t.Setenv(EnvDMWriteRefill, "0s")
+	got := DMWriteUserConfigFromEnv()
+	want := DMWriteUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
+	}
+}
+
+func TestReadMarkUserConfigDefaults(t *testing.T) {
+	got := ReadMarkUserConfig()
+	if got.Burst != 50 {
+		t.Errorf("Burst: got %d, want 50 (decision log L17 default)", got.Burst)
+	}
+	if got.Refill != time.Minute {
+		t.Errorf("Refill: got %v, want 1m (decision log L17 default)", got.Refill)
+	}
+}
+
+func TestReadMarkUserConfigFromEnvDefaultsWhenUnset(t *testing.T) {
+	t.Setenv(EnvReadMarkBurst, "")
+	t.Setenv(EnvReadMarkRefill, "")
+	got := ReadMarkUserConfigFromEnv()
+	want := ReadMarkUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestReadMarkUserConfigFromEnvOverrides(t *testing.T) {
+	t.Setenv(EnvReadMarkBurst, "7")
+	t.Setenv(EnvReadMarkRefill, "5s")
+	got := ReadMarkUserConfigFromEnv()
+	if got.Burst != 7 {
+		t.Errorf("Burst: got %d want 7", got.Burst)
+	}
+	if got.Refill != 5*time.Second {
+		t.Errorf("Refill: got %v want 5s", got.Refill)
+	}
+}
+
+func TestReadMarkUserConfigFromEnvIgnoresInvalid(t *testing.T) {
+	t.Setenv(EnvReadMarkBurst, "abc")
+	t.Setenv(EnvReadMarkRefill, "0s")
+	got := ReadMarkUserConfigFromEnv()
+	want := ReadMarkUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
+	}
+}
