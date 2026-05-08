@@ -182,6 +182,7 @@ function startGoObserver(): ObserverHandle {
 }
 
 interface TsSubscription {
+  ready: Promise<void>;
   channels: ChannelEvent[];
   waitFor: (kind: "create" | "rename", timeoutMs: number) => Promise<ChannelEvent>;
   close: () => void;
@@ -242,6 +243,7 @@ function startTsSubscription(): TsSubscription {
   }
 
   return {
+    ready: setup,
     channels,
     waitFor: async (kind, timeoutMs) => {
       await setup;
@@ -278,8 +280,13 @@ describe("phase-8 wire-drift canary: channel WS frame parity across Go + TS clie
     driver = createClient({ baseUrl: serverUrl(), WebSocket: WSCtor });
     await driver.register(driverUser, driverPassword, inviteCode());
 
-    await observer.ready;
-    // tsSub.waitFor awaits its own setup; no separate await needed here.
+    // Both observers must have their WS upgrade complete before the
+    // driver issues any REST mutation; otherwise the broadcast races
+    // the upgrade and the test sees a "subscriber did not observe
+    // kind=create" timeout. observer.ready resolves when wsobserver
+    // emits its "ready" line (after goclient.Watch returns); tsSub.ready
+    // resolves when the api-client WebSocketClient fires "open".
+    await Promise.all([observer.ready, tsSub.ready]);
   }, 30_000);
 
   afterAll(async () => {
