@@ -25,15 +25,11 @@ const CodeInvalidPeer = "invalid_peer"
 // specs/plans/phase-9/dms.md exactly.
 const WSEventDM = "dm"
 
-// WSEventRead is the {type} value on the {type:"read"} cross-device-sync
-// frame (decision-log §7). The data shape mirrors specs/plans/phase-9/
-// read-state.md: {scope, target_id, last_read_message_id, unread_count}.
-// Routed only to the originating viewer's user:<viewer> topic — peers
-// do not see read receipts (L10).
-const WSEventRead = "read"
-
 // readScopeDM is the data.scope value on the {type:"read"} frame for
-// DM read marks. Channels use a separate "channel" scope value.
+// DM read marks. Channels use a separate "channel" scope value. The
+// shared WSEventRead constant lives in channel_reads_handlers.go since
+// the channel arm landed first; both arms use the same envelope type
+// and discriminate via the data.scope field (decision-log §7).
 const readScopeDM = "dm"
 
 // DMsDeps wires the DM handlers. Mirrors ChannelsDeps so the wiring
