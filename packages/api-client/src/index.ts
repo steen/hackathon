@@ -11,18 +11,25 @@ export type {
   WebSocketLike,
 } from "./ws.js";
 export { ApiError, isApiErrorCode } from "./errors.js";
+export { markChannelRead } from "./channels.js";
+export { createDM, listDMMessages, listDMs, markDMRead, sendDMMessage } from "./dms.js";
 export type {
   AuthResponse,
   Channel,
   ChannelEvent,
   ChannelEventKind,
+  Conversation,
+  DMEvent,
+  DMMessage,
   Envelope,
   ErrorBody,
   Event,
+  ListDMMessagesOptions,
   ListMessagesOptions,
   Message,
   MessageEvent,
   PresenceEvent,
+  ReadEvent,
   UnknownEvent,
   User,
   WSTicket,

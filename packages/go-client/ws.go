@@ -33,6 +33,22 @@ const EventTypeMessage = "message"
 // envelope the server emits when a channel is created or renamed.
 const EventTypeChannel = "channel"
 
+// EventTypeDM is the `type` field of the {type:"dm",data:{conversation,message}}
+// envelope the server emits when a DM is sent (fanned to both sender and
+// recipient user:<viewer> topics — see specs/plans/phase-9/dms.md §8).
+// Phase 9 plan v2 keeps this kind as a passthrough on the Go side:
+// Event.Type is set to "dm" and Event.Raw carries the unparsed bytes;
+// callers that want a typed view decode Raw themselves.
+const EventTypeDM = "dm"
+
+// EventTypeRead is the `type` field of the {type:"read",data:{scope,...}}
+// envelope the server emits after a successful POST /read for
+// cross-device sync. Routed only to the originating viewer's
+// user:<viewer> topic (no peer fan-out — decision-log L10). Same
+// passthrough rule as EventTypeDM: Event.Type is set, Event.Raw carries
+// the bytes; callers decode Raw on demand.
+const EventTypeRead = "read"
+
 // ChannelEvent is the typed payload for {type:"channel",data:{kind,channel}}
 // frames. Kind is "create" or "rename"; Channel carries the post-change
 // channel state. Mirrors the TS ChannelEvent in
