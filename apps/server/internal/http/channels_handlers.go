@@ -51,13 +51,20 @@ func NewChannelsHandlers(deps ChannelsDeps) *ChannelsHandlers {
 	return &ChannelsHandlers{deps: deps}
 }
 
-// List handles GET /api/channels. Must be wrapped in auth.RequireJWT.
+// List handles GET /api/channels. Must be wrapped in auth.RequireJWT
+// — the per-viewer read-state arm needs the authenticated user id for
+// materialization + the JOIN into channel_reads (decision log §9 / §11).
 func (h *ChannelsHandlers) List(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	chans, err := h.deps.Repo.ListChannels(r.Context())
+	uid, _, ok := userFromContext(r)
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "missing user context")
+		return
+	}
+	chans, err := h.deps.Repo.ListChannelsWithReadState(r.Context(), uid)
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not list channels")
 		return

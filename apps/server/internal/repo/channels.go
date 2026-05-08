@@ -14,13 +14,11 @@ import (
 // LastMessageID/LastMessageAt are denormalized pointers populated by
 // InsertMessageTx (decision log L11). LastReadMessageID and
 // UnreadCount are populated by ListChannelsWithReadState — the
-// per-viewer listing helper that joins channel_reads after
-// MaterializeChannelReadsTx has run. Both pairs use pointer types with
-// `omitempty` so the existing ListChannels SELECT (which does not scan
-// them) leaves the JSON wire shape unchanged. The TS mirror in
-// packages/api-client/src/types.ts marks these `?: optional` per L26
-// (optional-first wire-types coordination); the HTTP populator wires
-// up in G2.
+// per-viewer listing helper that materializes channel_reads then
+// LEFT-JOINs it. All four use pointer types with `omitempty` so the
+// system arm (ListChannels, no viewer) leaves the JSON wire shape
+// unchanged. The TS mirror in packages/api-client/src/types.ts marks
+// these `?: optional` per L26 (optional-first wire-types coordination).
 type Channel struct {
 	ID                string     `json:"id"`
 	Name              string     `json:"name"`
@@ -40,6 +38,10 @@ var ErrChannelNameTaken = errors.New("repo: channel name already taken")
 var ErrChannelNotFound = errors.New("repo: channel not found")
 
 // ListChannels returns every channel ordered by id (ULID — chronological).
+// System-only listing — no per-viewer state. The HTTP /api/channels
+// handler uses ListChannelsWithReadState; this entrypoint is reserved
+// for callers without an authenticated viewer (WS default-channel
+// resolver in wiring/ws.go, seed-lookup in presence tests).
 // Callers that need filtering can pass a context with a deadline.
 func (r *Repo) ListChannels(ctx context.Context) ([]Channel, error) {
 	rows, err := r.db.QueryContext(ctx,
@@ -147,23 +149,25 @@ func (r *Repo) RenameChannel(ctx context.Context, id, newName string, _ time.Tim
 	return &c, nil
 }
 
-// ListChannelsWithReadState returns every channel ordered by id, with
-// per-viewer read-state fields (LastMessageID, LastMessageAt,
-// LastReadMessageID, UnreadCount) populated. Callers must run
-// MaterializeChannelReadsTx for the same viewer before this query so
-// LEFT JOIN-misses don't surface as 50K-unread (decision log §11).
+// ListChannelsWithReadState returns every channel with per-viewer
+// read-state fields populated, in `last_message_at DESC NULLS LAST`
+// order (decision log §9 — activity-ordered listing).
+//
+// Calls MaterializeChannelReadsTx for viewerUserID first so a fresh
+// user has a `channel_reads` row pinned to each channel's
+// `last_message_id` (decision log §11 — auto-materialize on listing,
+// never-messaged channels are skipped because the column is NOT NULL).
 //
 // The unread_count subquery counts messages with id > the viewer's
-// last_read_message_id (decision log L6 channel formula). When the
-// viewer has no channel_reads row (channel had NULL last_message_id at
-// materialization time, i.e. never-messaged channel), the COALESCE
-// pins the cursor to the empty string, which sorts before every ULID
-// under SQLite's default collation — but those
-// channels also have no messages, so the count is still 0.
-//
-// G2 will wire this into the HTTP `/api/channels` handler. Until then
-// the helper is dead code reachable only from tests.
+// last_read_message_id (decision log L6 channel formula). The
+// COALESCE guards the (rare in practice after materialization) row
+// where the viewer has no channel_reads entry — empty string sorts
+// before every ULID so all messages would count, but a never-messaged
+// channel has zero messages either way.
 func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID string) ([]Channel, error) {
+	if err := r.MaterializeChannelReadsTx(ctx, viewerUserID); err != nil {
+		return nil, err
+	}
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT c.id, c.name, c.created_at,
 		        c.last_message_id, c.last_message_at,
@@ -174,7 +178,7 @@ func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID strin
 		   FROM channels c
 		   LEFT JOIN channel_reads r
 		     ON r.channel_id = c.id AND r.user_id = ?
-		  ORDER BY c.id ASC`,
+		  ORDER BY c.last_message_at DESC NULLS LAST, c.id ASC`,
 		viewerUserID,
 	)
 	if err != nil {
