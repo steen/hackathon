@@ -136,7 +136,7 @@ func (h *MessagesHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		return
 	}
 	id := ids.NewULID()
-	msg, err := h.deps.Repo.InsertMessage(r.Context(), id, channelID, uid, body, h.deps.Now())
+	msg, err := h.deps.Repo.InsertMessageTx(r.Context(), id, channelID, uid, body, h.deps.Now())
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not insert message")
 		return

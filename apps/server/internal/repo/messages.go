@@ -70,17 +70,37 @@ func (r *Repo) ListMessages(ctx context.Context, channelID, before string, limit
 	return out, rows.Err()
 }
 
-// InsertMessage persists a single message and returns the row as written.
+// InsertMessageTx persists a single message and atomically updates the
+// owning channel's denormalized last_message_id / last_message_at so the
+// channels listing can derive unread counts without a per-row scan of
+// messages. Decision log `lt -p direct-messages 3` L11 + L21 mandate
+// the denormalization and the transactional pattern; the BeginTx shape
+// here mirrors apps/server/internal/http/auth_store.go:81 (begin →
+// deferred Rollback → ExecContext → Commit).
+//
 // The caller supplies id (ULID) and now so the broadcast that follows
 // carries the same values that landed in the DB.
-func (r *Repo) InsertMessage(ctx context.Context, id, channelID, userID, body string, now time.Time) (*Message, error) {
+func (r *Repo) InsertMessageTx(ctx context.Context, id, channelID, userID, body string, now time.Time) (*Message, error) {
 	created := now.UTC()
-	_, err := r.db.ExecContext(ctx,
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO messages(id, channel_id, user_id, body, created_at)
 		 VALUES (?, ?, ?, ?, ?)`,
 		id, channelID, userID, body, created,
-	)
-	if err != nil {
+	); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE channels SET last_message_id = ?, last_message_at = ? WHERE id = ?`,
+		id, created, channelID,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return &Message{
