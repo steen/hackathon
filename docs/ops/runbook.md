@@ -231,8 +231,21 @@ The named volume `chat-data` is not touched by a rebuild; the database survives 
 
 For a hackathon or homelab single-host deploy, this is the right trade. If you want to push a registry image instead, swap `build: .` for `image: <your-registry>/chat-server:<tag>` and run a separate build/push step in CI; the rest of the compose file is unchanged.
 
-## No compose healthcheck
+## In-image healthcheck
 
-The compose file deliberately does not declare a `healthcheck:` block. The production image is `gcr.io/distroless/static-debian12:nonroot` — no shell, no `wget`, no `curl`. A compose healthcheck of the form `CMD-SHELL ... wget ...` cannot run inside this image.
+The chat-server binary carries its own liveness probe behind the `--health-probe` flag (`apps/server/probe.go`). It dials `http://127.0.0.1:<port>/healthz` inside the container and exits 0 on a `200` reply, non-zero otherwise. No shell, `wget`, or `curl` is required, so it works inside the distroless `gcr.io/distroless/static-debian12:nonroot` final image.
 
-Liveness today is the reverse proxy's upstream health check hitting `/healthz` from outside the container. A self-contained `--health-probe` flag on the chat-server binary, which would let compose declare a `CMD ["/chat-server", "--health-probe"]` healthcheck without needing a shell or external tool, is filed as https://github.com/steen/Hackathon/issues/796.
+Both call sites use the exec form (no `CMD-SHELL`) since distroless has no `/bin/sh`:
+
+- `docker-compose.yml` declares `healthcheck: ["CMD", "/chat-server", "--health-probe"]`.
+- `Dockerfile` declares the same image-level `HEALTHCHECK CMD ["/chat-server", "--health-probe"]`.
+
+Inspect the current state from the host:
+
+```bash
+docker inspect $(docker compose ps -q chat-server) \
+  --format '{{.State.Health.Status}}'
+# starting | healthy | unhealthy
+```
+
+The in-image probe is the **container-level** liveness signal — it answers "is this container's HTTP server up?" An **external** liveness check at the reverse-proxy layer (the proxy's upstream health check hitting `/healthz`) is still the recommended outer signal, since it also covers the network path between proxy and container.
