@@ -1,17 +1,24 @@
 import type * as React from "react";
 import { useCallback, useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 
 // Accessible modal primitive. No consumers in this PR — wired by the
 // channel-create / channel-rename flows in their own tickets ("introduce
 // dead code" pattern). Behavior contract:
+//   - Mounts into document.body via createPortal so the dialog escapes any
+//     ancestor stacking context (transform / filter / position: fixed) that
+//     would otherwise trap it.
 //   - role=dialog + aria-modal + aria-labelledby pointing at the title <h2>.
 //   - Focus moves to the first focusable element inside the panel on open
 //     (or to `initialFocusRef.current` when set and inside the panel);
 //     focus is restored to the previously-focused element on close.
 //   - Tab/Shift-Tab cycle within the panel (focus trap).
-//   - Escape closes; backdrop click closes by default; pass
-//     `closeOnBackdrop={false}` to make backdrop clicks a no-op. Clicks
-//     inside the panel do not bubble out and trigger the backdrop close.
+//   - Escape closes; backdrop pointerdown closes by default; pass
+//     `closeOnBackdrop={false}` to make backdrop pointerdown a no-op.
+//     Pointerdown inside the panel does not bubble out and trigger the
+//     backdrop close — pointerdown rather than click so dragging a text
+//     selection out of the panel and releasing on the backdrop does not
+//     dismiss.
 //   - document.body scroll lock while open; the prior overflow value is
 //     restored on close/unmount.
 
@@ -64,7 +71,7 @@ export function Modal(props: ModalProps): React.JSX.Element | null {
   }, [onClose]);
 
   // Mirror the latest closeOnBackdrop / initialFocusRef so the open effect and
-  // the backdrop-click callback can read them without re-subscribing.
+  // the backdrop-pointerdown callback can read them without re-subscribing.
   const closeOnBackdropRef = useRef(closeOnBackdrop);
   useEffect(() => {
     closeOnBackdropRef.current = closeOnBackdrop;
@@ -146,19 +153,30 @@ export function Modal(props: ModalProps): React.JSX.Element | null {
     };
   }, [open]);
 
-  const onBackdropClick = useCallback(() => {
+  const onBackdropPointerDown = useCallback(() => {
     if (!closeOnBackdropRef.current) return;
     onCloseRef.current();
   }, []);
 
-  const onPanelClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  // Stop pointerdown inside the panel from bubbling to the backdrop. A
+  // pointerdown that starts on the panel must not dismiss even if the user
+  // drags out and releases on the backdrop — the spec calls this case out.
+  const onPanelPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
   }, []);
 
   if (!open) return null;
+  // SSR/test guard: createPortal needs a real DOM target. The web app is
+  // browser-only at runtime, but a missing `document` (SSR / harness teardown)
+  // must short-circuit cleanly rather than crash.
+  if (typeof document === "undefined") return null;
 
-  return (
-    <div className="modal-backdrop" data-testid="modal-backdrop" onClick={onBackdropClick}>
+  return createPortal(
+    <div
+      className="modal-backdrop"
+      data-testid="modal-backdrop"
+      onPointerDown={onBackdropPointerDown}
+    >
       <div
         ref={panelRef}
         className="modal-panel"
@@ -166,13 +184,14 @@ export function Modal(props: ModalProps): React.JSX.Element | null {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        onClick={onPanelClick}
+        onPointerDown={onPanelPointerDown}
       >
         <h2 id={titleId} className="modal-panel__title">
           {title}
         </h2>
         <div className="modal-panel__body">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
