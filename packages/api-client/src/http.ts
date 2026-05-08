@@ -69,6 +69,11 @@ export class HttpClient {
     return this.request<Channel>("POST", "/api/channels", { name });
   }
 
+  async renameChannel(id: string, name: string): Promise<Channel> {
+    const path = `/api/channels/${encodeURIComponent(id)}`;
+    return this.request<Channel>("PATCH", path, { name });
+  }
+
   async listMessages(channelId: string, opts: ListMessagesOptions = {}): Promise<Message[]> {
     const qs = new URLSearchParams();
     if (opts.before) qs.set("before", opts.before);

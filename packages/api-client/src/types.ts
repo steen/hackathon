@@ -50,12 +50,22 @@ export interface PresenceEvent {
   };
 }
 
+export type ChannelEventKind = "create" | "rename";
+
+export interface ChannelEvent {
+  type: "channel";
+  data: {
+    kind: ChannelEventKind;
+    channel: Channel;
+  };
+}
+
 export interface UnknownEvent {
   type: string;
   data: unknown;
 }
 
-export type Event = MessageEvent | PresenceEvent | UnknownEvent;
+export type Event = MessageEvent | PresenceEvent | ChannelEvent | UnknownEvent;
 
 export interface ErrorBody {
   code: string;
