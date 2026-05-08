@@ -48,6 +48,27 @@ func IPRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration, sink Ra
 	}
 }
 
+// UserRateLimit returns middleware that applies limiter keyed on the
+// authenticated user id from request context. Must be wrapped *inside*
+// the JWT middleware so the user id is populated; without a user id the
+// middleware passes through (callers paired with RequireJWT will only
+// see this branch in tests that bypass the auth chain).
+//
+// On rejection it writes a 429 with the standard envelope and a
+// Retry-After header. PRD §9: per-user channel-write limit.
+func UserRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration) func(stdhttp.Handler) stdhttp.Handler {
+	return func(next stdhttp.Handler) stdhttp.Handler {
+		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			uid := UserID(r.Context())
+			if uid != "" && !limiter.Allow(uid) {
+				writeRateLimited(w, retryAfter)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RateLimitAuditSink is the narrow audit-log surface the rate-limit
 // middleware needs. The auth handlers' store implements it.
 type RateLimitAuditSink interface {
