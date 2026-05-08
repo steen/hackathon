@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	stdhttp "net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -415,6 +416,60 @@ func TestChannelWriteRateLimitTrips429AfterBurst(t *testing.T) {
 	}
 	if env.OK || env.Error == nil || env.Error.Code != CodeRateLimited {
 		t.Fatalf("envelope: %+v", env)
+	}
+}
+
+// Phase 8 (#898) — the Retry-After header on the per-user channel-write
+// 429 response must reflect the retryAfter argument the caller passes
+// to UserRateLimit (not a hardcoded constant). registerChannels feeds
+// this from CHAT_CHANNEL_WRITE_REFILL, so a header that disagrees with
+// the configured refill mis-leads well-behaved clients backing off.
+//
+// We exercise two non-default values to pin the contract:
+//   - 30s rounds to exactly 30 seconds.
+//   - 90s rounds to exactly 90 seconds.
+//
+// Both prove the header tracks the argument; neither matches the old
+// hardcoded 60s, so the regression would fail on either case.
+func TestChannelWriteRetryAfterMatchesRefill(t *testing.T) {
+	cases := []struct {
+		name       string
+		retryAfter time.Duration
+		wantSecs   int
+	}{
+		{"30s", 30 * time.Second, 30},
+		{"90s", 90 * time.Second, 90},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+			writeLimit := UserRateLimit(limiter, tc.retryAfter, nil, false)
+			cf := newChannelsFixtureWithLimit(t, writeLimit)
+			defer cf.close()
+			tok := registerOK(t, cf.fixture, "alice", "correct-horse-battery")
+
+			if rr := cf.do(t, stdhttp.MethodPost, "/api/channels",
+				map[string]string{"name": "first"}, tok); rr.Code != stdhttp.StatusCreated {
+				t.Fatalf("1st POST: got %d want 201; body=%s", rr.Code, rr.Body.String())
+			}
+			rr := cf.do(t, stdhttp.MethodPost, "/api/channels",
+				map[string]string{"name": "second"}, tok)
+			if rr.Code != stdhttp.StatusTooManyRequests {
+				t.Fatalf("2nd POST: got %d want 429; body=%s", rr.Code, rr.Body.String())
+			}
+			got := rr.Header().Get("Retry-After")
+			if got == "" {
+				t.Fatalf("Retry-After header missing on 429")
+			}
+			secs, err := strconv.Atoi(got)
+			if err != nil {
+				t.Fatalf("Retry-After not an integer: %q (%v)", got, err)
+			}
+			if secs != tc.wantSecs {
+				t.Fatalf("Retry-After: got %d want %d (retryAfter=%s)",
+					secs, tc.wantSecs, tc.retryAfter)
+			}
+		})
 	}
 }
 
