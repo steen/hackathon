@@ -17,6 +17,12 @@ import (
 // server is still the source of truth.
 var channelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// ChannelNameRe exposes channelNameRe to the cross-package drift test in
+// channels_regex_drift_test.go, which compares it against the server's
+// equivalent. Aliased instead of inlined so the runtime validator and
+// the test see the same compiled pattern.
+var ChannelNameRe = channelNameRe
+
 // Channels implements `chatd channels`. With no sub-subcommand it lists
 // every channel one per line as `<id>\t<name>`. With `create` or `rename`
 // it dispatches to the matching sub-handler.
