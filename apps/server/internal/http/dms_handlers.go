@@ -25,6 +25,17 @@ const CodeInvalidPeer = "invalid_peer"
 // specs/plans/phase-9/dms.md exactly.
 const WSEventDM = "dm"
 
+// WSEventRead is the {type} value on the {type:"read"} cross-device-sync
+// frame (decision-log §7). The data shape mirrors specs/plans/phase-9/
+// read-state.md: {scope, target_id, last_read_message_id, unread_count}.
+// Routed only to the originating viewer's user:<viewer> topic — peers
+// do not see read receipts (L10).
+const WSEventRead = "read"
+
+// readScopeDM is the data.scope value on the {type:"read"} frame for
+// DM read marks. Channels use a separate "channel" scope value.
+const readScopeDM = "dm"
+
 // DMsDeps wires the DM handlers. Mirrors ChannelsDeps so the wiring
 // file can construct both with the same shape.
 type DMsDeps struct {
@@ -336,15 +347,111 @@ func (h *DMsHandlers) unreadCountForViewer(ctx context.Context, viewerID, conver
 	return n, nil
 }
 
+// MarkRead handles POST /api/dms/{id}/read. Decision-log L5 (advance-
+// only UPSERT), L8 (404 on non-participation reuses
+// resolveConversationFromPath), §7 (emit {type:"read"} to caller's
+// user:<viewer> topic for cross-device sync), L17 (read-mark bucket is
+// applied by the wiring layer). 204 on success per the issue's AC.
+func (h *DMsHandlers) MarkRead(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	if r.Method != stdhttp.MethodPost {
+		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
+		return
+	}
+	conv, viewerID, status, code, msg := h.resolveConversationFromPath(r)
+	if status != 0 {
+		WriteError(w, status, code, msg)
+		return
+	}
+
+	var req struct {
+		MessageID string `json:"message_id"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
+		return
+	}
+	messageID, ok := validULID(strings.TrimSpace(req.MessageID))
+	if !ok {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "message_id must be a ULID")
+		return
+	}
+
+	if err := h.deps.Repo.UpsertDMRead(r.Context(), conv.ID, viewerID, messageID); err != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not mark read")
+		return
+	}
+
+	h.broadcastDMRead(r.Context(), viewerID, conv.ID)
+	w.WriteHeader(stdhttp.StatusNoContent)
+}
+
+// broadcastDMRead emits a {type:"read", scope:"dm"} frame to the
+// caller's user:<viewer> topic only (decision-log §7 / L10 — no peer
+// fan-out). The frame's last_read_message_id reads back the persisted
+// pointer so a same-tx-no-op (advance-only L5: posting an older id)
+// still emits the CURRENT pointer, keeping cross-device clients
+// consistent without leaking the older id.
+//
+// The hub may be nil in tests that exercise the handler without
+// fan-out; the call is then a no-op.
+func (h *DMsHandlers) broadcastDMRead(ctx context.Context, viewerID, conversationID string) {
+	if h.deps.Hub == nil {
+		return
+	}
+	cursor, err := h.persistedDMReadCursor(ctx, viewerID, conversationID)
+	if err != nil {
+		return
+	}
+	unread, err := h.unreadCountForViewer(ctx, viewerID, conversationID)
+	if err != nil {
+		unread = 0
+	}
+	frame, err := json.Marshal(map[string]interface{}{
+		"type": WSEventRead,
+		"data": map[string]interface{}{
+			"scope":                readScopeDM,
+			"target_id":            conversationID,
+			"last_read_message_id": cursor,
+			"unread_count":         unread,
+		},
+	})
+	if err != nil {
+		return
+	}
+	h.deps.Hub.Broadcast("user:"+viewerID, frame)
+}
+
+// persistedDMReadCursor returns the viewer's current
+// last_read_dm_message_id for the conversation. Empty string when no
+// row exists (legitimate post-NULL state) — callers that need to
+// distinguish absent from empty should check the dm_reads schema
+// directly. Used by broadcastDMRead so the WS frame carries the
+// post-UPSERT pointer even when the UPSERT was a silent no-op.
+func (h *DMsHandlers) persistedDMReadCursor(ctx context.Context, viewerID, conversationID string) (string, error) {
+	row := h.deps.Repo.DB().QueryRowContext(ctx,
+		`SELECT COALESCE(last_read_dm_message_id, '') FROM dm_reads
+		   WHERE conversation_id = ? AND user_id = ?`,
+		conversationID, viewerID,
+	)
+	var s string
+	if err := row.Scan(&s); err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
 // Routes registers /api/dms and /api/dms/{id}/... on mux. require is
 // the JWT middleware constructed by registerAuth — every DM route is
 // gated through it. writeLimit, when non-nil, applies the per-user
 // dm-write limiter to POST /api/dms/{id}/messages (decision-log L17).
-// Callers that don't exercise rate-limiting pass nil.
+// readLimit, when non-nil, applies the per-user read-mark limiter to
+// POST /api/dms/{id}/read (decision-log L17). Callers that don't
+// exercise rate-limiting pass nil.
 func (h *DMsHandlers) Routes(
 	mux *stdhttp.ServeMux,
 	require func(stdhttp.Handler) stdhttp.Handler,
 	writeLimit func(stdhttp.Handler) stdhttp.Handler,
+	readLimit func(stdhttp.Handler) stdhttp.Handler,
 ) {
 	wrapWrite := func(handler stdhttp.Handler) stdhttp.Handler {
 		if writeLimit != nil {
@@ -352,8 +459,15 @@ func (h *DMsHandlers) Routes(
 		}
 		return require(handler)
 	}
+	wrapRead := func(handler stdhttp.Handler) stdhttp.Handler {
+		if readLimit != nil {
+			handler = readLimit(handler)
+		}
+		return require(handler)
+	}
 	mux.Handle("POST /api/dms", require(stdhttp.HandlerFunc(h.CreateOrGet)))
 	mux.Handle("GET /api/dms", require(stdhttp.HandlerFunc(h.List)))
 	mux.Handle("POST /api/dms/{id}/messages", wrapWrite(stdhttp.HandlerFunc(h.SendMessage)))
 	mux.Handle("GET /api/dms/{id}/messages", require(stdhttp.HandlerFunc(h.ListMessages)))
+	mux.Handle("POST /api/dms/{id}/read", wrapRead(stdhttp.HandlerFunc(h.MarkRead)))
 }
