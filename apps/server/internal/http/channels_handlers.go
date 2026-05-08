@@ -19,6 +19,12 @@ import (
 // Slack-style "is #General the same as #general?" foot-gun.
 var channelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// ChannelNameRe exposes channelNameRe to the cross-package drift test in
+// apps/cli/cmd/channels_regex_drift_test.go, which compares it against
+// the CLI's equivalent. Aliased instead of inlined so the runtime
+// validator and the test see the same compiled pattern.
+var ChannelNameRe = channelNameRe
+
 // ChannelsDeps is everything the channel handlers need wired in.
 type ChannelsDeps struct {
 	Repo *repo.Repo
