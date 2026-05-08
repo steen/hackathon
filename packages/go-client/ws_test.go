@@ -217,6 +217,180 @@ func TestWatchClosesOnContextCancel(t *testing.T) {
 	}
 }
 
+// TestWatchChannelFrameDecodesCreate stands up a WS server that pushes a
+// {type:"channel", data:{kind:"create", channel:{...}}} frame and asserts
+// the client surfaces a populated Event.Channel.
+func TestWatchChannelFrameDecodesCreate(t *testing.T) {
+	const chID = "01ABCDEFGHJKMNPQRSTVWXYZ03"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(envelopeJSON(`{"ticket":"t","expires_at":"2099-01-01T00:00:00Z"}`)))
+	})
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		frame, _ := json.Marshal(map[string]interface{}{
+			"type": "channel",
+			"data": map[string]interface{}{
+				"kind": "create",
+				"channel": map[string]interface{}{
+					"id":         chID,
+					"name":       "random",
+					"created_at": "2026-05-03T10:00:00Z",
+				},
+			},
+		})
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_ = conn.Write(ctx, websocket.MessageText, frame)
+		<-ctx.Done()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("u"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events, err := c.Watch(ctx, goclient.WatchOptions{})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	select {
+	case ev, ok := <-events:
+		if !ok {
+			t.Fatalf("events channel closed before frame")
+		}
+		if ev.Type != "channel" {
+			t.Fatalf("Type = %q, want channel", ev.Type)
+		}
+		if ev.Channel == nil {
+			t.Fatalf("Channel nil; raw=%s", ev.Raw)
+		}
+		if ev.Channel.Kind != "create" {
+			t.Fatalf("Kind = %q, want create", ev.Channel.Kind)
+		}
+		if ev.Channel.Channel.Name != "random" {
+			t.Fatalf("Channel.Name = %q, want random", ev.Channel.Channel.Name)
+		}
+		if string(ev.Channel.Channel.ID) != chID {
+			t.Fatalf("Channel.ID = %q, want %q", ev.Channel.Channel.ID, chID)
+		}
+		if ev.Message != nil {
+			t.Fatalf("Message must be nil for channel frame; got %+v", ev.Message)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for frame")
+	}
+}
+
+// TestWatchChannelFrameDecodesRename mirrors the create test for the
+// rename kind, since the wire shape is identical except for the kind
+// discriminator.
+func TestWatchChannelFrameDecodesRename(t *testing.T) {
+	const chID = "01ABCDEFGHJKMNPQRSTVWXYZ04"
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(envelopeJSON(`{"ticket":"t","expires_at":"2099-01-01T00:00:00Z"}`)))
+	})
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		frame, _ := json.Marshal(map[string]interface{}{
+			"type": "channel",
+			"data": map[string]interface{}{
+				"kind": "rename",
+				"channel": map[string]interface{}{
+					"id":         chID,
+					"name":       "renamed",
+					"created_at": "2026-05-03T10:00:00Z",
+				},
+			},
+		})
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		_ = conn.Write(ctx, websocket.MessageText, frame)
+		<-ctx.Done()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("u"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events, err := c.Watch(ctx, goclient.WatchOptions{})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	select {
+	case ev, ok := <-events:
+		if !ok {
+			t.Fatalf("events channel closed before frame")
+		}
+		if ev.Channel == nil {
+			t.Fatalf("Channel nil; raw=%s", ev.Raw)
+		}
+		if ev.Channel.Kind != "rename" {
+			t.Fatalf("Kind = %q, want rename", ev.Channel.Kind)
+		}
+		if ev.Channel.Channel.Name != "renamed" {
+			t.Fatalf("Channel.Name = %q, want renamed", ev.Channel.Channel.Name)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for frame")
+	}
+}
+
+// TestWatchChannelFrameMalformedDataPassesThrough verifies the existing
+// tolerance: when the channel frame's data fails to unmarshal into
+// ChannelEvent, Event.Type is still set ("channel") and Channel stays
+// nil — callers can fall back to Raw.
+func TestWatchChannelFrameMalformedDataPassesThrough(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(envelopeJSON(`{"ticket":"t","expires_at":"2099-01-01T00:00:00Z"}`)))
+	})
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		// data is a string, not a {kind,channel} object — unmarshalling
+		// into ChannelEvent must fail without panicking.
+		_ = conn.Write(ctx, websocket.MessageText, []byte(`{"type":"channel","data":"not-an-object"}`))
+		<-ctx.Done()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("u"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events, err := c.Watch(ctx, goclient.WatchOptions{})
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+	select {
+	case ev := <-events:
+		if ev.Type != "channel" {
+			t.Fatalf("Type = %q, want channel", ev.Type)
+		}
+		if ev.Channel != nil {
+			t.Fatalf("Channel = %+v, want nil for malformed data", ev.Channel)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out")
+	}
+}
+
 func TestWatchUnknownFrameSurfacesAsRaw(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/auth/ws-ticket", func(w http.ResponseWriter, _ *http.Request) {

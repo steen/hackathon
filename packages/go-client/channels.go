@@ -26,6 +26,11 @@ type createChannelRequest struct {
 	Name string `json:"name"`
 }
 
+// renameChannelRequest is the wire body for PATCH /api/channels/{id}.
+type renameChannelRequest struct {
+	Name string `json:"name"`
+}
+
 // ListChannels returns every channel the server knows about, ordered
 // by id (ULID — chronological).
 func (c *Client) ListChannels(ctx context.Context) ([]Channel, error) {
@@ -46,4 +51,16 @@ func (c *Client) CreateChannel(ctx context.Context, name string) (*Channel, erro
 		return nil, err
 	}
 	return &out, nil
+}
+
+// RenameChannel renames the channel with the given id. The server
+// applies the same name validation as CreateChannel and returns 409
+// conflict when the new name is already taken — callers can branch on
+// `IsCode(err, "conflict")`. 404 surfaces as `IsCode(err, "not_found")`.
+func (c *Client) RenameChannel(ctx context.Context, id, name string) (Channel, error) {
+	var out Channel
+	if err := c.do(ctx, http.MethodPatch, "/api/channels/"+id, renameChannelRequest{Name: name}, &out); err != nil {
+		return Channel{}, err
+	}
+	return out, nil
 }
