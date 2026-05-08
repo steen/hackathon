@@ -14,6 +14,8 @@ export { ApiError, isApiErrorCode } from "./errors.js";
 export type {
   AuthResponse,
   Channel,
+  ChannelEvent,
+  ChannelEventKind,
   Envelope,
   ErrorBody,
   Event,

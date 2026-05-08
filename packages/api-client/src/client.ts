@@ -73,6 +73,10 @@ export class Client {
     return this.http.createChannel(name);
   }
 
+  async renameChannel(id: string, name: string): Promise<Channel> {
+    return this.http.renameChannel(id, name);
+  }
+
   async listMessages(channelId: string, opts?: ListMessagesOptions): Promise<Message[]> {
     return this.http.listMessages(channelId, opts);
   }
