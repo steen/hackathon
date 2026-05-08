@@ -264,6 +264,60 @@ button.linklike {
   }
 }
 
+/* Modal primitive (apps/web/src/components/Modal.tsx). Backdrop covers the
+   viewport; the panel is centered with a desktop max-width. Below the
+   shared phone breakpoint (767px — see the mobile sidebar rules above) the
+   panel goes full-width to hand the entire viewport to the form. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-panel {
+  background: var(--bg-panel);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1.25rem 1.5rem;
+  width: 100%;
+  max-width: 420px;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.modal-panel__title {
+  font-size: 1.25rem;
+  margin: 0 0 1rem;
+  font-weight: 700;
+}
+
+.modal-panel__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+@media (max-width: 767px) {
+  .modal-backdrop {
+    padding: 0;
+    align-items: stretch;
+  }
+  .modal-panel {
+    max-width: none;
+    border-radius: 0;
+    max-height: 100dvh;
+    border-left: 0;
+    border-right: 0;
+  }
+}
+
 :focus:not(:focus-visible) {
   outline: none;
 }
