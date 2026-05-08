@@ -92,3 +92,45 @@ func TestRegisterIPConfigFromEnvBothOverrides(t *testing.T) {
 		t.Errorf("Capacity: got %d, want default %d", got.Capacity, RegisterIPConfig().Capacity)
 	}
 }
+
+func TestChannelWriteUserConfigDefaults(t *testing.T) {
+	got := ChannelWriteUserConfig()
+	if got.Burst != 10 {
+		t.Errorf("Burst: got %d, want 10 (PRD §9 default)", got.Burst)
+	}
+	if got.Refill != time.Minute {
+		t.Errorf("Refill: got %v, want 1m (PRD §9 default)", got.Refill)
+	}
+}
+
+func TestChannelWriteUserConfigFromEnvDefaultsWhenUnset(t *testing.T) {
+	t.Setenv(EnvChannelWriteBurst, "")
+	t.Setenv(EnvChannelWriteRefill, "")
+	got := ChannelWriteUserConfigFromEnv()
+	want := ChannelWriteUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestChannelWriteUserConfigFromEnvOverrides(t *testing.T) {
+	t.Setenv(EnvChannelWriteBurst, "3")
+	t.Setenv(EnvChannelWriteRefill, "5s")
+	got := ChannelWriteUserConfigFromEnv()
+	if got.Burst != 3 {
+		t.Errorf("Burst: got %d want 3", got.Burst)
+	}
+	if got.Refill != 5*time.Second {
+		t.Errorf("Refill: got %v want 5s", got.Refill)
+	}
+}
+
+func TestChannelWriteUserConfigFromEnvIgnoresInvalid(t *testing.T) {
+	t.Setenv(EnvChannelWriteBurst, "abc")
+	t.Setenv(EnvChannelWriteRefill, "0s")
+	got := ChannelWriteUserConfigFromEnv()
+	want := ChannelWriteUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
+	}
+}

@@ -91,3 +91,48 @@ func TestGetChannelReturnsNilForMissing(t *testing.T) {
 		t.Fatalf("got %+v want nil", got)
 	}
 }
+
+func TestRenameChannelPersistsNewName(t *testing.T) {
+	r, db := newRepo(t)
+	created, err := r.CreateChannel(context.Background(), ids.NewULID(), "old", time.Now())
+	if err != nil {
+		t.Fatalf("CreateChannel: %v", err)
+	}
+	got, err := r.RenameChannel(context.Background(), created.ID, "new", time.Now())
+	if err != nil {
+		t.Fatalf("RenameChannel: %v", err)
+	}
+	if got.ID != created.ID || got.Name != "new" {
+		t.Fatalf("returned: %+v want id=%s name=new", got, created.ID)
+	}
+	var name string
+	if err := db.QueryRow(`SELECT name FROM channels WHERE id = ?`, created.ID).Scan(&name); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if name != "new" {
+		t.Fatalf("persisted name: got %q want new", name)
+	}
+}
+
+func TestRenameChannelReturnsNotFound(t *testing.T) {
+	r, _ := newRepo(t)
+	_, err := r.RenameChannel(context.Background(), ids.NewULID(), "anything", time.Now())
+	if !errors.Is(err, repo.ErrChannelNotFound) {
+		t.Fatalf("err: got %v want ErrChannelNotFound", err)
+	}
+}
+
+func TestRenameChannelReturnsNameTakenOnCollision(t *testing.T) {
+	r, _ := newRepo(t)
+	a, err := r.CreateChannel(context.Background(), ids.NewULID(), "alpha", time.Now())
+	if err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := r.CreateChannel(context.Background(), ids.NewULID(), "beta", time.Now()); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	_, err = r.RenameChannel(context.Background(), a.ID, "beta", time.Now())
+	if !errors.Is(err, repo.ErrChannelNameTaken) {
+		t.Fatalf("err: got %v want ErrChannelNameTaken", err)
+	}
+}

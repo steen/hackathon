@@ -299,6 +299,89 @@ func TestIPRateLimitIgnoresXFFWhenTrustedProxyFalse(t *testing.T) {
 	}
 }
 
+// Phase 8 — UserRateLimit keys on the authenticated user id from the
+// request context. Two distinct ids each get their own bucket; one
+// id's exhaustion does not block another.
+func TestUserRateLimitKeysOnUserID(t *testing.T) {
+	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+	rl := UserRateLimit(limiter, time.Minute)
+	mux := stdhttp.NewServeMux()
+	mux.Handle("/x", rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		w.WriteHeader(stdhttp.StatusOK)
+	})))
+	send := func(uid string) int {
+		req := httptest.NewRequest(stdhttp.MethodGet, "/x", nil)
+		req = req.WithContext(WithUserID(req.Context(), uid))
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if got := send("alice"); got != stdhttp.StatusOK {
+		t.Fatalf("alice first: got %d want 200", got)
+	}
+	if got := send("bob"); got != stdhttp.StatusOK {
+		t.Fatalf("bob first (separate bucket): got %d want 200", got)
+	}
+	if got := send("alice"); got != stdhttp.StatusTooManyRequests {
+		t.Fatalf("alice second (bucket exhausted): got %d want 429", got)
+	}
+	if got := send("bob"); got != stdhttp.StatusTooManyRequests {
+		t.Fatalf("bob second: got %d want 429", got)
+	}
+}
+
+// Phase 8 — UserRateLimit returns the standard envelope on rejection.
+func TestUserRateLimitEnvelopeOnRejection(t *testing.T) {
+	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+	rl := UserRateLimit(limiter, time.Minute)
+	h := rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		w.WriteHeader(stdhttp.StatusOK)
+	}))
+	send := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(stdhttp.MethodGet, "/x", nil)
+		req = req.WithContext(WithUserID(req.Context(), "alice"))
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr
+	}
+	if rr := send(); rr.Code != stdhttp.StatusOK {
+		t.Fatalf("first: got %d want 200", rr.Code)
+	}
+	rr := send()
+	if rr.Code != stdhttp.StatusTooManyRequests {
+		t.Fatalf("second: got %d want 429", rr.Code)
+	}
+	if got := rr.Header().Get("Retry-After"); got == "" {
+		t.Errorf("Retry-After header missing on 429")
+	}
+	var env envelope
+	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if env.OK || env.Error == nil || env.Error.Code != CodeRateLimited {
+		t.Fatalf("envelope: %+v", env)
+	}
+}
+
+// Phase 8 — without a user id in context the middleware passes through.
+// Lets unauth'd traffic flow to inner handlers (which themselves return
+// 401); without this gate the limiter would reject the empty key.
+func TestUserRateLimitPassesThroughWithoutUserID(t *testing.T) {
+	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+	rl := UserRateLimit(limiter, time.Minute)
+	h := rl(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, _ *stdhttp.Request) {
+		w.WriteHeader(stdhttp.StatusOK)
+	}))
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest(stdhttp.MethodGet, "/x", nil)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		if rr.Code != stdhttp.StatusOK {
+			t.Fatalf("attempt %d: got %d want 200 (no user id should bypass limiter)", i, rr.Code)
+		}
+	}
+}
+
 // clientIP is the helper IPRateLimit + the audit log share. Pin its
 // branch table directly: the wiring above exercises the integration,
 // these table-driven cases lock in each branch's intent.
