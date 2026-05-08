@@ -29,15 +29,31 @@ const DefaultWatchReadIdleTimeout = 75 * time.Second
 // apps/server/internal/http.WSEventMessage.
 const EventTypeMessage = "message"
 
+// EventTypeChannel is the `type` field of the {type:"channel",data:<ChannelEvent>}
+// envelope the server emits when a channel is created or renamed.
+const EventTypeChannel = "channel"
+
+// ChannelEvent is the typed payload for {type:"channel",data:{kind,channel}}
+// frames. Kind is "create" or "rename"; Channel carries the post-change
+// channel state. Mirrors the TS ChannelEvent in
+// packages/api-client/src/types.ts.
+type ChannelEvent struct {
+	Kind    string  `json:"kind"`
+	Channel Channel `json:"channel"`
+}
+
 // Event is the typed view of a single inbound WS frame. When the frame
 // matches the {type:"message",data:<Message>} shape, Type is set and
-// Message is non-nil. Frames that fall outside that shape (e.g. the
-// raw phase-0 rebroadcast contract) surface with Type == "" and the
-// untouched bytes in Raw, so callers can layer their own decoding
-// without losing data.
+// Message is non-nil. When it matches {type:"channel",data:<ChannelEvent>},
+// Type is set and Channel is non-nil. Frames that fall outside both
+// shapes (e.g. the raw phase-0 rebroadcast contract or future event
+// types) surface with Type == "" (or Type set but Message/Channel nil)
+// and the untouched bytes in Raw, so callers can layer their own
+// decoding without losing data.
 type Event struct {
 	Type    string
 	Message *Message
+	Channel *ChannelEvent
 	Raw     []byte
 }
 
@@ -158,6 +174,12 @@ func decodeEvent(data []byte) Event {
 		var m Message
 		if err := json.Unmarshal(probe.Data, &m); err == nil {
 			ev.Message = &m
+		}
+	}
+	if probe.Type == EventTypeChannel && len(probe.Data) > 0 {
+		var ce ChannelEvent
+		if err := json.Unmarshal(probe.Data, &ce); err == nil {
+			ev.Channel = &ce
 		}
 	}
 	return ev

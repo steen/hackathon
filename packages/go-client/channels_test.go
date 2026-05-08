@@ -86,3 +86,66 @@ func TestCreateChannelConflict(t *testing.T) {
 		t.Fatalf("err = %v, want conflict code", err)
 	}
 }
+
+func TestRenameChannel(t *testing.T) {
+	const id = "01ABCDEFGHJKMNPQRSTVWXYZ02"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/channels/"+id {
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		b, _ := io.ReadAll(r.Body)
+		var got map[string]string
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("non-JSON body: %s", b)
+		}
+		if got["name"] != "renamed" {
+			t.Errorf("name = %q", got["name"])
+		}
+		_, _ = w.Write([]byte(envelopeJSON(
+			`{"id":"` + id + `","name":"renamed","created_at":"2026-05-03T10:00:00Z"}`,
+		)))
+	}))
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("tok"))
+	ch, err := c.RenameChannel(context.Background(), id, "renamed")
+	if err != nil {
+		t.Fatalf("RenameChannel: %v", err)
+	}
+	if ch.Name != "renamed" || string(ch.ID) != id {
+		t.Fatalf("channel = %+v", ch)
+	}
+}
+
+func TestRenameChannelErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		code   string
+	}{
+		{"BadRequest", http.StatusBadRequest, "invalid_request"},
+		{"Forbidden", http.StatusForbidden, "forbidden"},
+		{"NotFound", http.StatusNotFound, "not_found"},
+		{"Conflict", http.StatusConflict, "conflict"},
+		{"RateLimited", http.StatusTooManyRequests, "rate_limited"},
+		{"Internal", http.StatusInternalServerError, "internal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(envelopeError(tc.code, "boom")))
+			}))
+			defer srv.Close()
+
+			c := goclient.New(srv.URL, goclient.WithToken("tok"))
+			_, err := c.RenameChannel(context.Background(), "01ABCDEFGHJKMNPQRSTVWXYZ02", "renamed")
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if !goclient.IsCode(err, tc.code) {
+				t.Fatalf("err = %v, want code %q", err, tc.code)
+			}
+		})
+	}
+}
