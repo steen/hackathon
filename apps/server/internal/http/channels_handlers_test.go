@@ -390,7 +390,7 @@ func TestRenameChannelDuplicateNameReturns409(t *testing.T) {
 // Mirrors the SEC-5 pattern from auth_handlers_test.go.
 func TestChannelWriteRateLimitTrips429AfterBurst(t *testing.T) {
 	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 2, Refill: time.Hour})
-	writeLimit := UserRateLimit(limiter, time.Minute)
+	writeLimit := UserRateLimit(limiter, time.Minute, nil, false)
 	cf := newChannelsFixtureWithLimit(t, writeLimit)
 	defer cf.close()
 	tok := registerOK(t, cf.fixture, "alice", "correct-horse-battery")
@@ -422,7 +422,7 @@ func TestChannelWriteRateLimitTrips429AfterBurst(t *testing.T) {
 // bucket. After exhausting the bucket on POSTs, GET still returns 200.
 func TestChannelWriteRateLimitDoesNotAffectList(t *testing.T) {
 	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
-	writeLimit := UserRateLimit(limiter, time.Minute)
+	writeLimit := UserRateLimit(limiter, time.Minute, nil, false)
 	cf := newChannelsFixtureWithLimit(t, writeLimit)
 	defer cf.close()
 	tok := registerOK(t, cf.fixture, "alice", "correct-horse-battery")
@@ -444,7 +444,7 @@ func TestChannelWriteRateLimitDoesNotAffectList(t *testing.T) {
 // per-user buckets; one user's 429 does not block the other.
 func TestChannelWriteRateLimitIsolatesUsers(t *testing.T) {
 	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
-	writeLimit := UserRateLimit(limiter, time.Minute)
+	writeLimit := UserRateLimit(limiter, time.Minute, nil, false)
 	cf := newChannelsFixtureWithLimit(t, writeLimit)
 	defer cf.close()
 	alice := registerOK(t, cf.fixture, "alice", "correct-horse-battery")
@@ -462,6 +462,58 @@ func TestChannelWriteRateLimitIsolatesUsers(t *testing.T) {
 	if rr := cf.do(t, stdhttp.MethodPost, "/api/channels",
 		map[string]string{"name": "charlie"}, bob); rr.Code != stdhttp.StatusCreated {
 		t.Fatalf("bob POST under alice's exhausted bucket: %d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// Phase 8 (#883) — per-user channel-write 429s land in auth_events with
+// the rejected user_id set, mirroring IPRateLimit's audit story. Without
+// this, per-user rate-limit rejections are silent in the audit log.
+func TestChannelWriteRateLimitLogsAuthEvent(t *testing.T) {
+	limiter := ratelimit.NewIPLimiter(ratelimit.IPLimiterConfig{Burst: 1, Refill: time.Hour})
+	cf := newChannelsFixture(t)
+	defer cf.close()
+	sink := NewRateLimitAuditSink(cf.db)
+	writeLimit := UserRateLimit(limiter, time.Minute, sink, false)
+	// Re-wire with the audited limiter. The default fixture has no
+	// limiter; we rebuild Routes against the same handlers + mux state.
+	mux := stdhttp.NewServeMux()
+	require := auth.RequireJWT(auth.MiddlewareConfig{
+		SigningKey:        []byte("test-signing-key-must-be-long-enough"),
+		Lookup:            cf.handlers.LookupUserInfo,
+		WriteUnauthorized: WriteUnauthorized,
+		WithUserID:        WithUserID,
+	})
+	cf.channels.Routes(mux, require, writeLimit, cf.messages)
+	cf.mux = mux
+
+	tok := registerOK(t, cf.fixture, "alice", "correct-horse-battery")
+
+	// Burst=1: first POST succeeds, second trips 429 + audit row.
+	if rr := cf.do(t, stdhttp.MethodPost, "/api/channels",
+		map[string]string{"name": "first"}, tok); rr.Code != stdhttp.StatusCreated {
+		t.Fatalf("POST: got %d want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	if rr := cf.do(t, stdhttp.MethodPost, "/api/channels",
+		map[string]string{"name": "second"}, tok); rr.Code != stdhttp.StatusTooManyRequests {
+		t.Fatalf("2nd POST: got %d want 429", rr.Code)
+	}
+
+	// Find alice's user id so we can assert the audit row carries it
+	// (per-user 429s share AuthEventRateLimited with per-IP 429s; the
+	// user_id column distinguishes them).
+	var aliceID string
+	if err := cf.fixture.db.QueryRow(
+		`SELECT id FROM users WHERE username = ?`, "alice").Scan(&aliceID); err != nil {
+		t.Fatalf("lookup alice id: %v", err)
+	}
+	var n int
+	if err := cf.fixture.db.QueryRow(
+		`SELECT COUNT(*) FROM auth_events WHERE kind = ? AND user_id = ?`,
+		AuthEventRateLimited, aliceID).Scan(&n); err != nil {
+		t.Fatalf("query auth_events: %v", err)
+	}
+	if n < 1 {
+		t.Fatalf("auth_events rate_limited rows for user_id=%q: got %d want >=1", aliceID, n)
 	}
 }
 
