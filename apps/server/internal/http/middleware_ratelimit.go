@@ -1,6 +1,7 @@
 package http
 
 import (
+	"database/sql"
 	stdhttp "net/http"
 	"strconv"
 	"time"
@@ -55,12 +56,20 @@ func IPRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration, sink Ra
 // see this branch in tests that bypass the auth chain).
 //
 // On rejection it writes a 429 with the standard envelope and a
-// Retry-After header. PRD §9: per-user channel-write limit.
-func UserRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration) func(stdhttp.Handler) stdhttp.Handler {
+// Retry-After header, and (when sink is non-nil) appends one row to
+// auth_events with the user id set so the rejection is observable in
+// the audit log alongside per-IP 429s. trustedProxy plumbs through to
+// clientIP so the recorded IP matches the IPRateLimit path's behavior
+// when the server runs behind a reverse proxy. PRD §9: per-user
+// channel-write limit.
+func UserRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration, sink RateLimitAuditSink, trustedProxy bool) func(stdhttp.Handler) stdhttp.Handler {
 	return func(next stdhttp.Handler) stdhttp.Handler {
 		return stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			uid := UserID(r.Context())
 			if uid != "" && !limiter.Allow(uid) {
+				if sink != nil {
+					sink.LogRateLimited(r, uid, clientIP(r, trustedProxy))
+				}
 				writeRateLimited(w, retryAfter)
 				return
 			}
@@ -74,6 +83,12 @@ func UserRateLimit(limiter *ratelimit.IPLimiter, retryAfter time.Duration) func(
 type RateLimitAuditSink interface {
 	LogRateLimited(r *stdhttp.Request, userID, ip string)
 }
+
+// NewRateLimitAuditSink builds a RateLimitAuditSink from a *sql.DB so
+// wiring code outside the auth feature (e.g. the channels feature's
+// per-user limiter) can share the same auth_events writer without
+// reaching into the auth handlers' unexported store.
+func NewRateLimitAuditSink(db *sql.DB) RateLimitAuditSink { return newAuthStore(db) }
 
 // writeRateLimited emits the 429 envelope plus a Retry-After header so
 // well-behaved clients can back off. retryAfter is rounded up to the
