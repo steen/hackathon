@@ -47,6 +47,10 @@ func registerChannels(mux *http.ServeMux, deps Deps, require func(http.Handler) 
 			"default_refill", writeDefault.Refill,
 		)
 	}
+	slog.Info("per-user channel-write rate limit active",
+		"burst", writeCfg.Burst,
+		"refill", writeCfg.Refill,
+	)
 	writeLimiter := ratelimit.NewIPLimiter(writeCfg)
 	// Mirror IPRateLimit's audit story for the per-user channel-write
 	// limiter: rejected attempts append a row to auth_events keyed on
