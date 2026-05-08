@@ -14,13 +14,15 @@ import (
 // apps/server/internal/http/channels_handlers.go: 1-40 chars, ASCII
 // lowercase letters, digits, hyphens, must start with a letter or digit.
 // Validating client-side avoids a round-trip on obvious typos; the
-// server is still the source of truth.
+// server is still the source of truth. Drift against the server copy is
+// guarded by TestChannelNameRegexMatchesServer.
 var channelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 // ChannelNameRe exposes channelNameRe to the cross-package drift test in
-// channels_regex_drift_test.go, which compares it against the server's
-// equivalent. Aliased instead of inlined so the runtime validator and
-// the test see the same compiled pattern.
+// apps/server/internal/http/channels_regex_drift_test.go
+// (TestChannelNameRegexMatchesServer), which compares it against the
+// server's equivalent. Aliased instead of inlined so the runtime
+// validator and the test see the same compiled pattern.
 var ChannelNameRe = channelNameRe
 
 // Channels implements `chatd channels`. With no sub-subcommand it lists
