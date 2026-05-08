@@ -31,4 +31,8 @@ export default defineWorkspace([
     extends: "./phase-3/changelog-entry/vitest.config.ts",
     test: { name: "changelog-entry" },
   },
+  {
+    extends: "./phase-8/channel-ws-drift/vitest.config.ts",
+    test: { name: "channel-ws-drift" },
+  },
 ]);
