@@ -101,4 +101,31 @@ describe("Client", () => {
     const c = createClient({ baseUrl: "http://srv", fetch: fetchImpl });
     expect(typeof c.watch).toBe("function");
   });
+
+  it("renameChannel hits PATCH /api/channels/{id} and returns the renamed channel", async () => {
+    const calls: { method: string; url: string; body: string | null }[] = [];
+    const fetchImpl: FetchLike = (input, init) => {
+      calls.push({
+        method: init?.method ?? "GET",
+        url: urlOf(input),
+        body: typeof init?.body === "string" ? init.body : null,
+      });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: { id: "C1", name: "renamed", created_at: "2026-01-01T00:00:00Z" },
+            error: null,
+          }),
+          { status: 200 },
+        ),
+      );
+    };
+    const c = createClient({ baseUrl: "http://srv", fetch: fetchImpl });
+    const ch = await c.renameChannel("C1", "renamed");
+    expect(ch.name).toBe("renamed");
+    expect(calls[0]?.method).toBe("PATCH");
+    expect(calls[0]?.url).toBe("http://srv/api/channels/C1");
+    expect(JSON.parse(calls[0]?.body ?? "{}")).toEqual({ name: "renamed" });
+  });
 });
