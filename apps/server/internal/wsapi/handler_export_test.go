@@ -8,5 +8,8 @@ package wsapi
 // userIDForTesting exposes the unexported userID field on connSubscriber.
 func (c *connSubscriber) userIDForTesting() string { return c.userID }
 
-// channelForTesting exposes the unexported channel field on connSubscriber.
-func (c *connSubscriber) channelForTesting() string { return c.channel }
+// channelsForTesting exposes the unexported channels slice on
+// connSubscriber. Returns the bound topic list in subscribe order
+// (channel topic first, `user:<viewer>` inbox topic second when the
+// connection is authenticated).
+func (c *connSubscriber) channelsForTesting() []string { return c.channels }
