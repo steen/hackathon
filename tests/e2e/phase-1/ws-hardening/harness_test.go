@@ -131,7 +131,7 @@ func startServer(t *testing.T, opts startServerOpts) *runningServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binPath)
 	env := append(os.Environ(),
-		fmt.Sprintf("CHAT_SERVER_PORT=%d", port),
+		fmt.Sprintf("CHAT_LISTEN_ADDR=127.0.0.1:%d", port),
 		"CHAT_JWT_SECRET="+jwtSecret,
 		"CHAT_INVITE_CODE="+invite,
 		"CHAT_DB_PATH="+dbPath,

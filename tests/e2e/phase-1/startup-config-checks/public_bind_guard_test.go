@@ -34,7 +34,6 @@ func TestAC3_ServerRefusesPublicBindWithoutOverride(t *testing.T) {
 			"CHAT_INVITE_CODE": randomSecret(t, 8),
 			"CHAT_DB_PATH":     dbPath,
 			"CHAT_LISTEN_ADDR": fmt.Sprintf("0.0.0.0:%d", port),
-			"CHAT_SERVER_PORT": fmt.Sprintf("%d", port),
 			// CHAT_ALLOW_PUBLIC_BIND deliberately absent.
 		}
 
@@ -60,7 +59,6 @@ func TestAC3_ServerRefusesPublicBindWithoutOverride(t *testing.T) {
 			"CHAT_INVITE_CODE":       randomSecret(t, 8),
 			"CHAT_DB_PATH":           dbPath,
 			"CHAT_LISTEN_ADDR":       fmt.Sprintf("0.0.0.0:%d", port),
-			"CHAT_SERVER_PORT":       fmt.Sprintf("%d", port),
 			"CHAT_ALLOW_PUBLIC_BIND": "1",
 		}
 
@@ -77,7 +75,6 @@ func TestAC3_ServerRefusesPublicBindWithoutOverride(t *testing.T) {
 			"CHAT_INVITE_CODE": randomSecret(t, 8),
 			"CHAT_DB_PATH":     dbPath,
 			"CHAT_LISTEN_ADDR": fmt.Sprintf("127.0.0.1:%d", port),
-			"CHAT_SERVER_PORT": fmt.Sprintf("%d", port),
 		}
 
 		successStartServer(t, env, port)

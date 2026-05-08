@@ -85,7 +85,7 @@ export default async function setup(): Promise<() => Promise<void>> {
   child = spawn(serverBin, [], {
     env: {
       ...process.env,
-      CHAT_SERVER_PORT: String(port),
+      CHAT_LISTEN_ADDR: `127.0.0.1:${String(port)}`,
       CHAT_DB_PATH: dbPath,
       CHAT_JWT_SECRET: jwtSecret,
       CHAT_INVITE_CODE: inviteCode,

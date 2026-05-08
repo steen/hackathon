@@ -58,7 +58,7 @@ func startServer(t *testing.T) *runningServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, binPath)
 	cmd.Env = append(os.Environ(),
-		fmt.Sprintf("CHAT_SERVER_PORT=%d", port),
+		fmt.Sprintf("CHAT_LISTEN_ADDR=127.0.0.1:%d", port),
 		// PR #28: SEC-1 needs a strong, non-denylisted secret. Generated
 		// per-test from crypto/rand so no fake-secret literal is committed
 		// to git; lives only in this test process's env.
@@ -241,7 +241,7 @@ func fetchSubscriberCount(url string) (int, error) {
 }
 
 func TestAC4_ServerWsHub_ServerListensOnConfiguredPort(t *testing.T) {
-	// startServer launches the binary with CHAT_SERVER_PORT set and then
+	// startServer launches the binary with CHAT_LISTEN_ADDR set and then
 	// waits for the chosen port to be listening. If the env var were
 	// ignored or the default port hardcoded, waitForPort would time out
 	// and startServer would already have failed. The dial here is a

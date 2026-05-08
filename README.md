@@ -70,7 +70,7 @@ For demo deploys the web app is embedded into the server binary, so `go build ./
 
 ## Server environment variables
 
-The server reads the following at startup (`apps/server/internal/config/config.go` + `apps/server/main.go`). Validation runs once at boot; failures abort the process before any port is opened. A copy-pasteable starter template lives at [`.env.example`](.env.example) — every variable below is documented inline with its failure mode. The drift-check script `node scripts/check-env-example.mjs` asserts the template stays in sync with the Go source (it scans every `Env*`-prefixed const in `config.go` and the legacy `*Env` const block in `main.go`).
+The server reads the following at startup (`apps/server/internal/config/config.go`). Validation runs once at boot; failures abort the process before any port is opened. A copy-pasteable starter template lives at [`.env.example`](.env.example) — every variable below is documented inline with its failure mode. The drift-check script `node scripts/check-env-example.mjs` asserts the template stays in sync with the Go source (it scans every `Env*`-prefixed const in `config.go`).
 
 | Var | Required | Default | Purpose |
 |-----|----------|---------|---------|
@@ -82,7 +82,6 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 | `CHAT_ALLOWED_ORIGINS` | no | same-origin only | Comma-separated WebSocket `Origin` allowlist. Stray empty entries are dropped. |
 | `CHAT_TRUSTED_PROXY` | no | `0` | Set to `1` to honor the leftmost `X-Forwarded-For` entry as the source IP for the access log, the per-IP rate-limit key, and auth-event audit rows. Any other value (unset, `0`, `true`, `yes`) leaves the safe default in place: trust only `RemoteAddr`. PRD §9 / §11 documents only the binary on/off form. |
 | `CHAT_LOG_LEVEL` | no | `info` | One of `debug`, `info`, `warn`, `error`. Unrecognized values fall back to `info` and emit a single startup `WARN` naming the bad value. |
-| `CHAT_SERVER_PORT` | no | — | Legacy compatibility — replaces the port half of `CHAT_LISTEN_ADDR` without changing the host. Prefer `CHAT_LISTEN_ADDR` for new configs. |
 | `CHAT_BCRYPT_COST` | no | `10` | Bcrypt cost for password hashing (PRD §9 / OWASP floor). Accepted range `[10, 31]`; out-of-range, non-numeric, or empty-after-trim values are rejected at startup with `config: CHAT_BCRYPT_COST=… out of range [10, 31]` (or `… is not an integer`). Existing stored hashes verify against the cost embedded in each hash, so raising the cost does not break old logins. |
 
 ### Client environment variable
@@ -98,7 +97,7 @@ The server reads the following at startup (`apps/server/internal/config/config.g
 - **`CHAT_LISTEN_ADDR=… is non-loopback`** — keep the default, or set `CHAT_ALLOW_PUBLIC_BIND=1` if you actually want to expose the port.
 - **Web app loads but registration fails with a 4xx** — the invite code in the browser must match `$CHAT_INVITE_CODE` in the server's shell.
 - **Web app loads but WebSocket doesn't connect** — check the server is on `127.0.0.1:8080` (Vite proxies there); if you moved it, set `CHAT_ALLOWED_ORIGINS=http://localhost:5173` and adjust the Vite proxy.
-- **`port 5173 is already in use` / `port 8080 is already in use`** — kill the stragglers, or set `CHAT_SERVER_PORT` (server) and rerun `pnpm dev` after editing `apps/web/vite.config.ts`'s proxy target.
+- **`port 5173 is already in use` / `port 8080 is already in use`** — kill the stragglers, or set `CHAT_LISTEN_ADDR=127.0.0.1:<port>` (server) and rerun `pnpm dev` after editing `apps/web/vite.config.ts`'s proxy target.
 - **Phase-0 mode (no auth, no DB)** — happens when `CHAT_DB_PATH` is unset. Register/login endpoints are not mounted; use it only for the smoke harness.
 
 ## Tests and CI mirror

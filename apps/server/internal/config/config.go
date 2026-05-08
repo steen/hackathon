@@ -19,6 +19,8 @@ import (
 const (
 	EnvJWTSecret       = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
 	EnvInviteCode      = "CHAT_INVITE_CODE"
+	EnvDBPath          = "CHAT_DB_PATH"
+	EnvAllowedOrigins  = "CHAT_ALLOWED_ORIGINS"
 	EnvListenAddr      = "CHAT_LISTEN_ADDR"
 	EnvAllowPublicBind = "CHAT_ALLOW_PUBLIC_BIND"
 	// EnvTrustedProxy names the deferred PRD §9 trusted-proxy parser env

@@ -61,7 +61,7 @@ trap cleanup EXIT INT TERM HUP
 # collisions in CI runners with concurrent jobs.
 pick_free_port() {
   if ! command -v python3 >/dev/null 2>&1; then
-    echo "[smoke] python3 is required to pick a free port (or set CHAT_SERVER_PORT)" >&2
+    echo "[smoke] python3 is required to pick a free port (or set CHAT_LISTEN_ADDR)" >&2
     exit 1
   fi
   python3 - <<'PY'
@@ -84,7 +84,16 @@ echo "[smoke] building server + chatd..."
 go build -o "$SERVER_BIN" ./apps/server
 go build -o "$CHATD_BIN" ./apps/cli
 
-PORT="${CHAT_SERVER_PORT:-$(pick_free_port)}"
+# Honor an operator-supplied CHAT_LISTEN_ADDR (e.g. from the e2e smoke
+# harness reserving a held port to force a bind failure); otherwise pick
+# a free port and synthesize a loopback address.
+if [[ -n "${CHAT_LISTEN_ADDR:-}" ]]; then
+  # Strip "host:" prefix; supports both "127.0.0.1:NNNN" and "[::1]:NNNN".
+  PORT="${CHAT_LISTEN_ADDR##*:}"
+else
+  PORT="$(pick_free_port)"
+  CHAT_LISTEN_ADDR="127.0.0.1:${PORT}"
+fi
 API_URL="http://127.0.0.1:${PORT}"
 # The phase-2 CLI honors a base URL (http or https), not a ws:// endpoint.
 # Override CHAT_SERVER for the chatd invocations below.
@@ -100,7 +109,7 @@ SMOKE_JWT_SECRET="$(openssl rand -hex 20)"      # 40 hex chars, well over the 32
 SMOKE_INVITE_CODE="$(openssl rand -hex 8)"      # 16 hex chars
 
 echo "[smoke] starting server on :${PORT}"
-CHAT_SERVER_PORT="$PORT" \
+CHAT_LISTEN_ADDR="$CHAT_LISTEN_ADDR" \
   CHAT_DB_PATH="$DB_PATH" \
   CHAT_JWT_SECRET="$SMOKE_JWT_SECRET" \
   CHAT_INVITE_CODE="$SMOKE_INVITE_CODE" \
