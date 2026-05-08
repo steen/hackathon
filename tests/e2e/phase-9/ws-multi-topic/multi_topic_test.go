@@ -93,6 +93,66 @@ func TestWSMultiTopicAutoSubscribesUserInbox(t *testing.T) {
 	}
 }
 
+// TestWSDefaultChannelFallbackSubscribesGeneralAndUserInbox is the
+// AC-aligned e2e for issue #919 (the L15 default-channel fallback
+// from specs/plans/phase-9/ws-routing.md): a /ws upgrade with NO
+// ?channel= must land on the seeded `general` channel id AND
+// `user:<viewer>`. The pre-#919 production handler rejected this
+// upgrade with HTTP 400 — the test asserts the fallback now lands
+// the connection on both topics.
+func TestWSDefaultChannelFallbackSubscribesGeneralAndUserInbox(t *testing.T) {
+	srv := testsupport.StartServer(t, testsupport.StartOptions{})
+
+	username := "phase9-default-" + testsupport.RandomSecret(t, 4)
+	password := testsupport.RandomSecret(t, 12)
+	viewerID, token := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, username, password)
+
+	generalID := lookupSeededGeneralChannelID(t, srv, token)
+
+	ticket := testsupport.MintTicket(t, srv.HTTPURL, token)
+	// No ?channel= — only the ticket. The fallback must land the
+	// connection on the seeded general channel id.
+	wsURL := fmt.Sprintf("%s?ticket=%s", srv.WSURL, ticket)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, resp, err := websocket.Dial(ctx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("dial /ws (no channel param): %v", err)
+	}
+	defer c.CloseNow()
+	if resp == nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("dial /ws status=%v want 101", resp)
+	}
+
+	// AC: subscribed to the seeded general channel topic.
+	if !waitForSubCount(srv.HTTPURL, generalID, 1, 2*time.Second) {
+		got := fetchSubCount(t, srv.HTTPURL, generalID)
+		t.Fatalf("general channel topic %s: got %d subscriber(s) want 1 within 2s", generalID, got)
+	}
+
+	// AC: subscribed to `user:<viewer>` inbox topic alongside general.
+	inbox := "user:" + viewerID
+	if !waitForSubCount(srv.HTTPURL, inbox, 1, 2*time.Second) {
+		got := fetchSubCount(t, srv.HTTPURL, inbox)
+		t.Fatalf("inbox topic %s: got %d subscriber(s) want 1 within 2s", inbox, got)
+	}
+
+	// Close path tears down both topics.
+	if err := c.Close(websocket.StatusNormalClosure, ""); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if !waitForSubCount(srv.HTTPURL, generalID, 0, 2*time.Second) {
+		t.Fatalf("general channel topic %s did not drop to 0 within 2s after close", generalID)
+	}
+	if !waitForSubCount(srv.HTTPURL, inbox, 0, 2*time.Second) {
+		t.Fatalf("inbox topic %s did not drop to 0 within 2s after close", inbox)
+	}
+}
+
 // fetchSubCount issues GET /debug/subs?channel=<topic> against the
 // server and parses the "<n>\n" body. /debug/subs is loopback-only
 // and returns the hub's SubscriberCount for any topic — channel ids
@@ -151,10 +211,10 @@ func waitForSubCount(httpURL, topic string, want int, timeout time.Duration) boo
 }
 
 // lookupSeededGeneralChannelID lists channels with the given bearer
-// token and returns the seeded "general" channel id. Phase 9 WS
-// upgrades still require a real channel id under the production
-// `cfg.ChannelLookup` wiring (the L15 default-channel fallback is the
-// W sub-issue's responsibility).
+// token and returns the seeded "general" channel id. The id is used
+// both as the explicit ?channel= value in the multi-topic test above
+// and as the expected fallback target in the L15 default-channel
+// test (issue #919).
 func lookupSeededGeneralChannelID(t *testing.T, srv *testsupport.Server, bearer string) string {
 	t.Helper()
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.HTTPURL+"/api/channels", nil)

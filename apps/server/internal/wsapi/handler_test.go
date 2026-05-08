@@ -291,8 +291,12 @@ func TestHandlerRejectsUnknownChannel(t *testing.T) {
 	}
 }
 
-// With cfg.ChannelLookup wired (production path), an upgrade missing
-// ?channel= must reject with HTTP 400 BEFORE the WebSocket handshake.
+// With cfg.ChannelLookup wired but no DefaultChannelResolver, an
+// upgrade missing ?channel= must reject with HTTP 400 BEFORE the
+// WebSocket handshake. This covers the test/in-tree configuration that
+// wires only ChannelLookup (e.g. wsapi-internal tests below); the
+// production path under L15 wires the resolver and is exercised by
+// TestHandlerDefaultChannelResolverFallback.
 func TestHandlerRejectsMissingChannelWhenLookupWired(t *testing.T) {
 	h := hub.New()
 	calls := 0
@@ -693,5 +697,164 @@ func TestHandlerMalformedChannelIDRejected(t *testing.T) {
 	}
 	if called {
 		t.Fatal("ChannelLookup invoked for malformed id; should be rejected by normalizer first")
+	}
+}
+
+// L15 default-channel fallback: with cfg.DefaultChannelResolver wired,
+// a /ws upgrade with no ?channel= resolves to the resolver's id and
+// subscribes to BOTH that channel topic AND `user:<viewer>`. Locks in
+// the spec at specs/plans/phase-9/ws-routing.md (the W sub-issue).
+func TestHandlerDefaultChannelResolverFallback(t *testing.T) {
+	h := hub.New()
+	const defaultID = "01HDEFAULTDEFAULTDEFAULTDE"
+	resolverCalls := 0
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, id string) (bool, error) {
+			return id == defaultID, nil
+		},
+		DefaultChannelResolver: func(_ context.Context) (string, error) {
+			resolverCalls++
+			return defaultID, nil
+		},
+	}
+	ts := auth.NewTicketStore()
+	srv := httptest.NewServer(Handler(h, ts, cfg))
+	defer srv.Close()
+
+	const owner = "user-default-fallback"
+	tok, _ := ts.Issue(owner)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, defaultID, 1, 2*time.Second); err != nil {
+		t.Fatalf("default channel topic: %v", err)
+	}
+	if err := waitForSubscribers(h, "user:"+owner, 1, 2*time.Second); err != nil {
+		t.Fatalf("user-inbox topic: %v", err)
+	}
+	if resolverCalls != 1 {
+		t.Fatalf("DefaultChannelResolver calls: got %d want 1", resolverCalls)
+	}
+
+	subs := h.SnapshotSubscribers(defaultID)
+	if len(subs) != 1 {
+		t.Fatalf("subs: got %d want 1", len(subs))
+	}
+	cs, ok := subs[0].(*connSubscriber)
+	if !ok {
+		t.Fatalf("subscriber type: got %T want *connSubscriber", subs[0])
+	}
+	wantTopics := []string{defaultID, "user:" + owner}
+	gotTopics := cs.channelsForTesting()
+	if len(gotTopics) != len(wantTopics) {
+		t.Fatalf("channels: got %v want %v", gotTopics, wantTopics)
+	}
+	for i := range wantTopics {
+		if gotTopics[i] != wantTopics[i] {
+			t.Fatalf("channels[%d]: got %q want %q (full got=%v want=%v)",
+				i, gotTopics[i], wantTopics[i], gotTopics, wantTopics)
+		}
+	}
+}
+
+// L15 fallback: an explicit ?channel= takes precedence over the
+// resolver, and the resolver is not invoked. Guards against a future
+// refactor that flips the order or always consults the resolver.
+func TestHandlerExplicitChannelSkipsDefaultResolver(t *testing.T) {
+	h := hub.New()
+	const explicit = "01HEXPLICITEXPLICITEXPLICI"
+	resolverCalls := 0
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, id string) (bool, error) {
+			return id == explicit, nil
+		},
+		DefaultChannelResolver: func(_ context.Context) (string, error) {
+			resolverCalls++
+			return "01HUNREACHABLEUNREACHABLEU", nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?channel=" + explicit
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, explicit, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if resolverCalls != 0 {
+		t.Fatalf("DefaultChannelResolver invoked %d time(s) when ?channel= was explicit; want 0", resolverCalls)
+	}
+}
+
+// L15 fallback: a resolver error becomes HTTP 500 (no upgrade), same
+// shape as a ChannelLookup error.
+func TestHandlerDefaultChannelResolverErrorReturns500(t *testing.T) {
+	h := hub.New()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return true, nil
+		},
+		DefaultChannelResolver: func(_ context.Context) (string, error) {
+			return "", errors.New("synthetic resolver failure")
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("status: got %d want 500", resp.StatusCode)
+	}
+}
+
+// L15 fallback: a resolver that returns an id ChannelLookup rejects
+// surfaces as HTTP 404 (channel arm) rather than a silent
+// subscribe-to-nothing. Guards against a wiring drift where the
+// resolver and the lookup disagree (e.g. the seeded channel was
+// deleted out-of-band).
+func TestHandlerDefaultChannelResolverIDRejectedByLookup(t *testing.T) {
+	h := hub.New()
+	cfg := Config{
+		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
+			return false, nil
+		},
+		DefaultChannelResolver: func(_ context.Context) (string, error) {
+			return "01HSTALERESOLVERSTALERESOL", nil
+		},
+	}
+	srv := httptest.NewServer(Handler(h, nil, cfg))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/ws")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404", resp.StatusCode)
 	}
 }
