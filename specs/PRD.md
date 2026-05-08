@@ -53,6 +53,8 @@ Privacy-respecting, friend-scale chat that you fully control — accessible from
 - Default `#general` channel seeded on first run
 - Server-side logout (JWT invalidation via per-user token version)
 - Auth audit log (register / login success / login fail / logout)
+- Direct messages, 1:1 only (Phase 9)
+- Server-tracked read state for channels and DMs (Phase 9)
 
 **Technical**
 - Go HTTP + WebSocket server, single binary, embedded web assets
@@ -425,12 +427,54 @@ Outbound (server → client):
 { "type": "message",  "data": { "id", "channel_id", "sender_user_id", "body", "created_at" } }
 { "type": "presence", "data": { "kind": "join" | "leave", "user_id": "..." } }
 { "type": "channel",  "data": { "kind": "create" | "rename", "channel": { "id", "name", "created_at" } } }
+{ "type": "dm",       "data": { "conversation": <Conversation>, "dm_message": <DMMessage> } }
+{ "type": "read",     "data": { "scope": "channel" | "dm", "target_id": "...", "last_read_message_id": "...", "unread_count": 0 } }
 { "type": "error",    "data": { "code", "message" } }
 ```
+
+Phase 9 extends the topic model: every authenticated WS connection subscribes to **two** Hub topics for its lifetime — the channel topic (per the existing `?channel=<id>` upgrade parameter, or the legacy `defaultChannel = "#general"` fallback when omitted) AND the user-inbox topic `user:<viewer>` (decision §4, §10, L15). The `?channel=` parameter remains optional under the legacy default to preserve existing go-client/CLI behavior; new clients can pass an explicit channel id. Frames are routed by topic:
+
+- `message` and `presence` frames flow over the channel topic (existing behavior — no change).
+- `channel` frames remain global broadcasts via `Hub.BroadcastAll`.
+- `dm` frames are emitted to `user:<sender>` and `user:<recipient>` after `POST /api/dms/{id}/messages`. The frame is **self-sufficient on first contact** (§8): the embedded `conversation` block carries the peer summary and `last_message_at` so the recipient's client can render the sidebar entry without a `GET /api/dms` round-trip.
+- `read` frames are emitted to the originating viewer's `user:<viewer>` topic only (cross-device sync; no peer fan-out per L10).
 
 `presence` frames are global join/leave deltas; clients seed the full set from `GET /api/presence` on (re)connect.
 
 `channel` frames are global broadcasts emitted after a successful `POST /api/channels` or `PATCH /api/channels/{id}`; every connected client receives them regardless of which channel their WS connection is scoped to (channel listings live outside the per-WS channel scope). Inbound channel frames remain forbidden — the sender-spoofing rule from §"Design deviations" is unchanged; clients never write channel events into the WS.
+
+### Direct messages (Phase 9)
+
+```
+POST /api/dms                   { "peer_user_id" }    → 201 on create / 200 on existing,
+                                                        body: <Conversation>
+GET  /api/dms                   (Bearer)              → { "conversations": [ <Conversation> ] }
+                                                        # only conversations with at least one message
+POST /api/dms/{id}/messages     { "body" }            → <DMMessage>   # 201; 404 on non-participation
+GET  /api/dms/{id}/messages?limit=50&before=<msg_id>
+                                                      → { "messages": [ <DMMessage> ] }
+```
+
+`POST /api/dms` is idempotent — given a peer, it find-or-creates the conversation in a single transaction (canonical pair ordering `user_a_id < user_b_id`; locked-in default L2). 201 is returned when the row was inserted, 200 when it already existed (L18). Self-DM (`peer_user_id == viewer`) returns 400.
+
+`POST /api/dms/{id}/messages` shares its `MaxMessageBodyBytes = 4096` cap with channel messages (L16). Non-participation in the conversation returns 404, matching the channel-membership pattern (L8). The handler runs `InsertDMMessageTx`, which atomically inserts the message, advances `dm_conversations.last_message_id`/`last_message_at`, and materializes (or advance-only-updates) the sender's `dm_reads` row to the new message id (§11 / L21). Successful sends emit a `{type:"dm"}` WS frame to both participants' `user:<viewer>` topics.
+
+`GET /api/dms` lists every conversation in which the viewer participates AND that has at least one message (decision §3 — empty conversations are hidden from the sidebar). The listing is ordered by `last_message_at DESC` and carries no body preview (§9). Each row includes the peer's `{id, username}` summary so the client can render the sidebar without a second `/api/users` lookup. No pagination in v1 (L12).
+
+A new shared rate-limit bucket — `dm-write` (burst 10 / refill 1m) — gates `POST /api/dms/{id}/messages` per user. The shape mirrors the channel-write bucket; both are configured in `apps/server/internal/ratelimit/config.go` (L17).
+
+### Read state (Phase 9)
+
+```
+POST /api/channels/{id}/read    { "message_id" }     → { "ok": true }
+POST /api/dms/{id}/read         { "message_id" }     → { "ok": true }
+```
+
+Read state is server-authoritative and tracked per `(viewer, target)` pair so a viewer's "unread" badge survives across devices and reconnects (§5, §7). The `message_id` body field is required (L5); the handler refuses to advance to a message id less than the existing `last_read_*` (advance-only) and refuses to advance past the conversation's current `last_message_id`. A new shared rate-limit bucket — `read-mark` (burst 50 / refill 1m) — gates both endpoints per user (L17).
+
+Channel listings (`GET /api/channels`) and DM listings (`GET /api/dms`) carry an additive `unread_count` field so a fresh login can render badges without N round-trips. The asymmetric initialization rules (auto-materialize for channels, lazy-NULL for DMs) are documented in §11 and `specs/plans/phase-9/read-state.md`.
+
+WebSocket emits `{type:"read"}` frames so a viewer's other devices update their badge in real time (§7). The frame is fanned out only to the originating viewer's `user:<viewer>` topic; peers do not see read receipts (L10).
 
 ### Design deviations from earlier PRD revisions
 
@@ -495,6 +539,59 @@ Phase 2 implementation locked in several divergences from the original spec. Eac
 - Manual cross-client demo: CLI ↔ Web round-trip.
 - One-command bring-up: `pnpm dev`.
 - README documents quick start.
+
+### Schema additions (Phase 9)
+
+Phase 9 adds four tables in a single migration `migrations/0005_dms_and_read_state.sql` (locked-in default L23). Every column listed below is part of the contract; new columns require a fresh migration plus a wire-types coordinated update (CLAUDE.md "Wire types").
+
+`dm_conversations` — one row per ordered pair of users with at least one shared message attempt:
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT (ULID) | primary key (L1) |
+| `user_a_id` | TEXT (ULID) | NOT NULL; canonical pair ordering `user_a_id < user_b_id` (L2) |
+| `user_b_id` | TEXT (ULID) | NOT NULL; UNIQUE(`user_a_id`, `user_b_id`) |
+| `last_message_id` | TEXT NULLABLE | denormalized for the listing query (L11); NULL until first message |
+| `last_message_at` | TIMESTAMP NULLABLE | denormalized for the listing query (L11); NULL until first message |
+| `created_at` | TIMESTAMP | NOT NULL |
+
+Indexes: `(user_a_id)`, `(user_b_id)` for the listing query (L13).
+
+`dm_messages` — one row per DM (immutable per L9):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | TEXT (ULID) | primary key |
+| `conversation_id` | TEXT (ULID) | NOT NULL; FK → `dm_conversations.id` |
+| `sender_user_id` | TEXT (ULID) | NOT NULL |
+| `body` | TEXT | NOT NULL; cap = `MaxMessageBodyBytes = 4096` (L16) |
+| `created_at` | TIMESTAMP | NOT NULL |
+
+Indexes: `(conversation_id, id)` for paginated history (`?before=` cursor reuses the channel-message ULID-cursor pattern).
+
+`channel_reads` — viewer-per-channel read pointer (auto-materialized by `GET /api/channels`):
+
+| Column | Type | Notes |
+|---|---|---|
+| `channel_id` | TEXT (ULID) | NOT NULL; PK part 1 |
+| `user_id` | TEXT (ULID) | NOT NULL; PK part 2 |
+| `last_read_message_id` | TEXT (ULID) | NOT NULL; pinned at first-list to `channels.last_message_id` (§11 / decision-log §11) |
+| `updated_at` | TIMESTAMP | NOT NULL |
+
+Auto-materialization rule: every `GET /api/channels` request runs `INSERT OR IGNORE` for any (channel, viewer) row missing under the same transaction as the listing query, so a brand-new user sees `0 unread` on existing-history channels (rationale: every authenticated user is a member of every channel — PRD §9 — and the alternative behavior would surface "50K unread" on signup).
+
+`dm_reads` — viewer-per-DM read pointer (lazy NULL):
+
+| Column | Type | Notes |
+|---|---|---|
+| `conversation_id` | TEXT (ULID) | NOT NULL; PK part 1; FK → `dm_conversations.id` |
+| `user_id` | TEXT (ULID) | NOT NULL; PK part 2 |
+| `last_read_dm_message_id` | TEXT (ULID) NULLABLE | NULL means "viewer has never explicitly read" (treated as "all peer messages unread") |
+| `updated_at` | TIMESTAMP | NOT NULL |
+
+Asymmetric initialization: `GET /api/dms` does NOT auto-materialize `dm_reads` rows (decision-log §11). The sender's row is materialized inside `InsertDMMessageTx` (advance-only on subsequent sends — L21). The recipient's row is created only by the explicit `POST /api/dms/{id}/read` call (after the user has seen the messages). Until then NULL → all peer messages unread → correct badge for offline-arrived DMs.
+
+Channel listings additively gain `unread_count` (and the embedded `last_message_id`/`last_message_at` denormalized columns become wire-visible). DM listings carry `unread_count` and the peer summary alongside the conversation row. Wire shapes for both are spelled out in `specs/plans/phase-9/dms.md` and `specs/plans/phase-9/read-state.md`.
 
 ### UX
 
@@ -567,6 +664,13 @@ Deliverables:
 ## 13. Future Considerations
 
 Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will require real schema and code changes at the time it ships — they are intentionally **not** prepared for in MVP code.
+
+### Shipped post-MVP
+
+- **Direct messages, 1:1 only** — shipped Phase 9. See `specs/plans/phase-9/dms.md` for wire-type definitions and the `{type:"dm"}` envelope.
+- **Server-tracked read state for channels and DMs** — shipped Phase 9. See `specs/plans/phase-9/read-state.md` for `channel_reads` / `dm_reads` schema and the `{type:"read"}` envelope.
+
+### Roadmap
 
 - **TUI client** — Bubble Tea three-pane reusing `packages/go-client`.
 - **E2E encryption** — libsodium sealed boxes per channel; ratcheted session keys. Adds public keys to users, ciphertext envelope (`payload`/`nonce`/`sender_key_id`/`recipient_wraps`) to messages, and key-management UX to clients.
