@@ -16,13 +16,16 @@ import (
 
 // channelNameRe pins the friend-group-safe shape: 1-40 chars, ASCII
 // lowercase letters, digits, hyphens. Lowercase-only avoids the
-// Slack-style "is #General the same as #general?" foot-gun.
+// Slack-style "is #General the same as #general?" foot-gun. Drift
+// against the CLI copy (apps/cli/cmd/channels.go) is guarded by
+// TestChannelNameRegexMatchesServer.
 var channelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
 // ChannelNameRe exposes channelNameRe to the cross-package drift test in
-// apps/cli/cmd/channels_regex_drift_test.go, which compares it against
-// the CLI's equivalent. Aliased instead of inlined so the runtime
-// validator and the test see the same compiled pattern.
+// apps/server/internal/http/channels_regex_drift_test.go
+// (TestChannelNameRegexMatchesServer), which compares it against the
+// CLI's equivalent. Aliased instead of inlined so the runtime validator
+// and the test see the same compiled pattern.
 var ChannelNameRe = channelNameRe
 
 // ChannelsDeps is everything the channel handlers need wired in.
