@@ -10,10 +10,22 @@ import (
 
 // Channel mirrors a row in the channels table. Fields are exported so
 // HTTP handlers can JSON-encode them directly without an extra DTO.
+//
+// LastMessageID and LastMessageAt are denormalized pointers populated
+// by the message-insert transaction in a later phase-9 sub-issue (D).
+// Until that lands the existing SELECTs in this file do not scan them,
+// so they stay nil and `omitempty` keeps the HTTP wire shape unchanged
+// — JSON omits the keys entirely when nil. D ships the populating
+// transaction and the wire mirror in `packages/go-client/channels.go`
+// + `packages/api-client/src/types.ts` together (CLAUDE.md "Wire
+// types" rule). Once D is in place, ListChannels/GetChannel/etc. can
+// extend their SELECT/Scan and these fields surface in JSON.
 type Channel struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastMessageID *string    `json:"last_message_id,omitempty"`
+	LastMessageAt *time.Time `json:"last_message_at,omitempty"`
 }
 
 // ErrChannelNameTaken is returned by CreateChannel when the UNIQUE
