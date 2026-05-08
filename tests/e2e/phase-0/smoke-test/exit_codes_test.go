@@ -54,7 +54,7 @@ func TestAC2_SmokeScriptExitsZeroOnSuccessNonZeroWithClearErrorOnFailure(t *test
 
 	cmd := exec.CommandContext(ctx, "bash", script)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "CHAT_SERVER_PORT="+strconv.Itoa(port))
+	cmd.Env = append(os.Environ(), "CHAT_LISTEN_ADDR=127.0.0.1:"+strconv.Itoa(port))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

@@ -166,7 +166,6 @@ func baselineValidEnv(t *testing.T) map[string]string {
 		"CHAT_INVITE_CODE": randomSecret(t, 8),
 		"CHAT_DB_PATH":     dbPath,
 		"CHAT_LISTEN_ADDR": fmt.Sprintf("127.0.0.1:%d", port),
-		"CHAT_SERVER_PORT": fmt.Sprintf("%d", port),
 	}
 }
 

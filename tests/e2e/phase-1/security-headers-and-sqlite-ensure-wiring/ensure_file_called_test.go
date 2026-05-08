@@ -96,7 +96,7 @@ func TestAC3_EnsureFileInvokedBeforeSQLiteOpen(t *testing.T) {
 		t.Cleanup(cancel)
 		cmd := exec.CommandContext(ctx, binPath)
 		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("CHAT_SERVER_PORT=%d", port),
+			fmt.Sprintf("CHAT_LISTEN_ADDR=127.0.0.1:%d", port),
 			"CHAT_JWT_SECRET="+randomSecret(t, 32),
 			"CHAT_INVITE_CODE="+randomSecret(t, 8),
 			"CHAT_DB_PATH="+dbPath,

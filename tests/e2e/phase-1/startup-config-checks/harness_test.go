@@ -174,7 +174,7 @@ func tryStartServer(t *testing.T, env map[string]string) (exitCode int, output s
 // successStartServer launches the binary in the background with the
 // supplied env, waits for its TCP port to be listening, and registers a
 // Cleanup that stops it. Use this for positive-path checks that a valid
-// env actually boots. Caller must set CHAT_SERVER_PORT in env to match
+// env actually boots. Caller must set CHAT_LISTEN_ADDR in env to match
 // `port`.
 func successStartServer(t *testing.T, env map[string]string, port int) {
 	t.Helper()

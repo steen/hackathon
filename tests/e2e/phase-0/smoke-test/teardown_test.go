@@ -66,7 +66,7 @@ func TestAC3_SmokeScriptTearsDownAllSpawnedProcessesOnCompletion(t *testing.T) {
 		defer ln.Close()
 		port := ln.Addr().(*net.TCPAddr).Port
 
-		env := []string{"CHAT_SERVER_PORT=" + strconv.Itoa(port)}
+		env := []string{"CHAT_LISTEN_ADDR=127.0.0.1:" + strconv.Itoa(port)}
 		runAndAssertNoLeftovers(t, root, script, env, false)
 	})
 }

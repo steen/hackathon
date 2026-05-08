@@ -112,7 +112,7 @@ async function main() {
   const server = spawn(serverBin, [], {
     env: {
       ...process.env,
-      CHAT_SERVER_PORT: String(fixturePort),
+      CHAT_LISTEN_ADDR: `127.0.0.1:${fixturePort}`,
       CHAT_DB_PATH: dbPath,
       CHAT_JWT_SECRET: jwtSecret,
       CHAT_INVITE_CODE: inviteCode,

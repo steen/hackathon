@@ -119,7 +119,7 @@ function startServer(opts: {
   const child = spawn(opts.binary, [], {
     env: {
       ...process.env,
-      CHAT_SERVER_PORT: String(opts.port),
+      CHAT_LISTEN_ADDR: `127.0.0.1:${String(opts.port)}`,
       CHAT_DB_PATH: opts.dbPath,
       CHAT_JWT_SECRET: opts.jwtSecret,
       CHAT_INVITE_CODE: opts.inviteCode,

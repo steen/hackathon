@@ -20,11 +20,6 @@ import (
 )
 
 const (
-	portEnv           = "CHAT_SERVER_PORT"
-	dbPathEnv         = "CHAT_DB_PATH"
-	jwtSecretEnv      = "CHAT_JWT_SECRET" //nolint:gosec // G101 false positive: env var name, not a credential.
-	inviteCodeEnv     = "CHAT_INVITE_CODE"
-	allowedOriginsEnv = "CHAT_ALLOWED_ORIGINS"
 	shutdownTimeout   = 5 * time.Second
 	readHeaderTimeout = 5 * time.Second
 	idleTimeout       = 120 * time.Second
@@ -82,36 +77,33 @@ func run() error {
 		)
 	}
 
-	listenAddr, err := resolveListenAddr(cfg.ListenAddr, os.Getenv(portEnv))
-	if err != nil {
-		return fmt.Errorf("config: %w", err)
-	}
+	listenAddr := cfg.ListenAddr
 
 	deps := wiring.Deps{
 		Hub:            hub.New(),
-		AllowedOrigins: parseAllowedOrigins(os.Getenv(allowedOriginsEnv)),
+		AllowedOrigins: parseAllowedOrigins(os.Getenv(config.EnvAllowedOrigins)),
 	}
 	slog.Info("config check ok",
 		"name", "allowed_origins_parsed",
-		"env", allowedOriginsEnv,
+		"env", config.EnvAllowedOrigins,
 		"count", len(deps.AllowedOrigins),
 	)
 
 	// openAndMigrate, requireSecret and other bootstrap helpers live in boot.go.
-	sqlDB, repository, err := openAndMigrate(os.Getenv(dbPathEnv))
+	sqlDB, repository, err := openAndMigrate(os.Getenv(config.EnvDBPath))
 	if err != nil {
 		return err
 	}
 	if sqlDB != nil {
 		defer func() { _ = sqlDB.Close() }()
-		jwtSecret, err := requireSecret(jwtSecretEnv, dbPathEnv)
+		jwtSecret, err := requireSecret(config.EnvJWTSecret, config.EnvDBPath)
 		if err != nil {
 			return err
 		}
 		deps.Repo = repository
 		deps.JWTSecret = jwtSecret
-		deps.InviteCode = os.Getenv(inviteCodeEnv)
-		slog.Info("db ready", "path", os.Getenv(dbPathEnv))
+		deps.InviteCode = os.Getenv(config.EnvInviteCode)
+		slog.Info("db ready", "path", os.Getenv(config.EnvDBPath))
 	}
 
 	srv := &http.Server{

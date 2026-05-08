@@ -121,7 +121,7 @@ func StartServer(t *testing.T, opts StartOptions) *Server {
 	// no untrusted input flows into argv. Test-only helper.
 	cmd := exec.CommandContext(ctx, binPath) //nolint:gosec // see comment
 	env := append(os.Environ(),
-		fmt.Sprintf("CHAT_SERVER_PORT=%d", port),
+		fmt.Sprintf("CHAT_LISTEN_ADDR=127.0.0.1:%d", port),
 		"CHAT_JWT_SECRET="+jwtSecret,
 		"CHAT_INVITE_CODE="+invite,
 		"CHAT_DB_PATH="+dbPath,

@@ -12,7 +12,7 @@ import (
 // AC-4: Server starts via `go run ./apps/server` and listens on a
 // configurable port (env var or default).
 //
-// startServer launches the built binary with CHAT_SERVER_PORT=<port>
+// startServer launches the built binary with CHAT_LISTEN_ADDR=127.0.0.1:<port>
 // and waitForPort blocks until the chosen port is listening. If the
 // env var were ignored the dial below would either hit the wrong port
 // or waitForPort would have already failed. The dial is a
