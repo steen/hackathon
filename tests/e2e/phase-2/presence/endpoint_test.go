@@ -52,7 +52,7 @@ func TestPresenceAC3_RESTEndpointReturnsOnlineUserIDsAndUsernames(t *testing.T) 
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 2
 	}) {
-		t.Fatalf("debug/subs#general did not reach 2 subscribers within 2s (got %d)", fetchSubscriberCount(t, srv))
+		t.Fatalf("debug/subs (seeded general channel) did not reach 2 subscribers within 2s (got %d)", fetchSubscriberCount(t, srv))
 	}
 
 	t.Run("returns_id_and_username_for_each_online_user", func(t *testing.T) {

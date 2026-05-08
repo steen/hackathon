@@ -18,25 +18,21 @@ import (
 )
 
 // Deps is the set of process-wide dependencies a feature may need.
-// Built once in main.go and passed by value into Build. Optional
-// dependencies (anything that is nil in the phase-0 boot path with
-// no DB) are documented per field.
+// Built once in main.go and passed by value into Build. CHAT_DB_PATH,
+// CHAT_JWT_SECRET, and CHAT_INVITE_CODE are all required at startup
+// (config.Validate enforces them), so every field below is non-nil /
+// non-empty by the time Build runs.
 type Deps struct {
-	// Hub is the in-process WebSocket fan-out. Always non-nil.
+	// Hub is the in-process WebSocket fan-out.
 	Hub *hub.Hub
 
-	// Repo is the SQLite-backed repository. Nil when CHAT_DB_PATH is
-	// unset (phase-0 boot path, scripts/smoke.sh's no-DB modes); auth
-	// and channels features skip their registrations in that case.
+	// Repo is the SQLite-backed repository.
 	Repo *repo.Repo
 
-	// JWTSecret is the HMAC signing key for issued JWTs. Empty when
-	// Repo is nil; main.go validates the pair before constructing
-	// Deps so wiring code can treat (Repo != nil) == (len(JWTSecret) > 0).
+	// JWTSecret is the HMAC signing key for issued JWTs.
 	JWTSecret []byte
 
-	// InviteCode gates POST /api/auth/register. May be empty when
-	// Repo is nil.
+	// InviteCode gates POST /api/auth/register.
 	InviteCode string
 
 	// AllowedOrigins is the parsed CHAT_ALLOWED_ORIGINS list, passed

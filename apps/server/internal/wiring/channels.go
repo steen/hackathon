@@ -17,14 +17,7 @@ import (
 // in a per-user token-bucket limiter (PRD §9). Order: JWT → user limiter
 // → handler, so the limiter reads the user id from the context the JWT
 // middleware set.
-//
-// Skips registration when Deps.Repo or require is nil; both come from
-// the auth feature which itself skips when there is no DB.
 func registerChannels(mux *http.ServeMux, deps Deps, require func(http.Handler) http.Handler) {
-	if deps.Repo == nil || require == nil {
-		return
-	}
-
 	ch := httpapi.NewChannelsHandlers(httpapi.ChannelsDeps{
 		Repo: deps.Repo,
 		Hub:  deps.Hub,

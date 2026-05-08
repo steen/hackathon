@@ -82,6 +82,14 @@ describe("AC-3: auth transport — Bearer on REST, ticket on WS, no bearer on WS
     const password = strongPassword();
     await c.register(username, password, inviteCode());
 
+    // The WS handler now requires ?channel=<id>; look up the seeded
+    // "general" channel.
+    const channels = await c.listChannels();
+    const general = channels.find((ch) => ch.name === "general");
+    if (!general) {
+      throw new Error("seeded 'general' channel not found");
+    }
+
     interface DialRecord {
       url: string;
       argLength: number;
@@ -125,7 +133,7 @@ describe("AC-3: auth transport — Bearer on REST, ticket on WS, no bearer on WS
     }
     vi.stubGlobal("WebSocket", SniffingWebSocket);
 
-    const ws = c.websocket();
+    const ws = c.websocket(general.id);
     const opened = new Promise<void>((resolve, reject) => {
       ws.on("open", () => {
         resolve();

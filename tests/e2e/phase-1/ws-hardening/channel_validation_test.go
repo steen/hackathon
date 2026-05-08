@@ -17,7 +17,7 @@ import (
 
 // wsDialURL builds the test WS URL via url.Values so reserved
 // characters in ticket/channel encode correctly. An empty channel
-// omits ?channel=, which the handler treats as the #general sentinel.
+// omits ?channel=; the production handler rejects that with HTTP 400.
 func wsDialURL(base, ticket, channel string) string {
 	q := url.Values{}
 	q.Set("ticket", ticket)
@@ -48,9 +48,9 @@ func wsDialURL(base, ticket, channel string) string {
 //     arm as (1) for the contract surface, but proves the lookup
 //     actually queried the DB rather than rejecting solely on
 //     NormalizeChannelID's shape check.
-//  3. Legacy "#general" sentinel + freshly-created ULID channel →
-//  101. Positive control proving the 404 in arms (1)/(2) is the
-//     channel-existence guard, not an unrelated upgrade failure.
+//  3. Freshly-created ULID channel → 101. Positive control proving
+//     the 404 in arms (1)/(2) is the channel-existence guard, not an
+//     unrelated upgrade failure.
 //
 // The harness's mintTicket helper uses a unique random username per
 // call, so each subtest's ticket is independently bound and the
@@ -92,12 +92,6 @@ func TestAC4_WSHardening_UnknownChannel_RejectedAtUpgrade(t *testing.T) {
 			channel:    "00000000000000000000NOEXIS",
 			wantStatus: http.StatusNotFound,
 			wantErr:    true,
-		},
-		{
-			name:       "legacy_general_sentinel_accepted_101",
-			channel:    "#general",
-			wantStatus: http.StatusSwitchingProtocols,
-			wantErr:    false,
 		},
 		{
 			name:       "known_channel_id_accepted_101",
@@ -150,15 +144,19 @@ func TestAC4_WSHardening_UnknownChannel_RejectedAtUpgrade(t *testing.T) {
 //
 // Steps:
 //  1. Dial /ws with an unknown channel → must yield HTTP 404.
-//  2. Immediately dial /ws with no channel (defaults to #general,
-//     which bypasses the lookup) using a fresh ticket → must yield
-//     HTTP 101 and a working bidirectional connection.
+//  2. Immediately dial /ws with a freshly created ULID channel using a
+//     fresh ticket → must yield HTTP 101 and a working bidirectional
+//     connection.
 //  3. Read once on the post-404 connection — must yield the user's
 //     own `presence:join` frame within 2s. A CloseError/EOF means
 //     the server tore the connection down; a deadline timeout means
 //     the broadcast pipeline is broken.
 func TestAC4_WSHardening_UnknownChannelDoesNotPoisonServer(t *testing.T) {
 	srv := startServer(t, startServerOpts{})
+
+	// Pre-create a real channel for the positive arm.
+	authorTok := registerForChannelCreation(t, srv)
+	knownChannelID := createChannel(t, srv, authorTok, "ac4-poison-"+randomSecret(t, 4))
 
 	// Arm 1 — bad-channel dial yields 404, no upgrade.
 	badTicket := mintTicket(t, srv)
@@ -175,14 +173,14 @@ func TestAC4_WSHardening_UnknownChannelDoesNotPoisonServer(t *testing.T) {
 		t.Fatalf("dial unknown channel: resp=%v, want status 404", respBad)
 	}
 
-	// Arm 2 — fresh ticket against the legacy sentinel must still
+	// Arm 2 — fresh ticket against a known ULID channel must still
 	// upgrade. If the bad dial had crashed the server (e.g. via a
 	// nil-pointer panic in the lookup path leaking past Recover),
 	// this connection would either fail to dial or close immediately.
 	goodTicket := mintTicket(t, srv)
 	ctxGood, cancelGood := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelGood()
-	cGood, respGood, err := websocket.Dial(ctxGood, wsDialURL(srv.wsURL, goodTicket, ""), nil)
+	cGood, respGood, err := websocket.Dial(ctxGood, wsDialURL(srv.wsURL, goodTicket, knownChannelID), nil)
 	if err != nil {
 		body := ""
 		if respGood != nil {
@@ -243,7 +241,7 @@ func TestAC4_WSHardening_UnknownChannelDoesNotPoisonServer(t *testing.T) {
 // contract has not yet landed; the parent epic for that work is
 // `feature-ws-userid-binding-and-channel-existence-check`. When that
 // contract lands, replace the t.Skip with: dial with a valid ticket
-// and channel "#general", write a JSON frame
+// and a known ULID channel, write a JSON frame
 // `{"type":"send","channel_id":"NOT-A-REAL-ULID","body":"hi"}`, expect
 // a frame back `{"type":"error","code":"CHANNEL_NOT_FOUND"}`, then
 // read once more within a short window to assert the connection is

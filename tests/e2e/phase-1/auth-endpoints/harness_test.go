@@ -251,6 +251,34 @@ func doRequest(t *testing.T, req *http.Request) (int, envelope, []byte) {
 // register POSTs /api/auth/register with the right invite code, fails
 // the test on a non-2xx, and returns the user id and freshly-issued
 // token from the success envelope.
+// seededGeneralChannelID returns the ULID of the seeded "general"
+// channel. The WS handler now requires ?channel=<id>; tests that need
+// a successful upgrade dial against this id. Caller supplies a bearer
+// token because /api/channels is auth-gated.
+func seededGeneralChannelID(t *testing.T, srv *runningServer, bearer string) string {
+	t.Helper()
+	status, env, raw := getJSON(t, srv, "/api/channels", bearer)
+	if status != http.StatusOK || !env.OK || env.Data == nil {
+		t.Fatalf("GET /api/channels: status %d body %s", status, raw)
+	}
+	var data struct {
+		Channels []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"channels"`
+	}
+	if err := json.Unmarshal(*env.Data, &data); err != nil {
+		t.Fatalf("decode channels: %v body=%s", err, raw)
+	}
+	for _, c := range data.Channels {
+		if c.Name == "general" {
+			return c.ID
+		}
+	}
+	t.Fatalf("seeded 'general' channel not found in %s", raw)
+	return ""
+}
+
 func register(t *testing.T, srv *runningServer, username, password string) (userID, token string) {
 	t.Helper()
 	status, env, raw := postJSON(t, srv, "/api/auth/register", "", map[string]string{

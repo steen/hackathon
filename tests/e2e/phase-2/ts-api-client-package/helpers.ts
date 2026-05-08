@@ -1,12 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { WebSocket as NodeWebSocket } from "ws";
-import { createClient, type Client } from "@hackathon/api-client";
+import { createClient, type Client, type WebSocketCtor } from "@hackathon/api-client";
 
 // Node has no global WebSocket on the LTS used in CI; the api-client
 // falls back to globalThis.WebSocket when no WebSocket ctor is passed.
 // Thread the `ws` package's WebSocket through every helper-built Client
 // so tests run identically on dev (where node may expose one) and CI.
-const WSCtor = NodeWebSocket as unknown as new (url: string) => WebSocket;
+// Cast through `unknown` because the `ws` package types its `WebSocket`
+// against the DOM lib's stricter `onopen: (ev: Event) => void`, while
+// api-client's WebSocketLike uses `(ev: unknown) => void` for runtime
+// portability. The shapes match at runtime.
+const WSCtor = NodeWebSocket as unknown as WebSocketCtor;
 
 export function serverUrl(): string {
   const v = process.env.E2E_SERVER_URL;

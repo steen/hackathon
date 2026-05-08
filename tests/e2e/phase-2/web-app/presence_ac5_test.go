@@ -256,13 +256,14 @@ func TestAC5_WebAppPresenceListContract(t *testing.T) {
 // own harness.
 
 type webAppPresenceServer struct {
-	httpURL    string
-	wsURL      string
-	port       int
-	jwtSecret  string
-	inviteCode string
-	cancel     context.CancelFunc
-	wait       chan struct{}
+	httpURL          string
+	wsURL            string
+	port             int
+	jwtSecret        string
+	inviteCode       string
+	generalChannelID string
+	cancel           context.CancelFunc
+	wait             chan struct{}
 }
 
 type presenceEnvelope struct {
@@ -363,7 +364,7 @@ func startWebAppPresenceServer(t *testing.T) *webAppPresenceServer {
 		cancel()
 		<-wait
 	})
-	return &webAppPresenceServer{
+	srv := &webAppPresenceServer{
 		httpURL:    fmt.Sprintf("http://127.0.0.1:%d", port),
 		wsURL:      fmt.Sprintf("ws://127.0.0.1:%d/ws", port),
 		port:       port,
@@ -372,6 +373,42 @@ func startWebAppPresenceServer(t *testing.T) *webAppPresenceServer {
 		cancel:     cancel,
 		wait:       wait,
 	}
+	srv.generalChannelID = lookupGeneralChannelID(t, srv)
+	return srv
+}
+
+// lookupGeneralChannelID registers a probe user and reads the seeded
+// "general" channel's ULID; the WS handler now requires ?channel=
+// against a real ULID.
+func lookupGeneralChannelID(t *testing.T, srv *webAppPresenceServer) string {
+	t.Helper()
+	probeName := "probe-" + randomHex(t, 4)
+	_, tok := registerUser(t, srv, probeName, randomHex(t, 12))
+	req, err := http.NewRequest(http.MethodGet, srv.httpURL+"/api/channels", nil)
+	if err != nil {
+		t.Fatalf("new GET /api/channels: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	status, env, raw := doPresenceReq(t, req)
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/channels: status %d body %s", status, raw)
+	}
+	var data struct {
+		Channels []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"channels"`
+	}
+	if err := json.Unmarshal(*env.Data, &data); err != nil {
+		t.Fatalf("decode /api/channels: %v body=%s", err, raw)
+	}
+	for _, c := range data.Channels {
+		if c.Name == "general" {
+			return c.ID
+		}
+	}
+	t.Fatalf("seeded 'general' channel not found in %s", raw)
+	return ""
 }
 
 func registerUser(t *testing.T, srv *webAppPresenceServer, username, password string) (id, token string) {
@@ -448,7 +485,7 @@ func dialAuthedWS(t *testing.T, srv *webAppPresenceServer, bearer string) *webso
 	// upgrade; closing it here would race the WS close handshake. The
 	// .golangci.yml note on bodyclose for _test.go covers the lint
 	// suppression.
-	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket, nil)
+	c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket+"&channel="+srv.generalChannelID, nil)
 	if err != nil {
 		body := ""
 		if resp != nil {

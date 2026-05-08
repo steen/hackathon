@@ -8,7 +8,7 @@
 
 ## Acceptance criteria
 - A single Go binary, configured solely via env vars, serves both the API/WS and the embedded web app.
-- The binary's required env vars to enter the auth-enabled boot path are: `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, and `CHAT_DB_PATH` (no default — `apps/server/main.go` falls back to phase-0 mode without persistence if unset). `CHAT_LISTEN_ADDR` defaults to `127.0.0.1:8080`.
+- All three required env vars must be set: `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, and `CHAT_DB_PATH`. None has a default; the server fails before opening a port if any is missing. `CHAT_LISTEN_ADDR` defaults to `127.0.0.1:8080`.
 - A documented manual demo path: build the binary → set the three required env vars → run → register via web → send a message → see it in CLI watch.
 - The Phase 3 validation criterion is met: clean clone → `pnpm dev` → full demo flow under 5 minutes.
 

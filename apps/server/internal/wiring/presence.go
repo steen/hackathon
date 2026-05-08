@@ -7,12 +7,7 @@ import (
 )
 
 // registerPresence wires GET /api/presence behind the JWT middleware.
-// Skips when there is no DB; presence reads user metadata from the
-// repo's connection.
 func registerPresence(mux *http.ServeMux, deps Deps, require func(http.Handler) http.Handler) {
-	if deps.Repo == nil || require == nil {
-		return
-	}
 	presence := httpapi.NewPresenceHandlers(httpapi.PresenceDeps{
 		Hub: deps.Hub,
 		DB:  deps.Repo.DB(),

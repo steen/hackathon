@@ -17,19 +17,13 @@ import (
 const presenceLookupTimeout = 500 * time.Millisecond
 
 // registerPresenceUsername installs the wsapi presence-frame username
-// resolver, backed by a direct query against the users table. No-op
-// when deps.Repo is nil (the no-DB boot path used by smoke tests):
-// without the registration, wsapi.presenceFrame emits frames whose
-// `username` field is omitted, matching the pre-#490 wire shape.
+// resolver, backed by a direct query against the users table.
 //
 // The resolver hits the DB once per emit. Presence rates in this app
 // are low (one frame per first-connect / last-disconnect per user),
 // so a TTL'd cache would be premature; revisit if/when periodic
 // reseed (#496) lands.
 func registerPresenceUsername(deps Deps) {
-	if deps.Repo == nil {
-		return
-	}
 	db := deps.Repo.DB()
 	wsapi.SetPresenceUsernameLookup(func(userID string) string {
 		ctx, cancel := context.WithTimeout(context.Background(), presenceLookupTimeout)

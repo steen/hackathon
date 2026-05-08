@@ -78,6 +78,7 @@ var jwtSecretDenylist = []string{
 type Config struct {
 	JWTSecret       string
 	InviteCode      string
+	DBPath          string
 	ListenAddr      string
 	AllowPublicBind bool
 	// TrustedProxy enables honoring the leftmost X-Forwarded-For entry
@@ -123,6 +124,7 @@ func Load() Config {
 	return Config{
 		JWTSecret:       os.Getenv(EnvJWTSecret),
 		InviteCode:      os.Getenv(EnvInviteCode),
+		DBPath:          os.Getenv(EnvDBPath),
 		ListenAddr:      addr,
 		AllowPublicBind: os.Getenv(EnvAllowPublicBind) == "1",
 		TrustedProxy:    os.Getenv(EnvTrustedProxy) == "1",
@@ -207,6 +209,11 @@ func (c *Config) Validate() ([]CheckResult, error) {
 	}
 	checks = append(checks, CheckResult{Name: "invite_code_present", OK: true})
 
+	if err := validateDBPath(c.DBPath); err != nil {
+		return checks, err
+	}
+	checks = append(checks, CheckResult{Name: "db_path_present", OK: true})
+
 	if err := validateBind(c.ListenAddr, c.AllowPublicBind); err != nil {
 		return checks, err
 	}
@@ -247,6 +254,13 @@ func validateJWTSecret(s string) error {
 func validateInviteCode(s string) error {
 	if s == "" {
 		return fmt.Errorf("%s is required while registration is enabled", EnvInviteCode)
+	}
+	return nil
+}
+
+func validateDBPath(s string) error {
+	if s == "" {
+		return fmt.Errorf("%s is required (path to the SQLite file the auth + channels surface persists to)", EnvDBPath)
 	}
 	return nil
 }

@@ -141,13 +141,9 @@ func (h *Hub) BroadcastAll(msg []byte) {
 
 // AddPresence records one connection for userID and reports whether
 // this is the first connection for that user (the caller will then
-// emit a presence "join" event). Empty userID is a no-op returning
-// false — phase-0 boot paths run without auth and have no user to
-// track.
+// emit a presence "join" event). userID must be non-empty; auth is
+// required for every WS upgrade in this codebase.
 func (h *Hub) AddPresence(userID string) bool {
-	if userID == "" {
-		return false
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	prev := h.presence[userID]
@@ -157,12 +153,8 @@ func (h *Hub) AddPresence(userID string) bool {
 
 // RemovePresence drops one connection for userID and reports whether
 // this was the last connection (the caller will then emit a presence
-// "leave" event). Removing an unknown userID or an empty string is a
-// no-op returning false.
+// "leave" event). Removing an unknown userID is a no-op returning false.
 func (h *Hub) RemovePresence(userID string) bool {
-	if userID == "" {
-		return false
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	count, ok := h.presence[userID]

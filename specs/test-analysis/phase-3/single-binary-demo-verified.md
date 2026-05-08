@@ -22,7 +22,7 @@ deferred: 4
 | AC | Statement | Status | E2E test reference |
 |----|-----------|--------|---------------------|
 | AC-1 | A single Go binary, configured solely via env vars, serves both the API/WS and the embedded web app. | deferred | — |
-| AC-2 | The binary's required env vars to enter the auth-enabled boot path are: `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, and `CHAT_DB_PATH` (no default — `apps/server/main.go` falls back to phase-0 mode without persistence if unset). `CHAT_LISTEN_ADDR` defaults to `127.0.0.1:8080`. | deferred | — |
+| AC-2 | All three required env vars must be set: `CHAT_JWT_SECRET`, `CHAT_INVITE_CODE`, and `CHAT_DB_PATH`. None has a default; the server fails startup before opening a port if any is missing. `CHAT_LISTEN_ADDR` defaults to `127.0.0.1:8080`. | deferred | — |
 | AC-3 | A documented manual demo path: build the binary -> set the three required env vars -> run -> register via web -> send a message -> see it in CLI watch. | deferred | — |
 | AC-4 | The Phase 3 validation criterion is met: clean clone -> `pnpm dev` -> full demo flow under 5 minutes. | deferred | — |
 
@@ -46,7 +46,7 @@ All 4 ACs deferred. This feature is integration-flavored — it asserts the whol
   - All three set + valid -> server enters auth-enabled mode (verifiable by `POST /api/auth/register` returning 200 with the test invite code).
   - `CHAT_JWT_SECRET` unset, `CHAT_DB_PATH` set -> binary exits non-zero with the error from `apps/server/main.go:111-113` (`config: CHAT_JWT_SECRET must be set when CHAT_DB_PATH is set`). Pin the error text or at least the substring `CHAT_JWT_SECRET must be set` so a refactor doesn't silently drop the check.
   - `CHAT_INVITE_CODE` unset (others set) -> per `apps/server/internal/config/config.go` validation (changelog 2026-05-03 17:45Z) the binary should refuse to boot. Verify the actual behavior by reading `config.go::Validate()` at impl time — the spec phrases it as "required" but the current Validate may treat it as required-only-when-registration-enabled.
-  - `CHAT_DB_PATH` unset (others set) -> binary boots in phase-0 mode (no auth, no channels). Verify by `GET /api/channels` returning 404 (no handler mounted) and `GET /ws` accepting an unauthenticated upgrade. This is the documented "fallback" path the spec calls out.
+  - `CHAT_DB_PATH` unset (others set) -> binary refuses to boot with `config: CHAT_DB_PATH is required …`. Pin the substring `CHAT_DB_PATH is required` so a refactor doesn't silently relax the check.
 - **AC-3 (demo flow end-to-end):** the canonical happy path. One test that:
   - Boots the single binary on a random port.
   - `POST /api/auth/register` with the test invite -> capture token.

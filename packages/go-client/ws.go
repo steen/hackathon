@@ -57,10 +57,10 @@ type Event struct {
 	Raw     []byte
 }
 
-// WatchOptions tunes Watch. ChannelID, when set, is forwarded as the
+// WatchOptions tunes Watch. ChannelID is forwarded as the
 // `?channel=<id>` query parameter on the upgrade — the server uses it
-// to pick which hub topic the connection subscribes to. When empty,
-// the server falls back to its `#general` default.
+// to pick which hub topic the connection subscribes to. The server
+// requires this; an empty ChannelID will fail the upgrade.
 //
 // ReadIdleTimeout bounds the time between inbound frames before the
 // connection is treated as stale. Zero means use

@@ -13,7 +13,6 @@ import (
 
 	"github.com/coder/websocket"
 
-	"hackathon/apps/server/internal/auth"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/repo"
@@ -49,10 +48,15 @@ func TestRegisterPresenceUsernameEndToEndCarriesUsername(t *testing.T) {
 	token := registerThroughAPI(t, srv.URL, username, password, presenceTestInvite)
 	ticket := wsTicketThroughAPI(t, srv.URL, token)
 
+	// The seed plants a "general" channel before Build returns; look it
+	// up so the WS dial below carries a real ULID. The handler now
+	// requires ?channel= when ChannelLookup is wired.
+	channelID := lookupGeneralChannelID(t, deps)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + ticket
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + ticket + "&channel=" + channelID
 	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
@@ -81,53 +85,24 @@ func TestRegisterPresenceUsernameEndToEndCarriesUsername(t *testing.T) {
 	}
 }
 
-// TestRegisterPresenceUsernameNoOpWithoutRepo asserts that calling
-// registerPresenceUsername with a Deps whose Repo is nil does NOT
-// install a resolver — the previously-registered hook (or, in the
-// real boot path, the absence of one) survives unchanged. We prove
-// this by pre-installing a sentinel hook, calling the registration,
-// and confirming the sentinel still drives the frame.
-func TestRegisterPresenceUsernameNoOpWithoutRepo(t *testing.T) {
-	const sentinel = "SENTINEL-USERNAME"
-	wsapi.SetPresenceUsernameLookup(func(string) string { return sentinel })
-	t.Cleanup(func() { wsapi.SetPresenceUsernameLookup(nil) })
-
-	registerPresenceUsername(Deps{Repo: nil})
-
-	h := hub.New()
-	ts := auth.NewTicketStore()
-	srv := httptest.NewServer(wsapi.Handler(h, ts, wsapi.Config{}))
-	t.Cleanup(srv.Close)
-
-	tok, _ := ts.Issue("solo")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// lookupGeneralChannelID reads the seeded "general" channel id from
+// the deps' Repo. The seed runs as part of Build above, so the row is
+// present by the time this helper executes.
+func lookupGeneralChannelID(t *testing.T, deps Deps) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
-	conn, resp, err := websocket.Dial(ctx, wsURL, nil)
+	channels, err := deps.Repo.ListChannels(ctx)
 	if err != nil {
-		t.Fatalf("ws dial: %v", err)
+		t.Fatalf("list channels: %v", err)
 	}
-	if resp != nil && resp.Body != nil {
-		_ = resp.Body.Close()
+	for _, c := range channels {
+		if c.Name == "general" {
+			return c.ID
+		}
 	}
-	defer conn.CloseNow()
-
-	readCtx, cancelRead := context.WithTimeout(ctx, 2*time.Second)
-	defer cancelRead()
-	_, raw, err := conn.Read(readCtx)
-	if err != nil {
-		t.Fatalf("ws read self-join: %v", err)
-	}
-
-	var ev presenceFrame
-	if err := json.Unmarshal(raw, &ev); err != nil {
-		t.Fatalf("decode: %v (raw=%s)", err, string(raw))
-	}
-	if ev.Data.Username != sentinel {
-		t.Fatalf("sentinel was overwritten: got username=%q, want %q (raw=%s)",
-			ev.Data.Username, sentinel, string(raw))
-	}
+	t.Fatalf("seeded 'general' channel not found in %v", channels)
+	return ""
 }
 
 // presenceFrame mirrors the wsapi presence envelope for decoding

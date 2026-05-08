@@ -54,7 +54,7 @@ func TestPresenceAC2_BroadcastsJoinAndLeaveOnConnectAndDisconnect(t *testing.T) 
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 1
 	}) {
-		t.Fatalf("debug/subs#general did not reach 1 subscriber within 2s before bob dial")
+		t.Fatalf("debug/subs (seeded general channel) did not reach 1 subscriber within 2s before bob dial")
 	}
 
 	bobConn := dialAuthenticatedWS(t, srv, bobTok)

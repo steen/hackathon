@@ -94,7 +94,26 @@ func run(ctx context.Context, baseURL, username, password, invite string) error 
 		return fmt.Errorf("register: %w", err)
 	}
 
-	events, err := client.Watch(ctx, goclient.WatchOptions{})
+	// The WS handler now requires ?channel=<id>; subscribe to the
+	// seeded "general" channel. Hub.BroadcastAll fans channel:create /
+	// channel:rename events to every subscriber regardless of which
+	// channel they're on, so the observer still sees them.
+	channels, err := client.ListChannels(ctx)
+	if err != nil {
+		return fmt.Errorf("list channels: %w", err)
+	}
+	var channelID string
+	for _, ch := range channels {
+		if ch.Name == "general" {
+			channelID = string(ch.ID)
+			break
+		}
+	}
+	if channelID == "" {
+		return fmt.Errorf("seeded 'general' channel not found")
+	}
+
+	events, err := client.Watch(ctx, goclient.WatchOptions{ChannelID: channelID})
 	if err != nil {
 		return fmt.Errorf("watch: %w", err)
 	}

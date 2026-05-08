@@ -221,6 +221,79 @@ func postJSON(t *testing.T, srv *runningServer, path, bearer string, body any) (
 	return resp.StatusCode, env, raw
 }
 
+// getJSON GETs the given path with optional bearer and returns the
+// status, decoded envelope, and raw body.
+func getJSON(t *testing.T, srv *runningServer, path, bearer string) (int, envelope, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, srv.httpURL+path, nil)
+	if err != nil {
+		t.Fatalf("new GET %s: %v", path, err)
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("http.Do %s %s: %v", req.Method, req.URL, err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body %s %s: %v", req.Method, req.URL, err)
+	}
+	var env envelope
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &env); err != nil {
+			t.Fatalf("decode envelope from %s %s (status %d): %v\nbody=%q", req.Method, req.URL, resp.StatusCode, err, raw)
+		}
+	}
+	return resp.StatusCode, env, raw
+}
+
+// seededChannelID registers a probe user and returns the seeded
+// "general" channel's ULID. The WS handler now requires ?channel=
+// against a real ULID; tests that need a successful upgrade pass this.
+func seededChannelID(t *testing.T, srv *runningServer) string {
+	t.Helper()
+	probeName := "probe-" + randomSecret(t, 4)
+	probePassword := randomSecret(t, 12)
+	status, env, raw := postJSON(t, srv, "/api/auth/register", "", map[string]string{
+		"username":    probeName,
+		"password":    probePassword,
+		"invite_code": srv.inviteCode,
+	})
+	if status != http.StatusCreated && status != http.StatusOK {
+		t.Fatalf("probe register: status %d body %s", status, raw)
+	}
+	var regData struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(*env.Data, &regData); err != nil {
+		t.Fatalf("decode probe register: %v body=%s", err, raw)
+	}
+	status, env, raw = getJSON(t, srv, "/api/channels", regData.Token)
+	if status != http.StatusOK {
+		t.Fatalf("GET /api/channels: status %d body %s", status, raw)
+	}
+	var chData struct {
+		Channels []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"channels"`
+	}
+	if err := json.Unmarshal(*env.Data, &chData); err != nil {
+		t.Fatalf("decode /api/channels: %v body=%s", err, raw)
+	}
+	for _, c := range chData.Channels {
+		if c.Name == "general" {
+			return c.ID
+		}
+	}
+	t.Fatalf("seeded 'general' channel not found in %s", raw)
+	return ""
+}
+
 // register + login + mint ws-ticket. Returns a fresh single-use
 // ticket value redeemable by /ws once.
 func mintTicket(t *testing.T, srv *runningServer) string {

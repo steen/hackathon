@@ -38,6 +38,7 @@ func TestAC1_WSHardening_CrossOriginUpgradeRejectedWith403(t *testing.T) {
 	srv := startServer(t, startServerOpts{
 		allowedOrigins: "http://localhost:3000",
 	})
+	channelID := seededChannelID(t, srv)
 
 	cases := []struct {
 		name       string
@@ -75,7 +76,7 @@ func TestAC1_WSHardening_CrossOriginUpgradeRejectedWith403(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 
-			c, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket, &websocket.DialOptions{
+			c, resp, err := websocket.Dial(ctx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, &websocket.DialOptions{
 				HTTPHeader: originHeader(tc.origin),
 			})
 			if c != nil {

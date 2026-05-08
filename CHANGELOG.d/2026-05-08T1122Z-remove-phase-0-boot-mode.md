@@ -1,0 +1,3 @@
+## Removed
+
+- Phase-0 boot mode (`CHAT_DB_PATH` unset → no DB / no auth / WS-hub-only) is gone. `CHAT_DB_PATH` is now required at startup; the server fails before opening a port if it is missing. The `Repo == nil` branches across `apps/server/internal/wiring/*.go`, the `userID == ""` fallback in `hub.AddPresence` / `RemovePresence`, the `defaultChannel = "#general"` legacy sentinel and bypass branch in `wsapi/handler.go`, and the `tests/e2e/phase-0/server-ws-hub/` + `tests/server-ws-hub/` test suites all go with it. Production wiring is now linear: register auth, channels, presence, ws, seed, health unconditionally.

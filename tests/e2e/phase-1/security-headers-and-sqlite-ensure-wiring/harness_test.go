@@ -245,6 +245,47 @@ func register(t *testing.T, srv *runningServer, username, password string) strin
 	return data.Token
 }
 
+// seededChannelID returns the ULID of the seeded "general" channel by
+// hitting GET /api/channels with the supplied bearer.
+func seededChannelID(t *testing.T, srv *runningServer, bearer string) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, srv.httpURL+"/api/channels", nil)
+	if err != nil {
+		t.Fatalf("new GET /api/channels: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/channels: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/channels: status %d body %s", resp.StatusCode, raw)
+	}
+	var env envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("decode /api/channels envelope: %v body=%s", err, raw)
+	}
+	var data struct {
+		Channels []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"channels"`
+	}
+	if err := json.Unmarshal(*env.Data, &data); err != nil {
+		t.Fatalf("decode /api/channels: %v body=%s", err, raw)
+	}
+	for _, c := range data.Channels {
+		if c.Name == "general" {
+			return c.ID
+		}
+	}
+	t.Fatalf("seeded 'general' channel not found in %s", raw)
+	return ""
+}
+
 func mintTicket(t *testing.T, srv *runningServer, bearer string) string {
 	t.Helper()
 	status, env, raw := postJSON(t, srv, "/api/auth/ws-ticket", bearer, nil)

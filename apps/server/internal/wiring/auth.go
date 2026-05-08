@@ -19,14 +19,7 @@ import (
 // threaded through to the auth handlers (clientIP for audit rows) and
 // the IP rate-limit middleware (per-IP bucket key). Without this the
 // rate-limit bucket collapses to one key behind a reverse proxy.
-//
-// Skips registration entirely when Deps.Repo is nil — the no-DB
-// boot path used by smoke tests has no users to authenticate.
 func registerAuth(mux *http.ServeMux, deps Deps, trustedProxy bool) authBundle {
-	if deps.Repo == nil {
-		return authBundle{}
-	}
-
 	tickets := auth.NewTicketStore()
 
 	loginIPLimiter := ratelimit.NewIPLimiter(ratelimit.LoginIPConfig())

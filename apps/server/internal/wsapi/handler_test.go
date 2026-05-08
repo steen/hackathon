@@ -19,10 +19,10 @@ import (
 
 // Audit #78 (medium): an authenticated peer must NOT be able to
 // rebroadcast a forged {type:"message",data:{sender_user_id:"<other>"}}
-// frame to other subscribers. The phase-0 raw rebroadcast was removed
-// because it bypassed persistence and let any peer impersonate any
-// sender. The inbound frame is still read (so the conn drains and the
-// size+rate limits still trip), but the bytes are dropped.
+// frame to other subscribers. An earlier raw-rebroadcast contract was
+// removed because it bypassed persistence and let any peer impersonate
+// any sender. The inbound frame is still read (so the conn drains and
+// the size+rate limits still trip), but the bytes are dropped.
 func TestHandlerDoesNotRebroadcastInboundFrames(t *testing.T) {
 	h := hub.New()
 	srv := httptest.NewServer(Handler(h, nil, Config{}))
@@ -45,12 +45,12 @@ func TestHandlerDoesNotRebroadcastInboundFrames(t *testing.T) {
 	}
 	defer receiver.CloseNow()
 
-	if err := waitForSubscribers(h, "#general", 2, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 2, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
 	forged := []byte(`{"type":"message","data":{"id":"01HFAKEFAKEFAKEFAKEFAKEFAK",` +
-		`"channel_id":"#general","sender_user_id":"01HVICTIMVICTIMVICTIMVICTIM",` +
+		`"channel_id":"` + testDefaultChannel + `","sender_user_id":"01HVICTIMVICTIMVICTIMVICTIM",` +
 		`"body":"impersonated text","created_at":"2026-05-03T00:00:00Z"}}`)
 	if err := sender.Write(ctx, websocket.MessageText, forged); err != nil {
 		t.Fatalf("write: %v", err)
@@ -68,7 +68,7 @@ func TestHandlerDoesNotRebroadcastInboundFrames(t *testing.T) {
 	// that rebroadcasts raw client frames cannot hide behind ordering
 	// luck. Shorter waits race the sentinel and risk false greens.
 	time.Sleep(50 * time.Millisecond)
-	h.Broadcast("#general", []byte(sentinel))
+	h.Broadcast(testDefaultChannel, []byte(sentinel))
 
 	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer readCancel()
@@ -97,13 +97,13 @@ func TestHandlerUnsubscribesOnDisconnect(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 
-	if err := waitForSubscribers(h, "#general", 1, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
 	_ = c.Close(websocket.StatusNormalClosure, "")
 
-	if err := waitForSubscribers(h, "#general", 0, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 0, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -129,7 +129,7 @@ func TestHandlerTicketSingleUse(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	if err := waitForSubscribers(h, "#general", 1, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
@@ -259,9 +259,7 @@ func waitForSubscribers(h *hub.Hub, channel string, want int, timeout time.Durat
 }
 
 // gap-D: WS upgrade for an unknown channel is rejected with HTTP 404
-// BEFORE the WebSocket handshake. The legacy #general sentinel keeps
-// working without a DB lookup; any other channel id is checked via
-// cfg.ChannelLookup.
+// BEFORE the WebSocket handshake.
 func TestHandlerRejectsUnknownChannel(t *testing.T) {
 	h := hub.New()
 	cfg := Config{
@@ -293,30 +291,33 @@ func TestHandlerRejectsUnknownChannel(t *testing.T) {
 	}
 }
 
-// gap-D: legacy #general bypasses the lookup so phase-0 boot paths and
-// pre-DB tests keep working.
-func TestHandlerAcceptsLegacyDefaultChannelWithoutLookup(t *testing.T) {
+// With cfg.ChannelLookup wired (production path), an upgrade missing
+// ?channel= must reject with HTTP 400 BEFORE the WebSocket handshake.
+func TestHandlerRejectsMissingChannelWhenLookupWired(t *testing.T) {
 	h := hub.New()
 	calls := 0
 	cfg := Config{
 		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
 			calls++
-			return false, nil // would normally reject — but #general skips the check
+			return true, nil
 		},
 	}
 	srv := httptest.NewServer(Handler(h, nil, cfg))
 	defer srv.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	resp, err := http.Get(srv.URL + "/ws")
 	if err != nil {
-		t.Fatalf("dial: %v", err)
+		t.Fatalf("get: %v", err)
 	}
-	_ = c.Close(websocket.StatusNormalClosure, "")
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: got %d want 400", resp.StatusCode)
+	}
 	if calls != 0 {
-		t.Fatalf("ChannelLookup invoked %d time(s) for default channel; want 0", calls)
+		t.Fatalf("ChannelLookup invoked %d time(s) before channel-required check; want 0", calls)
 	}
 }
 
@@ -442,41 +443,6 @@ func TestHandlerUnknownChannelWithoutTicketReturns404(t *testing.T) {
 	}
 }
 
-// Audit #78 (low): the legacy defaultChannel sentinel still skips the
-// lookup, so a request without ?channel= and with a valid ticket must
-// upgrade successfully even when ChannelLookup would otherwise reject.
-func TestHandlerDefaultChannelSentinelStillRedeemsTicket(t *testing.T) {
-	h := hub.New()
-	ts := auth.NewTicketStore()
-	cfg := Config{
-		ChannelLookup: func(_ context.Context, _ string) (bool, error) {
-			return false, nil
-		},
-	}
-	srv := httptest.NewServer(Handler(h, ts, cfg))
-	defer srv.Close()
-
-	const owner = "user-default"
-	tok, _ := ts.Issue(owner)
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	c, _, err := websocket.Dial(ctx, wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer c.CloseNow()
-
-	if err := waitForSubscribers(h, defaultChannel, 1, 2*time.Second); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := ts.Redeem(tok); ok {
-		t.Fatal("ticket should have been consumed by the successful upgrade")
-	}
-}
-
 // gap-D F5: after a successful ticket redemption, the per-conn state
 // carries the redeemed userID. Observed via the test-only accessor on
 // connSubscriber and hub.SnapshotSubscribers.
@@ -498,11 +464,11 @@ func TestHandlerBindsUserIDFromTicket(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	if err := waitForSubscribers(h, defaultChannel, 1, 2*time.Second); err != nil {
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
 		t.Fatal(err)
 	}
 
-	subs := h.SnapshotSubscribers(defaultChannel)
+	subs := h.SnapshotSubscribers(testDefaultChannel)
 	if len(subs) != 1 {
 		t.Fatalf("subs: got %d want 1", len(subs))
 	}
@@ -513,8 +479,8 @@ func TestHandlerBindsUserIDFromTicket(t *testing.T) {
 	if got := cs.userIDForTesting(); got != owner {
 		t.Fatalf("userID: got %q want %q", got, owner)
 	}
-	if got := cs.channelForTesting(); got != defaultChannel {
-		t.Fatalf("channel: got %q want %q", got, defaultChannel)
+	if got := cs.channelForTesting(); got != testDefaultChannel {
+		t.Fatalf("channel: got %q want %q", got, testDefaultChannel)
 	}
 }
 
@@ -561,8 +527,7 @@ func TestHandlerLowercaseChannelIDFoldsToUpper(t *testing.T) {
 
 // Audit #78 (info): a malformed channel id (not 26 chars / outside
 // the 0-9A-Z alphabet) is rejected with HTTP 404 BEFORE ChannelLookup
-// is invoked. The defaultChannel sentinel ("#general") is exempt and
-// is exercised by TestHandlerAcceptsLegacyDefaultChannelWithoutLookup.
+// is invoked.
 func TestHandlerMalformedChannelIDRejected(t *testing.T) {
 	h := hub.New()
 	called := false

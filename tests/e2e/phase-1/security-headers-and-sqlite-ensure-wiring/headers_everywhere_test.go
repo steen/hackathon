@@ -53,11 +53,12 @@ func TestAC1_FourSecurityHeadersOnEveryResponsePath(t *testing.T) {
 		username := "alice"
 		password := randomSecret(t, 12)
 		bearer := register(t, srv, username, password)
+		channelID := seededChannelID(t, srv, bearer)
 		ticket := mintTicket(t, srv, bearer)
 
 		dialCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket, nil)
+		c, resp, err := websocket.Dial(dialCtx, srv.wsURL+"?ticket="+ticket+"&channel="+channelID, nil)
 		if resp != nil && resp.Body != nil {
 			defer resp.Body.Close()
 		}

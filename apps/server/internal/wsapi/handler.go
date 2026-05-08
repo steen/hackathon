@@ -19,10 +19,16 @@ import (
 	"hackathon/apps/server/wsproto"
 )
 
-const (
-	defaultChannel = "#general"
-	sendBuffer     = 64
-)
+// testDefaultChannel is the channel a /ws upgrade lands on when the
+// caller omits ?channel= AND the handler has no cfg.ChannelLookup
+// wired. Production wiring always supplies a ChannelLookup (the SQLite
+// repo's ChannelExists), so production rejects an upgrade missing
+// ?channel= with HTTP 400 — this fallback exists only for the unit
+// tests in apps/server/internal/wsapi/* that exercise hub fan-out
+// without standing up a DB.
+const testDefaultChannel = "#test-default"
+
+const sendBuffer = 64
 
 // ReadLimitBytes caps a single inbound WS frame (PRD §9, SEC-6).
 // Hitting this causes the library to close with StatusMessageTooBig (1009).
@@ -57,10 +63,11 @@ const MessageBodyLimit = wsproto.MessageBodyLimit
 // always allowed by the library and does not need to be listed.
 //
 // ChannelLookup, when non-nil, is invoked before websocket.Accept for
-// any requested channel that is not the legacy defaultChannel sentinel
-// (#general). On (false, nil) the upgrade is rejected with HTTP 404
-// "channel not found" before the WebSocket handshake. On a non-nil
-// error the upgrade is rejected with HTTP 500 and the error is logged.
+// the requested channel id. On (false, nil) the upgrade is rejected
+// with HTTP 404 "channel not found" before the WebSocket handshake.
+// On a non-nil error the upgrade is rejected with HTTP 500 and the
+// error is logged. Production wiring always supplies this; nil is a
+// test-only path.
 type Config struct {
 	OriginPatterns []string
 	ChannelLookup  func(ctx context.Context, id string) (bool, error)
@@ -169,59 +176,58 @@ func (c *connSubscriber) signalCloseFlushed() {
 // consuming the one-shot ticket (audit #78, low-severity).
 //
 // When ts is nil, ticket enforcement is skipped. This branch exists
-// for the phase-0 smoke wiring and for tests that exercise the hub
-// fan-out without standing up the auth stack.
+// for the unit tests in this package that exercise the hub fan-out
+// without standing up the auth stack; production wiring always supplies
+// a non-nil ts.
 //
 // Same-origin enforcement is delegated to coder/websocket.Accept,
 // which compares Host to Origin by default and additionally honors
 // any patterns in cfg.OriginPatterns. A mismatch yields HTTP 403.
 //
-// Each connection subscribes to one channel for its lifetime:
-// defaultChannel by default, or the value of the ?channel= query
-// parameter when present (channels-and-messages feature). The PRD's
-// typed {type:subscribe,...} frame protocol can layer on top later
-// without breaking this contract.
+// Each connection subscribes to one channel for its lifetime: the
+// upper-folded ULID supplied via ?channel=<id>. ?channel= is required
+// when cfg.ChannelLookup is wired (production); the test-only no-lookup
+// path falls back to testDefaultChannel when the param is absent.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
-		channel := defaultChannel
-		if c := r.URL.Query().Get("channel"); c != "" {
+		raw := r.URL.Query().Get("channel")
+		var channel string
+		if raw == "" {
+			if cfg.ChannelLookup != nil {
+				http.Error(w, "channel parameter required", http.StatusBadRequest)
+				return
+			}
+			channel = testDefaultChannel
+		} else {
 			// Cap the channel-key length — a 1 MB query string would
 			// otherwise sit in the subscriber map for the lifetime of
 			// the connection. 64 chars covers a 26-char ULID plus
-			// padding for `#general`-style legacy names.
-			if len(c) > 64 {
+			// padding.
+			if len(raw) > 64 {
 				http.Error(w, "channel parameter too long", http.StatusBadRequest)
 				return
 			}
-			// Upper-fold non-sentinel channel ids so a lower-cased
-			// URL hits the same channel as the REST surface, which
-			// also folds via ids.NormalizeChannelID (audit #78, info).
-			// The defaultChannel sentinel ("#general") is a literal
-			// and must NOT be folded.
-			if c != defaultChannel {
-				norm, ok := ids.NormalizeChannelID(c)
-				if !ok {
-					http.Error(w, "channel not found", http.StatusNotFound)
-					return
-				}
-				channel = norm
-			} else {
-				channel = c
+			// Upper-fold the channel id so a lower-cased URL hits the
+			// same channel as the REST surface, which also folds via
+			// ids.NormalizeChannelID (audit #78, info).
+			norm, ok := ids.NormalizeChannelID(raw)
+			if !ok {
+				http.Error(w, "channel not found", http.StatusNotFound)
+				return
 			}
+			channel = norm
 		}
 
 		// Reject upgrades for unknown channels with HTTP 404 BEFORE the
 		// WebSocket handshake — and BEFORE redeeming the ws-ticket, so a
 		// typo or probe does not burn the one-shot ticket (audit #78,
-		// low-severity). The legacy defaultChannel sentinel skips the
-		// lookup so phase-0 boot paths and tests without a DB keep
-		// working. Use http.Error (text/plain) — the JSON envelope lives
-		// in internal/http and importing it here would create a cycle
-		// (the http package's ws_broadcast_test.go imports wsapi).
-		if cfg.ChannelLookup != nil && channel != defaultChannel {
+		// low-severity). Use http.Error (text/plain) — the JSON envelope
+		// lives in internal/http and importing it here would create a
+		// cycle (the http package's ws_broadcast_test.go imports wsapi).
+		if cfg.ChannelLookup != nil {
 			ok, err := cfg.ChannelLookup(r.Context(), channel)
 			if err != nil {
 				slog.Error("ws channel lookup", "channel", channel, "err", err)
@@ -320,13 +326,14 @@ func readLoop(ctx context.Context, conn *websocket.Conn, bucket *tokenBucket) {
 			_ = conn.Close(websocket.StatusPolicyViolation, wsproto.SendRateLimitCloseReason)
 			return
 		}
-		// Audit #78 (medium): drop inbound frames silently. The phase-0
-		// raw rebroadcast let any peer forge {type,data} envelopes with
-		// arbitrary sender_user_id, bypassing persistence and audit log.
-		// Producers must use POST /api/channels/{id}/messages so the
-		// server attributes the sender from the JWT and persists first.
-		// The read still happens (drains the buffer; enforces size +
-		// rate limits above) — only the broadcast is gone.
+		// Audit #78 (medium): drop inbound frames silently. An earlier
+		// raw-rebroadcast contract let any peer forge {type,data}
+		// envelopes with arbitrary sender_user_id, bypassing persistence
+		// and the audit log. Producers must use POST
+		// /api/channels/{id}/messages so the server attributes the sender
+		// from the JWT and persists first. The read still happens (drains
+		// the buffer; enforces size + rate limits above) — only the
+		// broadcast is gone.
 	}
 }
 

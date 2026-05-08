@@ -42,7 +42,7 @@ func TestPresenceAC1_ServerTracksConnectedAuthenticatedUsers(t *testing.T) {
 	if !waitFor(2*time.Second, func() bool {
 		return fetchSubscriberCount(t, srv) == 2
 	}) {
-		t.Fatalf("debug/subs%s did not reach 2 subscribers within 2s (got %d)", defaultChannel, fetchSubscriberCount(t, srv))
+		t.Fatalf("debug/subs?channel=%s did not reach 2 subscribers within 2s (got %d)", srv.generalChannelID, fetchSubscriberCount(t, srv))
 	}
 
 	users := fetchPresenceUsers(t, srv, aliceTok)

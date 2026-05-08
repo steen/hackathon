@@ -11,7 +11,7 @@
 - Quick start documents the **server** env vars actually read by `apps/server` today (see `apps/server/internal/config/config.go` and `apps/server/main.go`):
   - `CHAT_JWT_SECRET` — required when `CHAT_DB_PATH` is set; must be ≥32 ASCII bytes, not a single repeated char, ≥5 distinct bytes, not on the dev-default denylist (`change-me`, `secret`, `password`, …).
   - `CHAT_INVITE_CODE` — required; gates registration.
-  - `CHAT_DB_PATH` — required for the persistent/auth-enabled boot path; no default. If unset the server runs in phase-0 mode (no auth, no SQLite).
+  - `CHAT_DB_PATH` — required; SQLite file path the server opens, migrates, and persists to. No default; the server refuses to boot if unset.
   - `CHAT_LISTEN_ADDR` — defaults to `127.0.0.1:8080`. Non-loopback hosts are rejected unless `CHAT_ALLOW_PUBLIC_BIND=1`.
   - `CHAT_ALLOW_PUBLIC_BIND` — set to `1` to allow non-loopback bind (e.g. `0.0.0.0:8080`).
   - `CHAT_ALLOWED_ORIGINS` — comma-separated list of allowed WS Origin patterns (default same-origin only).
