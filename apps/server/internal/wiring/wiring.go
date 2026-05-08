@@ -65,6 +65,7 @@ func Build(deps Deps) http.Handler {
 	registerSeed(deps)
 	authFeature := registerAuth(mux, deps, trustedProxy)
 	registerChannels(mux, deps, authFeature.Require)
+	registerChannelReads(mux, deps, authFeature.Require)
 	registerDMs(mux, deps, authFeature.Require)
 	registerPresence(mux, deps, authFeature.Require)
 	registerUsers(mux, deps, authFeature.Require)

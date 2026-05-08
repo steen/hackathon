@@ -51,13 +51,20 @@ func NewChannelsHandlers(deps ChannelsDeps) *ChannelsHandlers {
 	return &ChannelsHandlers{deps: deps}
 }
 
-// List handles GET /api/channels. Must be wrapped in auth.RequireJWT.
+// List handles GET /api/channels. Must be wrapped in auth.RequireJWT
+// — the per-viewer read-state arm needs the authenticated user id for
+// materialization + the JOIN into channel_reads (decision log §9 / §11).
 func (h *ChannelsHandlers) List(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodGet {
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
-	chans, err := h.deps.Repo.ListChannels(r.Context())
+	uid, _, ok := userFromContext(r)
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "missing user context")
+		return
+	}
+	chans, err := h.deps.Repo.ListChannelsWithReadState(r.Context(), uid)
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not list channels")
 		return
@@ -219,7 +226,15 @@ func channelIDFromPath(r *stdhttp.Request) (string, bool) {
 }
 
 // userFromContext is the small accessor that maps RequireJWT's context
-// values onto the (id, username) pair the handlers need together.
+// values onto the (id, username) pair the handlers need together. The
+// username return value is currently discarded by every caller (the
+// channels/messages/reads handlers route on user id only); kept on the
+// signature so a future handler that needs the display name doesn't
+// have to reach back through the auth package directly. unparam
+// suppression: drift detection here would mask the deliberate
+// no-callers-yet shape.
+//
+//nolint:unparam // username preserved for future callers, see comment.
 func userFromContext(r *stdhttp.Request) (string, string, bool) {
 	uid, ok := auth.UserIDFromContext(r.Context())
 	if !ok {
