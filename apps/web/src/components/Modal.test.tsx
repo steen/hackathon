@@ -37,6 +37,23 @@ describe("test_web_modal_render_gating", () => {
   });
 });
 
+describe("test_web_modal_portal", () => {
+  it("mounts the dialog into document.body, not the React tree's parent", () => {
+    const { container } = render(
+      <Modal open={true} onClose={vi.fn()} title="Portal">
+        <p>portal-body</p>
+      </Modal>,
+    );
+    // The Testing Library container is the React tree's parent. With a
+    // portal, the dialog is NOT inside it.
+    expect(container.querySelector("[role='dialog']")).toBeNull();
+    expect(container.querySelector("[data-testid='modal-backdrop']")).toBeNull();
+    // The dialog IS in document.body (portal target).
+    const dialog = screen.getByRole("dialog");
+    expect(document.body.contains(dialog)).toBe(true);
+  });
+});
+
 describe("test_web_modal_close_triggers", () => {
   it("calls onClose when Escape is pressed", async () => {
     const onClose = vi.fn();
@@ -50,25 +67,43 @@ describe("test_web_modal_close_triggers", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onClose on backdrop click", () => {
+  it("calls onClose on backdrop pointerdown", () => {
     const onClose = vi.fn();
     render(
       <Modal open={true} onClose={onClose} title="T">
         <button type="button">inner</button>
       </Modal>,
     );
-    fireEvent.click(screen.getByTestId("modal-backdrop"));
+    fireEvent.pointerDown(screen.getByTestId("modal-backdrop"));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("does not call onClose on panel click", () => {
+  it("does not call onClose on panel pointerdown", () => {
     const onClose = vi.fn();
     render(
       <Modal open={true} onClose={onClose} title="T">
         <button type="button">inner</button>
       </Modal>,
     );
-    fireEvent.click(screen.getByRole("dialog"));
+    fireEvent.pointerDown(screen.getByRole("dialog"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not dismiss when pointerdown starts on the panel and pointerup lands on the backdrop", () => {
+    // Spec scenario: a user selecting text inside the panel and dragging
+    // out onto the backdrop must NOT dismiss. With pointerdown semantics
+    // the down-event on the panel stops propagation, and a release-only
+    // pointerup on the backdrop does not fire the close handler.
+    const onClose = vi.fn();
+    render(
+      <Modal open={true} onClose={onClose} title="T">
+        <button type="button">inner</button>
+      </Modal>,
+    );
+    const panel = screen.getByRole("dialog");
+    const backdrop = screen.getByTestId("modal-backdrop");
+    fireEvent.pointerDown(panel);
+    fireEvent.pointerUp(backdrop);
     expect(onClose).not.toHaveBeenCalled();
   });
 });
@@ -126,6 +161,63 @@ describe("test_web_modal_focus_management", () => {
   });
 });
 
+describe("test_web_modal_focus_trap", () => {
+  it("Tab from the last focusable element wraps focus to the first", () => {
+    render(
+      <Modal open={true} onClose={vi.fn()} title="T">
+        <button type="button">first-btn</button>
+        <textarea aria-label="middle-area" />
+        <button type="button">last-btn</button>
+      </Modal>,
+    );
+    const first = screen.getByRole("button", { name: "first-btn" });
+    const last = screen.getByRole("button", { name: "last-btn" });
+    last.focus();
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+  });
+
+  it("Shift-Tab from the first focusable element wraps focus to the last", () => {
+    render(
+      <Modal open={true} onClose={vi.fn()} title="T">
+        <button type="button">first-btn</button>
+        <textarea aria-label="middle-area" />
+        <button type="button">last-btn</button>
+      </Modal>,
+    );
+    const first = screen.getByRole("button", { name: "first-btn" });
+    const last = screen.getByRole("button", { name: "last-btn" });
+    // Modal auto-focuses the first focusable on open.
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("Tab from outside the panel snaps focus back inside", () => {
+    function Harness(): React.JSX.Element {
+      return (
+        <>
+          <button type="button" data-testid="outside">
+            outside
+          </button>
+          <Modal open={true} onClose={vi.fn()} title="T">
+            <button type="button">first-btn</button>
+            <button type="button">last-btn</button>
+          </Modal>
+        </>
+      );
+    }
+    render(<Harness />);
+    const outside = screen.getByTestId("outside");
+    const first = screen.getByRole("button", { name: "first-btn" });
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+  });
+});
+
 describe("test_web_modal_body_scroll_lock", () => {
   it("toggles document.body.style.overflow on open and restores on close", () => {
     document.body.style.overflow = "auto";
@@ -152,25 +244,25 @@ describe("test_web_modal_body_scroll_lock", () => {
 });
 
 describe("test_web_modal_close_on_backdrop_prop", () => {
-  it("closeOnBackdrop is true by default — backdrop click closes", () => {
+  it("closeOnBackdrop is true by default — backdrop pointerdown closes", () => {
     const onClose = vi.fn();
     render(
       <Modal open={true} onClose={onClose} title="T">
         <button type="button">inner</button>
       </Modal>,
     );
-    fireEvent.click(screen.getByTestId("modal-backdrop"));
+    fireEvent.pointerDown(screen.getByTestId("modal-backdrop"));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("closeOnBackdrop=false suppresses onClose on backdrop click but Escape still closes", async () => {
+  it("closeOnBackdrop=false suppresses onClose on backdrop pointerdown but Escape still closes", async () => {
     const onClose = vi.fn();
     render(
       <Modal open={true} onClose={onClose} title="T" closeOnBackdrop={false}>
         <button type="button">inner</button>
       </Modal>,
     );
-    fireEvent.click(screen.getByTestId("modal-backdrop"));
+    fireEvent.pointerDown(screen.getByTestId("modal-backdrop"));
     expect(onClose).not.toHaveBeenCalled();
 
     const u = userEvent.setup();
