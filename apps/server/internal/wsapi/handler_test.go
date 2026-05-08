@@ -479,8 +479,148 @@ func TestHandlerBindsUserIDFromTicket(t *testing.T) {
 	if got := cs.userIDForTesting(); got != owner {
 		t.Fatalf("userID: got %q want %q", got, owner)
 	}
-	if got := cs.channelForTesting(); got != testDefaultChannel {
-		t.Fatalf("channel: got %q want %q", got, testDefaultChannel)
+	// Decision log §10 / L15: an authenticated connection binds two
+	// topics — the channel topic first, `user:<viewer>` second.
+	wantTopics := []string{testDefaultChannel, "user:" + owner}
+	gotTopics := cs.channelsForTesting()
+	if len(gotTopics) != len(wantTopics) {
+		t.Fatalf("channels: got %v want %v", gotTopics, wantTopics)
+	}
+	for i := range wantTopics {
+		if gotTopics[i] != wantTopics[i] {
+			t.Fatalf("channels[%d]: got %q want %q (full got=%v want=%v)",
+				i, gotTopics[i], wantTopics[i], gotTopics, wantTopics)
+		}
+	}
+}
+
+// Decision log §10 / L15: every authenticated WS connection auto-
+// subscribes to the inbox topic `user:<viewer>` alongside its channel
+// topic. Asserts the hub registers the connection on BOTH topics and
+// that a Broadcast on `user:<viewer>` reaches the connection.
+func TestHandlerSubscribesToUserInboxTopic(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	srv := httptest.NewServer(Handler(h, ts, Config{}))
+	defer srv.Close()
+
+	const owner = "user-multi-topic"
+	tok, _ := ts.Issue(owner)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForSubscribers(h, "user:"+owner, 1, 2*time.Second); err != nil {
+		t.Fatalf("user-inbox topic subscriber: %v", err)
+	}
+
+	// Drain the self-emitted presence-join frame the handler broadcasts
+	// for the first connection of an authenticated user — it arrives via
+	// BroadcastAll on the channel topic, not on the user-inbox topic, but
+	// it sits at the head of the read queue and would otherwise be the
+	// first frame this test reads.
+	drainCtx, drainCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer drainCancel()
+	if _, _, err := c.Read(drainCtx); err != nil {
+		t.Fatalf("drain presence-join frame: %v", err)
+	}
+
+	// A frame published to the inbox topic must reach the connection.
+	const payload = "user-inbox-payload"
+	h.Broadcast("user:"+owner, []byte(payload))
+	readCtx, readCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer readCancel()
+	_, data, err := c.Read(readCtx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(data) != payload {
+		t.Fatalf("frame: got %q want %q", data, payload)
+	}
+}
+
+// Decision log §10: a ticket-less connection has no viewer id, so the
+// connection must NOT register a `user:` topic with an empty id (which
+// would let a future broadcast leak to every unauthenticated client).
+// The single-topic legacy shape is preserved for the no-TicketStore path.
+func TestHandlerNoUserTopicWhenUnauthenticated(t *testing.T) {
+	h := hub.New()
+	srv := httptest.NewServer(Handler(h, nil, Config{}))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.SubscriberCount("user:"); got != 0 {
+		t.Fatalf("topic 'user:' must have no subscribers when unauthenticated; got %d", got)
+	}
+
+	subs := h.SnapshotSubscribers(testDefaultChannel)
+	if len(subs) != 1 {
+		t.Fatalf("subs: got %d want 1", len(subs))
+	}
+	cs, ok := subs[0].(*connSubscriber)
+	if !ok {
+		t.Fatalf("subscriber type: got %T want *connSubscriber", subs[0])
+	}
+	if got := cs.channelsForTesting(); len(got) != 1 || got[0] != testDefaultChannel {
+		t.Fatalf("channels: got %v want [%q]", got, testDefaultChannel)
+	}
+}
+
+// AC: close path unsubscribes from ALL bound topics (multi-topic
+// teardown). Asserts both the channel topic and `user:<viewer>` drop
+// to zero subscribers after the connection closes.
+func TestHandlerUnsubscribesAllTopicsOnDisconnect(t *testing.T) {
+	h := hub.New()
+	ts := auth.NewTicketStore()
+	srv := httptest.NewServer(Handler(h, ts, Config{}))
+	defer srv.Close()
+
+	const owner = "user-teardown"
+	tok, _ := ts.Issue(owner)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws?ticket=" + tok
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+
+	if err := waitForSubscribers(h, testDefaultChannel, 1, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitForSubscribers(h, "user:"+owner, 1, 2*time.Second); err != nil {
+		t.Fatalf("user-inbox topic subscriber: %v", err)
+	}
+
+	_ = c.Close(websocket.StatusNormalClosure, "")
+
+	if err := waitForSubscribers(h, testDefaultChannel, 0, 2*time.Second); err != nil {
+		t.Fatalf("channel topic teardown: %v", err)
+	}
+	if err := waitForSubscribers(h, "user:"+owner, 0, 2*time.Second); err != nil {
+		t.Fatalf("user-inbox topic teardown: %v", err)
 	}
 }
 

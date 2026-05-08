@@ -77,9 +77,12 @@ type Config struct {
 // queue so a slow client cannot stall the hub. When the queue is full the
 // message is dropped for that subscriber.
 //
-// userID and channel are bound at connect time so messages.user_id writes
+// userID and channels are bound at connect time so messages.user_id writes
 // can attribute the sender (gap-D wiring). Both are read-only after
-// construction; no mutex needed.
+// construction; no mutex needed. channels carries every Hub topic the
+// connection is subscribed to for its lifetime — the upgrade-time channel
+// topic plus, when the connection is authenticated, its `user:<viewer>`
+// inbox topic (decision log §10 / L15).
 //
 // shutdown signals the writeLoop to emit a typed 1001 close frame and
 // tear down the connection (Hub.CloseAll path). closeMu guards one-shot
@@ -93,18 +96,18 @@ type connSubscriber struct {
 	shutdown   chan struct{}
 	closeFlush chan struct{}
 
-	userID  string
-	channel string
+	userID   string
+	channels []string
 }
 
-func newConnSubscriber(userID, channel string) *connSubscriber {
+func newConnSubscriber(userID string, channels []string) *connSubscriber {
 	return &connSubscriber{
 		send:       make(chan []byte, sendBuffer),
 		done:       make(chan struct{}),
 		shutdown:   make(chan struct{}),
 		closeFlush: make(chan struct{}),
 		userID:     userID,
-		channel:    channel,
+		channels:   channels,
 	}
 }
 
@@ -184,10 +187,12 @@ func (c *connSubscriber) signalCloseFlushed() {
 // which compares Host to Origin by default and additionally honors
 // any patterns in cfg.OriginPatterns. A mismatch yields HTTP 403.
 //
-// Each connection subscribes to one channel for its lifetime: the
-// upper-folded ULID supplied via ?channel=<id>. ?channel= is required
-// when cfg.ChannelLookup is wired (production); the test-only no-lookup
-// path falls back to testDefaultChannel when the param is absent.
+// Each authenticated connection subscribes to TWO Hub topics for its
+// lifetime: the channel topic (upper-folded ULID supplied via
+// ?channel=<id>; ?channel= is required when cfg.ChannelLookup is wired;
+// the test-only no-lookup path falls back to testDefaultChannel when
+// the param is absent) AND the inbox topic `user:<viewer>` derived
+// from the redeemed ws-ticket. Decision log §10 / L15.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
@@ -266,9 +271,26 @@ func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 		defer func() { _ = conn.CloseNow() }()
 		conn.SetReadLimit(ReadLimitBytes)
 
-		sub := newConnSubscriber(userID, channel)
-		h.Subscribe(channel, sub)
-		defer h.Unsubscribe(channel, sub)
+		// Decision log §10 / L15: every authenticated WS connection
+		// subscribes to two Hub topics — the channel topic plus its
+		// `user:<viewer>` inbox topic. The inbox topic is appended only
+		// when the connection is authenticated (userID != "") so a test
+		// path with no TicketStore does not register a `user:` topic
+		// with an empty id. The order — channel first, user second —
+		// matches the spec at specs/plans/phase-9/ws-routing.md.
+		topics := []string{channel}
+		if userID != "" {
+			topics = append(topics, "user:"+userID)
+		}
+		sub := newConnSubscriber(userID, topics)
+		for _, t := range topics {
+			h.Subscribe(t, sub)
+		}
+		defer func() {
+			for _, t := range topics {
+				h.Unsubscribe(t, sub)
+			}
+		}()
 		defer sub.close()
 
 		// Presence events fire only for authenticated connections.
