@@ -1,0 +1,3 @@
+### Added
+
+- `apps/server/internal/ratelimit`: register two Phase 9 token-bucket configs ahead of their wiring PRs. `DMWriteUserConfig()` (default `Burst=10` / `Refill=1m`, env `CHAT_DM_WRITE_BURST` / `CHAT_DM_WRITE_REFILL`) is the per-user bucket for `POST /api/dms/{id}/messages`; `ReadMarkUserConfig()` (default `Burst=50` / `Refill=1m`, env `CHAT_READ_MARK_BURST` / `CHAT_READ_MARK_REFILL`) is the per-user bucket for `POST /api/channels/{id}/read` and `POST /api/dms/{id}/read`. Defaults pinned in the Phase 9 decision log (L17). Both shapes mirror `ChannelWriteUserConfig*` exactly. No HTTP handler is wired in this PR — wiring lands in the dm-write and read-mark sub-issues.
