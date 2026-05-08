@@ -5,15 +5,27 @@ package goclient
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
 // Channel mirrors the server-side repo.Channel JSON shape.
+//
+// LastMessageID, LastMessageAt, UnreadCount, and LastReadMessageID are
+// optional listing-additive fields per the Phase 9 read-state contract
+// (decision-log L26 — optional-first wire shape). They are nil on every
+// endpoint until the channel-listing populator ships server-side, so
+// consumers must tolerate nil.
 type Channel struct {
-	ID        ULID      `json:"id"`
-	Name      string    `json:"name"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                ULID       `json:"id"`
+	Name              string     `json:"name"`
+	CreatedAt         time.Time  `json:"created_at"`
+	LastMessageID     *ULID      `json:"last_message_id,omitempty"`
+	LastMessageAt     *time.Time `json:"last_message_at,omitempty"`
+	UnreadCount       *int       `json:"unread_count,omitempty"`
+	LastReadMessageID *ULID      `json:"last_read_message_id,omitempty"`
 }
 
 // channelsListResponse is the envelope payload for GET /api/channels.
@@ -63,4 +75,15 @@ func (c *Client) RenameChannel(ctx context.Context, id, name string) (Channel, e
 		return Channel{}, err
 	}
 	return out, nil
+}
+
+// MarkChannelRead advances the viewer's read pointer for channelID to
+// messageID. The server applies the advance-only rule (decision-log
+// L5) — a pointer that would move backwards is silently kept; the call
+// still returns 200 (idempotent client behavior). The server emits a
+// {type:"read"} WS frame to the viewer's user:<viewer> topic for
+// cross-device sync (no peer fan-out — L10).
+func (c *Client) MarkChannelRead(ctx context.Context, channelID, messageID string) error {
+	path := fmt.Sprintf("/api/channels/%s/read", url.PathEscape(channelID))
+	return c.do(ctx, http.MethodPost, path, markReadRequest{MessageID: messageID}, nil)
 }
