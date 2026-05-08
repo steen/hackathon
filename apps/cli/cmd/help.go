@@ -33,6 +33,10 @@ Commands:
                                  clear local config.
   channels                       List every channel, tab-separated as
                                  <id> <name>.
+  channels create <name>         Create a channel; prints <id>\t<name>.
+  channels rename <current> <new>
+                                 Rename a channel by current name; prints
+                                 <id>\t<name>.
   history <channel> [--limit N] [--before ID]
                                  Print messages newest-first, tab-separated
                                  as <rfc3339> <sender> <body>.
