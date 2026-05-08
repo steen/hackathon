@@ -11,21 +11,24 @@ import (
 // Channel mirrors a row in the channels table. Fields are exported so
 // HTTP handlers can JSON-encode them directly without an extra DTO.
 //
-// LastMessageID and LastMessageAt are denormalized pointers populated
-// by the message-insert transaction in a later phase-9 sub-issue (D).
-// Until that lands the existing SELECTs in this file do not scan them,
-// so they stay nil and `omitempty` keeps the HTTP wire shape unchanged
-// — JSON omits the keys entirely when nil. D ships the populating
-// transaction and the wire mirror in `packages/go-client/channels.go`
-// + `packages/api-client/src/types.ts` together (CLAUDE.md "Wire
-// types" rule). Once D is in place, ListChannels/GetChannel/etc. can
-// extend their SELECT/Scan and these fields surface in JSON.
+// LastMessageID/LastMessageAt are denormalized pointers populated by
+// InsertMessageTx (decision log L11). LastReadMessageID and
+// UnreadCount are populated by ListChannelsWithReadState — the
+// per-viewer listing helper that joins channel_reads after
+// MaterializeChannelReadsTx has run. Both pairs use pointer types with
+// `omitempty` so the existing ListChannels SELECT (which does not scan
+// them) leaves the JSON wire shape unchanged. The TS mirror in
+// packages/api-client/src/types.ts marks these `?: optional` per L26
+// (optional-first wire-types coordination); the HTTP populator wires
+// up in G2.
 type Channel struct {
-	ID            string     `json:"id"`
-	Name          string     `json:"name"`
-	CreatedAt     time.Time  `json:"created_at"`
-	LastMessageID *string    `json:"last_message_id,omitempty"`
-	LastMessageAt *time.Time `json:"last_message_at,omitempty"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	CreatedAt         time.Time  `json:"created_at"`
+	LastMessageID     *string    `json:"last_message_id,omitempty"`
+	LastMessageAt     *time.Time `json:"last_message_at,omitempty"`
+	LastReadMessageID *string    `json:"last_read_message_id,omitempty"`
+	UnreadCount       *int       `json:"unread_count,omitempty"`
 }
 
 // ErrChannelNameTaken is returned by CreateChannel when the UNIQUE
@@ -142,6 +145,72 @@ func (r *Repo) RenameChannel(ctx context.Context, id, newName string, _ time.Tim
 		return nil, err
 	}
 	return &c, nil
+}
+
+// ListChannelsWithReadState returns every channel ordered by id, with
+// per-viewer read-state fields (LastMessageID, LastMessageAt,
+// LastReadMessageID, UnreadCount) populated. Callers must run
+// MaterializeChannelReadsTx for the same viewer before this query so
+// LEFT JOIN-misses don't surface as 50K-unread (decision log §11).
+//
+// The unread_count subquery counts messages with id > the viewer's
+// last_read_message_id (decision log L6 channel formula). When the
+// viewer has no channel_reads row (channel had NULL last_message_id at
+// materialization time, i.e. never-messaged channel), the COALESCE
+// pins the cursor to the empty string, which sorts before every ULID
+// under SQLite's default collation — but those
+// channels also have no messages, so the count is still 0.
+//
+// G2 will wire this into the HTTP `/api/channels` handler. Until then
+// the helper is dead code reachable only from tests.
+func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID string) ([]Channel, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT c.id, c.name, c.created_at,
+		        c.last_message_id, c.last_message_at,
+		        r.last_read_message_id,
+		        (SELECT COUNT(*) FROM messages m
+		          WHERE m.channel_id = c.id
+		            AND m.id > COALESCE(r.last_read_message_id, '')) AS unread_count
+		   FROM channels c
+		   LEFT JOIN channel_reads r
+		     ON r.channel_id = c.id AND r.user_id = ?
+		  ORDER BY c.id ASC`,
+		viewerUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]Channel, 0)
+	for rows.Next() {
+		var (
+			c             Channel
+			lastMsgID     sql.NullString
+			lastMsgAt     sql.NullTime
+			lastReadMsgID sql.NullString
+			unread        int
+		)
+		if err := rows.Scan(&c.ID, &c.Name, &c.CreatedAt,
+			&lastMsgID, &lastMsgAt, &lastReadMsgID, &unread); err != nil {
+			return nil, err
+		}
+		if lastMsgID.Valid {
+			s := lastMsgID.String
+			c.LastMessageID = &s
+		}
+		if lastMsgAt.Valid {
+			t := lastMsgAt.Time
+			c.LastMessageAt = &t
+		}
+		if lastReadMsgID.Valid {
+			s := lastReadMsgID.String
+			c.LastReadMessageID = &s
+		}
+		uc := unread
+		c.UnreadCount = &uc
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }
 
 // isChannelNameTakenErr maps SQLite's UNIQUE-constraint message for the

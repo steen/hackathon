@@ -1,0 +1,3 @@
+### Added
+
+- `apps/server/internal/repo`: `UpsertChannelRead` (advance-only UPSERT per decision log L5) and `MaterializeChannelReadsTx` (auto-materialize a `channel_reads` row per channel for a viewer at first listing, decision log §11). Adds `LastReadMessageID`/`UnreadCount` pointer fields to `Channel` (optional-first wire shape per L26) and a `ListChannelsWithReadState` helper that joins `channel_reads` and computes per-viewer `unread_count`. The HTTP wiring lands in G2 (#869); this PR ships the SQL contract plus repo-level tests covering materialize, idempotency, advance-only, and the listing helper.
