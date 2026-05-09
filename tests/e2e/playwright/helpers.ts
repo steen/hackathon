@@ -57,15 +57,47 @@ export async function registerViaApi(username: string): Promise<RegisterResponse
   return env.data;
 }
 
+// Phase-10 §6 + L25: GET /api/channels filters to channels the viewer
+// is a member of. The Playwright suite predates the explicit
+// channel-members relation and routinely creates a channel as user A
+// then loads user B's view to assert cross-user visibility. The
+// auto-add at registration covers the case where users register
+// AFTER a public channel exists; the more common test order is
+// register-then-create, which leaves pre-existing users out. The
+// helper bridges that gap by creating the channel as public AND
+// iterating /api/users to invite every other user to it under the
+// public-channel server-auto-fill carve-out. Tightening to a real
+// inviter-signature flow would require wiring crypto pubkeys into
+// the Playwright fixture (deferred to #984).
 export async function createChannelViaApi(token: string, name: string): Promise<ChannelRow> {
   const res = await fetch(baseUrl() + "/api/channels", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, is_public: true }),
   });
   const env = (await res.json()) as Envelope<ChannelRow>;
   if (!env.ok || !env.data) throw new Error(`create channel failed: ${JSON.stringify(env)}`);
-  return env.data;
+  const channel = env.data;
+  // Invite every other registered user so legacy specs that register
+  // viewer-then-create-channel still see cross-user visibility.
+  const usersRes = await fetch(baseUrl() + "/api/users", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const usersEnv = (await usersRes.json()) as Envelope<{
+    users: { id: string }[];
+  }>;
+  if (usersEnv.ok && usersEnv.data) {
+    for (const u of usersEnv.data.users) {
+      // POST /api/channels/{id}/members — public-channel auto-fill
+      // accepts an empty membership block.
+      await fetch(baseUrl() + `/api/channels/${channel.id}/members`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ user_id: u.id }),
+      });
+    }
+  }
+  return channel;
 }
 
 // Waits for the chat shell to finish its first render after auth by
