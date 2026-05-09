@@ -575,11 +575,18 @@ func postMessage(t *testing.T, httpURL, bearer, channelID, body string) string {
 }
 
 // createChannel POSTs /api/channels and returns the new channel id.
+//
+// is_public=true so a fresh registration after this call auto-joins the
+// channel via the §9 + R1.2 carve-out — the legacy phase-9 tests pre-
+// date the L25 listing filter and assumed implicit membership.
+// Tightening to a real invite flow would muddy what the test actually
+// asserts (read-state ordering); flipping the channel public keeps the
+// shape and exercises the auto-add path the new filter relies on.
 func createChannel(t *testing.T, httpURL, bearer, name string) string {
 	t.Helper()
 	status, env, raw := testsupport.PostJSON(t, httpURL,
 		"/api/channels", bearer,
-		map[string]string{"name": name})
+		map[string]any{"name": name, "is_public": true})
 	if status != http.StatusCreated && status != http.StatusOK {
 		t.Fatalf("POST /api/channels (name=%s): status %d body=%s", name, status, raw)
 	}

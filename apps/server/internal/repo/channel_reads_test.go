@@ -45,6 +45,8 @@ func TestMaterializeChannelReadsTxPopulatesMissingRows(t *testing.T) {
 
 	chWithMsg := mustChannel(t, r, "alpha")
 	chEmpty := mustChannel(t, r, "beta")
+	joinAsMember(t, r, chWithMsg, viewer)
+	joinAsMember(t, r, chEmpty, viewer)
 	tipID := ids.NewULID()
 	if _, err := r.InsertMessageTx(context.Background(), tipID, chWithMsg, author, "m", time.Now()); err != nil {
 		t.Fatalf("InsertMessageTx: %v", err)
@@ -85,6 +87,7 @@ func TestMaterializeChannelReadsTxIsIdempotent(t *testing.T) {
 	viewer := mustUserUnique(t, r)
 	author := mustUserUnique(t, r)
 	channelID := mustChannel(t, r, "alpha")
+	joinAsMember(t, r, channelID, viewer)
 	firstTip := ids.NewULID()
 	if _, err := r.InsertMessageTx(context.Background(), firstTip, channelID, author, "m", time.Now()); err != nil {
 		t.Fatalf("first message: %v", err)
@@ -187,6 +190,7 @@ func TestListChannelsWithReadStateReportsUnread(t *testing.T) {
 	viewer := mustUserUnique(t, r)
 	author := mustUserUnique(t, r)
 	channelID := mustChannel(t, r, "alpha")
+	joinAsMember(t, r, channelID, viewer)
 	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
 		t.Fatalf("seed pre-baseline: %v", err)
 	}
@@ -236,6 +240,8 @@ func TestListChannelsWithReadStateMaterializesNonEmptyChannels(t *testing.T) {
 
 	withMsg := mustChannel(t, r, "alpha")
 	empty := mustChannel(t, r, "beta")
+	joinAsMember(t, r, withMsg, viewer)
+	joinAsMember(t, r, empty, viewer)
 	tip := ids.NewULID()
 	if _, err := r.InsertMessageTx(context.Background(), tip, withMsg, author, "m", time.Now()); err != nil {
 		t.Fatalf("InsertMessageTx: %v", err)

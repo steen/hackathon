@@ -137,9 +137,9 @@ describe("useChannels", () => {
     });
     let returned: { id: string; name: string } | undefined;
     await act(async () => {
-      returned = await result.current.create("books");
+      returned = await result.current.create("books", { isPublic: false });
     });
-    expect(createChannelMock).toHaveBeenCalledWith("books");
+    expect(createChannelMock).toHaveBeenCalledWith("books", { isPublic: false });
     expect(returned?.id).toBe("C2");
     expect(result.current.channels.map((c) => c.id)).toEqual(["C1", "C2"]);
     // Only the mount-effect reload — no extra refetch on create.

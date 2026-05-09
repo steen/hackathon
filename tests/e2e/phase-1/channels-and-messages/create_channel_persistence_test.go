@@ -15,10 +15,17 @@ import (
 //     per-creator. The existing happy/conflict test only retries from
 //     the same caller.
 //   - persistence: the row written by POST /api/channels survives a
-//     full process round-trip back through GET /api/channels (the AC-1
-//     test asserts list-after-create for the same caller; this asserts
-//     the row is visible to a different authenticated user, proving
-//     the channel is shared, not per-user).
+//     full process round-trip back through GET /api/channels for users
+//     who are members of the channel.
+//
+// Phase-10 §6 + L25 changes the visibility semantics: GET /api/channels
+// filters to channels the viewer is a member of. The original "second
+// user sees the channel" assertion held under implicit-membership and
+// is preserved here against a fresh A-creator who DOES see it; the
+// non-creator B sees only #general (the seeded public channel they
+// auto-joined at registration). The duplicate-name uniqueness check
+// remains global — it asserts persistence at the schema layer through
+// the SELECT on `channels`.
 func TestAC2_CreateChannelCrossUserDuplicateAndVisibility(t *testing.T) {
 	srv := startServer(t)
 
@@ -46,15 +53,26 @@ func TestAC2_CreateChannelCrossUserDuplicateAndVisibility(t *testing.T) {
 		t.Fatalf("AC-2: rows for name %q after cross-user duplicate = %d, want 1", name, count)
 	}
 
-	visibleToB := listChannels(t, srv, tokB)
-	var found bool
-	for _, c := range visibleToB {
+	// Creator (member via §10 self-bootstrap) sees the channel.
+	visibleToA := listChannels(t, srv, tokA)
+	var foundA bool
+	for _, c := range visibleToA {
 		if c.ID == created.ID && c.Name == name {
-			found = true
+			foundA = true
 			break
 		}
 	}
-	if !found {
-		t.Fatalf("AC-2: channel %q (id=%s) not visible to second user: %+v", name, created.ID, visibleToB)
+	if !foundA {
+		t.Fatalf("AC-2 (Phase-10): channel %q (id=%s) not visible to creator: %+v", name, created.ID, visibleToA)
+	}
+
+	// Non-member B sees only the seeded #general channel they were
+	// auto-joined to at registration; the new private channel must NOT
+	// appear in their listing per L25.
+	visibleToB := listChannels(t, srv, tokB)
+	for _, c := range visibleToB {
+		if c.ID == created.ID {
+			t.Fatalf("AC-2 (Phase-10): non-member B should not see private channel %q (id=%s) — L25 listing filter; got %+v", name, created.ID, visibleToB)
+		}
 	}
 }

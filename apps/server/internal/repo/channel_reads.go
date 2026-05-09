@@ -59,16 +59,26 @@ func (r *Repo) UpsertChannelRead(ctx context.Context, channelID, userID, lastRea
 // because the WHERE NOT EXISTS clause filters out already-materialized
 // rows.
 func (r *Repo) MaterializeChannelReadsTx(ctx context.Context, viewerUserID string) error {
-	var readsCount, channelsWithTipCount int
+	// Phase-10 L25: both the pre-check COUNT and the sweep INSERT join
+	// channel_members so the materialization only touches channels the
+	// viewer is a member of. Without the filter, the sweep keeps creating
+	// channel_reads rows for channels the viewer cannot see (and the
+	// pre-check's tip-count diverges from the reads-count, forcing a
+	// pointless transaction every listing). adversarial-review-2 RACE-3.
+	var readsCount, memberChannelsWithTipCount int
 	if err := r.db.QueryRowContext(ctx,
 		`SELECT
 		     (SELECT COUNT(*) FROM channel_reads WHERE user_id = ?),
-		     (SELECT COUNT(*) FROM channels WHERE last_message_id IS NOT NULL)`,
-		viewerUserID,
-	).Scan(&readsCount, &channelsWithTipCount); err != nil {
+		     (SELECT COUNT(*)
+		        FROM channels c
+		        JOIN channel_members cm
+		          ON cm.channel_id = c.id AND cm.user_id = ?
+		       WHERE c.last_message_id IS NOT NULL)`,
+		viewerUserID, viewerUserID,
+	).Scan(&readsCount, &memberChannelsWithTipCount); err != nil {
 		return err
 	}
-	if readsCount >= channelsWithTipCount {
+	if readsCount >= memberChannelsWithTipCount {
 		return nil
 	}
 
@@ -82,12 +92,14 @@ func (r *Repo) MaterializeChannelReadsTx(ctx context.Context, viewerUserID strin
 		`INSERT OR IGNORE INTO channel_reads (channel_id, user_id, last_read_message_id, updated_at)
 		 SELECT c.id, ?, c.last_message_id, ?
 		   FROM channels c
+		   JOIN channel_members cm
+		     ON cm.channel_id = c.id AND cm.user_id = ?
 		  WHERE c.last_message_id IS NOT NULL
 		    AND NOT EXISTS (
 		        SELECT 1 FROM channel_reads
 		         WHERE channel_id = c.id AND user_id = ?
 		    )`,
-		viewerUserID, now, viewerUserID,
+		viewerUserID, now, viewerUserID, viewerUserID,
 	); err != nil {
 		return err
 	}

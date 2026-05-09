@@ -81,6 +81,25 @@ export interface MembershipBlock {
   inviter_signature: string | null;
 }
 
+// ChannelMember mirrors one row in `GET /api/channels/{id}/members`.
+// Server-side counterpart: `memberWire` in
+// apps/server/internal/http/members_handlers.go (kept in sync — see
+// the top-of-file `sync with` comment in goclient/channels.go).
+// inviter_signature is omitted for the public-channel auto-add
+// carve-out (R1.2). username is a convenience populated from the
+// users table at request time so clients don't need a second
+// /api/users round-trip to render the panel.
+export interface ChannelMember {
+  user_id: string;
+  inviter_user_id: string;
+  inviter_sign_pubkey: string;
+  inviter_signature?: string;
+  invitee_box_pubkey: string;
+  invitee_sign_pubkey: string;
+  added_at: string;
+  username?: string;
+}
+
 export interface Message {
   id: string;
   channel_id: string;

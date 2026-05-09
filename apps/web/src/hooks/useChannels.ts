@@ -21,7 +21,7 @@ interface ChannelsState {
 
 interface UseChannels extends ChannelsState {
   reload: () => Promise<void>;
-  create: (name: string) => Promise<Channel>;
+  create: (name: string, options: { isPublic: boolean }) => Promise<Channel>;
   rename: (id: string, newName: string) => Promise<Channel>;
 }
 
@@ -56,13 +56,16 @@ export function useChannels(enabled: boolean, opts: UseChannelsOpts = {}): UseCh
   // Eager merge on REST success so the caller can switch to the new id
   // before the WS frame arrives; the WS handler's id-dedup makes the
   // echo a no-op.
-  const create = useCallback(async (name: string): Promise<Channel> => {
-    const ch = await getClient().createChannel(name);
-    setState((s) =>
-      s.channels.some((c) => c.id === ch.id) ? s : { ...s, channels: [...s.channels, ch] },
-    );
-    return ch;
-  }, []);
+  const create = useCallback(
+    async (name: string, options: { isPublic: boolean }): Promise<Channel> => {
+      const ch = await getClient().createChannel(name, { isPublic: options.isPublic });
+      setState((s) =>
+        s.channels.some((c) => c.id === ch.id) ? s : { ...s, channels: [...s.channels, ch] },
+      );
+      return ch;
+    },
+    [],
+  );
 
   const rename = useCallback(async (id: string, newName: string): Promise<Channel> => {
     const ch = await getClient().renameChannel(id, newName);

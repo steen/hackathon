@@ -27,6 +27,12 @@ type Channel struct {
 	LastMessageAt     *time.Time `json:"last_message_at,omitempty"`
 	LastReadMessageID *string    `json:"last_read_message_id,omitempty"`
 	UnreadCount       *int       `json:"unread_count,omitempty"`
+	// IsPublic mirrors channels.is_public (decision-log §9 + L24). The
+	// default is FALSE so a channel created without an explicit flag is
+	// invite-only. Pointer for tri-state on the wire — nil when the
+	// caller used a code path that does not select the column (e.g.
+	// pre-Phase-10 SELECTs in tests). Immutable after creation per L15.
+	IsPublic *bool `json:"is_public,omitempty"`
 }
 
 // ErrChannelNameTaken is returned by CreateChannel when the UNIQUE
@@ -45,7 +51,7 @@ var ErrChannelNotFound = errors.New("repo: channel not found")
 // Callers that need filtering can pass a context with a deadline.
 func (r *Repo) ListChannels(ctx context.Context) ([]Channel, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, created_at FROM channels ORDER BY id ASC`)
+		`SELECT id, name, is_public, created_at FROM channels ORDER BY id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -53,9 +59,12 @@ func (r *Repo) ListChannels(ctx context.Context) ([]Channel, error) {
 	out := make([]Channel, 0)
 	for rows.Next() {
 		var c Channel
-		if err := rows.Scan(&c.ID, &c.Name, &c.CreatedAt); err != nil {
+		var isPub bool
+		if err := rows.Scan(&c.ID, &c.Name, &isPub, &c.CreatedAt); err != nil {
 			return nil, err
 		}
+		v := isPub
+		c.IsPublic = &v
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -82,14 +91,17 @@ func (r *Repo) ChannelExists(ctx context.Context, id string) (bool, error) {
 // inspecting sql.ErrNoRows themselves.
 func (r *Repo) GetChannel(ctx context.Context, id string) (*Channel, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, created_at FROM channels WHERE id = ?`, id)
+		`SELECT id, name, is_public, created_at FROM channels WHERE id = ?`, id)
 	var c Channel
-	if err := row.Scan(&c.ID, &c.Name, &c.CreatedAt); err != nil {
+	var isPub bool
+	if err := row.Scan(&c.ID, &c.Name, &isPub, &c.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	v := isPub
+	c.IsPublic = &v
 	return &c, nil
 }
 
@@ -113,7 +125,8 @@ func (r *Repo) CreateChannel(ctx context.Context, id, name string, isPublic bool
 		}
 		return nil, err
 	}
-	return &Channel{ID: id, Name: name, CreatedAt: created}, nil
+	v := isPublic
+	return &Channel{ID: id, Name: name, CreatedAt: created, IsPublic: &v}, nil
 }
 
 // RenameChannel updates channels.name for the row matching id and returns
@@ -143,14 +156,17 @@ func (r *Repo) RenameChannel(ctx context.Context, id, newName string, _ time.Tim
 		return nil, ErrChannelNotFound
 	}
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, created_at FROM channels WHERE id = ?`, id)
+		`SELECT id, name, is_public, created_at FROM channels WHERE id = ?`, id)
 	var c Channel
-	if err := row.Scan(&c.ID, &c.Name, &c.CreatedAt); err != nil {
+	var isPub bool
+	if err := row.Scan(&c.ID, &c.Name, &isPub, &c.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrChannelNotFound
 		}
 		return nil, err
 	}
+	v := isPub
+	c.IsPublic = &v
 	return &c, nil
 }
 
@@ -185,18 +201,24 @@ func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID strin
 	if err := r.MaterializeChannelReadsTx(ctx, viewerUserID); err != nil {
 		return nil, err
 	}
+	// Phase-10 §6 + L25: GET /api/channels filters to channels where the
+	// viewer is a member. The JOIN against channel_members on
+	// (channel_id, user_id) filters server-side so the listing reveals
+	// no metadata about non-member channels.
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT c.id, c.name, c.created_at,
+		`SELECT c.id, c.name, c.is_public, c.created_at,
 		        c.last_message_id, c.last_message_at,
 		        r.last_read_message_id,
 		        (SELECT COUNT(*) FROM messages m
 		          WHERE m.channel_id = c.id
 		            AND m.id > r.last_read_message_id) AS unread_count
 		   FROM channels c
+		   JOIN channel_members cm
+		     ON cm.channel_id = c.id AND cm.user_id = ?
 		   LEFT JOIN channel_reads r
 		     ON r.channel_id = c.id AND r.user_id = ?
 		  ORDER BY c.last_message_at DESC NULLS LAST, c.id ASC`,
-		viewerUserID,
+		viewerUserID, viewerUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -206,15 +228,18 @@ func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID strin
 	for rows.Next() {
 		var (
 			c             Channel
+			isPub         bool
 			lastMsgID     sql.NullString
 			lastMsgAt     sql.NullTime
 			lastReadMsgID sql.NullString
 			unread        int
 		)
-		if err := rows.Scan(&c.ID, &c.Name, &c.CreatedAt,
+		if err := rows.Scan(&c.ID, &c.Name, &isPub, &c.CreatedAt,
 			&lastMsgID, &lastMsgAt, &lastReadMsgID, &unread); err != nil {
 			return nil, err
 		}
+		v := isPub
+		c.IsPublic = &v
 		if lastMsgID.Valid {
 			s := lastMsgID.String
 			c.LastMessageID = &s

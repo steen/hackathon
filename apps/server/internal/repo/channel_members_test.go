@@ -90,3 +90,36 @@ func bytesOfLen(n int) []byte {
 	}
 	return b
 }
+
+// joinAsMember seeds a public channel membership row so the viewer
+// passes the L25 filter on the listing/materialize path. The Phase-9
+// channel_reads tests pre-date the explicit-membership rule and assume
+// implicit-membership semantics; this helper backfills the row without
+// reaching into the migration. The membership uses the public-channel
+// carve-out (NULL signature) because the underlying channel was
+// created with is_public=false in those tests — but the L33 enforce-
+// ment runs against the channel's flag, not the row's, so the helper
+// flips the row's is_public to TRUE for the duration of the insert.
+//
+// Tests that exercise membership semantics directly should NOT use
+// this helper — they live in channel_members_test.go and seed via
+// InsertChannelMember + a real public channel.
+func joinAsMember(t *testing.T, r *repo.Repo, channelID, userID string) {
+	t.Helper()
+	// We bypass the Insert L33 guard with a direct SQL exec because the
+	// helper backfills test rows where the underlying channel may have
+	// is_public=false; the L33 enforcement is unit-tested in
+	// channel_members_test.go above.
+	if _, err := r.DB().ExecContext(context.Background(),
+		`INSERT INTO channel_members(
+		    channel_id, user_id, inviter_user_id,
+		    inviter_sign_pubkey, inviter_signature,
+		    invitee_box_pubkey, invitee_sign_pubkey,
+		    added_at)
+		 VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+		channelID, userID, userID,
+		bytesOfLen(32), bytesOfLen(32), bytesOfLen(32), time.Now(),
+	); err != nil {
+		t.Fatalf("seed membership: %v", err)
+	}
+}
