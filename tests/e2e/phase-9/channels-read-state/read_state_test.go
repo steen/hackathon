@@ -230,9 +230,12 @@ func TestSecondListingDoesNotRewriteChannelReads(t *testing.T) {
 //  1. 204 No Content.
 //  2. SQLite `channel_reads.last_read_message_id` advances to the
 //     supplied id.
-//  3. The viewer's `user:<viewer>` WS topic receives a
-//     {type:"read", scope:"channel", scope_id:<id>, last_read_message_id:<id>}
-//     frame.
+//  3. The viewer's `user:<viewer>` WS topic receives a contract-shaped
+//     read frame:
+//     {type:"read", data:{scope:"channel", target_id:<id>,
+//     last_read_message_id:<id>, unread_count:0}}
+//     matching specs/plans/phase-9/read-state.md and the DM arm in
+//     dms_handlers.go:broadcastDMRead.
 func TestPostReadAdvancesCursorAndPublishesFrame(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
 
@@ -285,16 +288,23 @@ func TestPostReadAdvancesCursorAndPublishesFrame(t *testing.T) {
 		t.Fatalf("cursor stuck at tipBeforeList %q (expected %q)", tipBeforeList, advanceTarget)
 	}
 
-	// AC: WS frame received on `user:<viewer>` with the right scope/payload.
+	// AC: WS frame received on `user:<viewer>` with the right
+	// scope/payload. The viewer just advanced their cursor to the
+	// channel tip, so unread_count must be 0.
 	frame := waitForReadFrame(t, inboxFrames, advanceTarget, 3*time.Second)
-	if frame.Scope != "channel" {
-		t.Errorf("frame scope = %q, want %q", frame.Scope, "channel")
+	if frame.Data.Scope != "channel" {
+		t.Errorf("frame data.scope = %q, want %q", frame.Data.Scope, "channel")
 	}
-	if frame.ScopeID != general {
-		t.Errorf("frame scope_id = %q, want %q", frame.ScopeID, general)
+	if frame.Data.TargetID != general {
+		t.Errorf("frame data.target_id = %q, want %q", frame.Data.TargetID, general)
 	}
-	if frame.LastReadMessageID != advanceTarget {
-		t.Errorf("frame last_read_message_id = %q, want %q", frame.LastReadMessageID, advanceTarget)
+	if frame.Data.LastReadMessageID != advanceTarget {
+		t.Errorf("frame data.last_read_message_id = %q, want %q",
+			frame.Data.LastReadMessageID, advanceTarget)
+	}
+	if frame.Data.UnreadCount != 0 {
+		t.Errorf("frame data.unread_count = %d, want 0 (viewer is at tip)",
+			frame.Data.UnreadCount)
 	}
 }
 
@@ -353,13 +363,20 @@ func TestPostReadRateLimitTrips(t *testing.T) {
 }
 
 // readFrameBody is the typed shape we parse from the
-// `user:<viewer>` topic. ScopeID + LastReadMessageID let the test
-// assert routing + payload simultaneously.
+// `user:<viewer>` topic. Mirrors specs/plans/phase-9/read-state.md
+// `{type:"read"}` envelope: data.scope + data.target_id +
+// data.last_read_message_id + data.unread_count let the test assert
+// routing and payload simultaneously.
 type readFrameBody struct {
-	Type              string `json:"type"`
+	Type string            `json:"type"`
+	Data readFrameDataBody `json:"data"`
+}
+
+type readFrameDataBody struct {
 	Scope             string `json:"scope"`
-	ScopeID           string `json:"scope_id"`
+	TargetID          string `json:"target_id"`
 	LastReadMessageID string `json:"last_read_message_id"`
+	UnreadCount       int    `json:"unread_count"`
 }
 
 // openInbox dials the production /ws endpoint and returns a channel
@@ -419,7 +436,7 @@ func waitForReadFrame(t *testing.T, frames <-chan readFrameBody, target string, 
 			if !ok {
 				t.Fatalf("inbox closed without delivering a read frame for %q", target)
 			}
-			if f.LastReadMessageID == target {
+			if f.Data.LastReadMessageID == target {
 				return f
 			}
 			// Earlier frame from a prior step — keep waiting.
