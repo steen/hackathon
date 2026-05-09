@@ -278,6 +278,55 @@ func TestListChannelsWithReadStateMaterializesNonEmptyChannels(t *testing.T) {
 	}
 }
 
+// Documents the MaterializeChannelReadsTx precondition called out in
+// ListChannelsWithReadState's doc-comment: the listing SQL relies on
+// `r.last_read_message_id` being non-NULL for every non-empty channel.
+// Running the listing SQL directly without the materialize call (i.e.
+// the LEFT JOIN misses) returns unread_count=0 for a channel that
+// actually has messages — a silent undercount. This exercises the
+// inner SELECT in isolation so the precondition stays load-bearing
+// even if a future refactor moves the materialize call elsewhere.
+func TestListChannelsWithReadStateRequiresMaterializeForNonEmpty(t *testing.T) {
+	r, _ := newRepo(t)
+	viewer := mustUserUnique(t, r)
+	author := mustUserUnique(t, r)
+	channelID := mustChannel(t, r, "alpha")
+	for i := 0; i < 3; i++ {
+		if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
+			t.Fatalf("seed message %d: %v", i, err)
+		}
+	}
+
+	// No MaterializeChannelReadsTx call — viewer has no channel_reads
+	// row for this channel. Run the same SELECT body
+	// ListChannelsWithReadState executes; the LEFT JOIN misses, so
+	// `m.id > NULL` is NULL and COUNT(*) collapses to 0.
+	row := r.DB().QueryRow(
+		`SELECT (SELECT COUNT(*) FROM messages m
+		          WHERE m.channel_id = c.id
+		            AND m.id > r.last_read_message_id),
+		        r.last_read_message_id IS NULL
+		   FROM channels c
+		   LEFT JOIN channel_reads r
+		     ON r.channel_id = c.id AND r.user_id = ?
+		  WHERE c.id = ?`,
+		viewer, channelID,
+	)
+	var (
+		unread     int
+		joinMissed bool
+	)
+	if err := row.Scan(&unread, &joinMissed); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if !joinMissed {
+		t.Fatalf("test setup: channel_reads row already present; expected LEFT JOIN miss")
+	}
+	if unread != 0 {
+		t.Fatalf("unread without materialize: got %d want 0 (silent undercount documents the precondition violation)", unread)
+	}
+}
+
 func readCursor(t *testing.T, db *sql.DB, channelID, userID string) string {
 	t.Helper()
 	var got string
