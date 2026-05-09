@@ -4,6 +4,12 @@
 export interface User {
   id: string;
   username: string;
+  // Phase-10 identity pubkeys. Optional under the L26 "optional-first"
+  // wire-coordination rule: TS may declare these before the server populates
+  // them (#4 lands the server side). base64 of raw 32 bytes each — see
+  // specs/plans/phase-10/encryption.md "User wire-type extensions" + L2.
+  box_pubkey?: string;
+  sign_pubkey?: string;
 }
 
 export interface Channel {
@@ -18,6 +24,61 @@ export interface Channel {
   last_message_at?: string | null;
   unread_count?: number;
   last_read_message_id?: string | null;
+  // Phase-10 public-channel flag. Optional and unset on the wire until #6
+  // populates it; see decision-log L24 ("is_public" migration + seed).
+  // Immutable after channel creation per L15.
+  is_public?: boolean;
+}
+
+// MessageEnvelope is the encrypted-message wire shape from Phase 10
+// (decision-log L21, specs/plans/phase-10/encryption.md). Renamed from
+// "Envelope" to avoid colliding with the response-wrapper Envelope<T>
+// already exported below; the JSON wire field is still `envelope`.
+//
+// cipher_suite = 0x01 is the only suite in v1 (naclbox-v1 — decision §3).
+// signature is Ed25519 over the snakd-msg-v1:{channel,dm}: scope from L21.
+// client_created_at is signed; the parent `created_at` is server-stamped
+// and unsigned (display-only).
+export interface MessageEnvelope {
+  cipher_suite: number;
+  key_generation_id: number;
+  nonce: string;
+  ciphertext: string;
+  sender_sign_pubkey: string;
+  signature: string;
+  client_created_at: string;
+}
+
+// WrapEntry is the per-recipient root-key wrap that travels on every
+// wrap-carrying endpoint (decision-log L5 + §7). recipient_user_id may be
+// omitted when the wrap-list singularity already pins the recipient
+// (e.g. the single root_key_wrap on POST /api/channels/{id}/members).
+// wrapped_key is base64 of crypto_box ciphertext (48 bytes after MAC).
+// nonce is base64 of 24 random bytes (XSalsa20). sender_box_pubkey is
+// base64 of 32 raw bytes — the wrapper's box_pubkey at wrap time.
+export interface WrapEntry {
+  recipient_user_id?: string;
+  wrapped_key: string;
+  sender_box_pubkey: string;
+  nonce: string;
+}
+
+// MembershipBlock is the inviter-signed channel-membership row from
+// decision-log §10 + L22. Travels on POST /api/channels,
+// POST /api/channels/{id}/members, the replay-wrap endpoint, and as the
+// `membership` field of every entry in the wraps-needed response.
+//
+// inviter_signature is Ed25519 over the snakd-mship-v1: scope. It is null
+// only for the public-channel server-auto-add carve-out (R1.2 residual,
+// see security.md); private-channel rows must carry a non-null signature
+// (L33 application-level enforcement in repo/channel_members.go).
+export interface MembershipBlock {
+  inviter_user_id: string;
+  inviter_sign_pubkey: string;
+  invitee_box_pubkey: string;
+  invitee_sign_pubkey: string;
+  added_at: string;
+  inviter_signature: string | null;
 }
 
 export interface Message {
@@ -26,6 +87,10 @@ export interface Message {
   sender_user_id: string;
   body: string;
   created_at: string;
+  // Phase-10 encrypted-message envelope (L21). Optional in this PR per the
+  // L26 optional-first rule; #983 narrows it to required once every consumer
+  // of `.body` is migrated to decrypt-from-envelope (Wave 5 / E).
+  envelope?: MessageEnvelope;
 }
 
 // Conversation mirrors the wire shape from specs/plans/phase-9/dms.md.
@@ -52,6 +117,10 @@ export interface DMMessage {
   sender_user_id: string;
   body: string;
   created_at: string;
+  // Phase-10 encrypted-message envelope (L21). Optional in this PR per the
+  // L26 optional-first rule; #983 narrows it to required once every consumer
+  // of `.body` is migrated.
+  envelope?: MessageEnvelope;
 }
 
 export interface ListDMMessagesOptions {
@@ -89,14 +158,37 @@ export interface PresenceEvent {
   };
 }
 
-export type ChannelEventKind = "create" | "rename";
+// ChannelEventKind carries the Phase-8 "create"/"rename" frames plus the
+// Phase-10 extensions from decision-log L9 + L29:
+//   - members_changed: broadcast after POST/DELETE on /channels/{id}/members
+//     so recipients can race to rotate or compute lazy-wrap fill-ins.
+//   - key_received: routed to the receiving user's user:<viewer> topic when
+//     their wrap is filled in or rotated (closes the lazy-wrap loop).
+//   - wrap_failed: routed to the user's own user:<viewer> topic when their
+//     local crypto_box_open on a wrap fails — recovery is replay-wrap (L29
+//     + L35).
+export type ChannelEventKind =
+  | "create"
+  | "rename"
+  | "members_changed"
+  | "key_received"
+  | "wrap_failed";
+
+export type ChannelEventData =
+  | { kind: "create"; channel: Channel }
+  | { kind: "rename"; channel: Channel }
+  | {
+      kind: "members_changed";
+      channel_id: string;
+      current_generation_id: number;
+      members_at_rotation: User[];
+    }
+  | { kind: "key_received"; channel_id: string; generation_id: number }
+  | { kind: "wrap_failed"; channel_id: string; generation_id: number };
 
 export interface ChannelEvent {
   type: "channel";
-  data: {
-    kind: ChannelEventKind;
-    channel: Channel;
-  };
+  data: ChannelEventData;
 }
 
 // DMEvent is self-sufficient on first contact (decision §8): the embedded

@@ -18,6 +18,7 @@
     "vitest.config.ts",
     "phase-2/**/*.ts",
     "phase-3/**/*.ts",
-    "phase-8/**/*.ts"
+    "phase-8/**/*.ts",
+    "phase-10/**/*.ts"
   ]
 }

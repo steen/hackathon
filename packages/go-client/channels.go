@@ -18,6 +18,11 @@ import (
 // (decision-log L26 — optional-first wire shape). They are nil on every
 // endpoint until the channel-listing populator ships server-side, so
 // consumers must tolerate nil.
+//
+// IsPublic is the Phase-10 public-channel flag (decision-log §9 + L24).
+// Pointer for tri-state (nil = server has not populated; *true / *false
+// = explicit). Immutable after channel creation per L15. Wave 2 (M /
+// membership PR) populates it.
 type Channel struct {
 	ID                ULID       `json:"id"`
 	Name              string     `json:"name"`
@@ -26,6 +31,7 @@ type Channel struct {
 	LastMessageAt     *time.Time `json:"last_message_at,omitempty"`
 	UnreadCount       *int       `json:"unread_count,omitempty"`
 	LastReadMessageID *ULID      `json:"last_read_message_id,omitempty"`
+	IsPublic          *bool      `json:"is_public,omitempty"`
 }
 
 // channelsListResponse is the envelope payload for GET /api/channels.

@@ -35,4 +35,8 @@ export default defineWorkspace([
     extends: "./phase-8/channel-ws-drift/vitest.config.ts",
     test: { name: "channel-ws-drift" },
   },
+  {
+    extends: "./phase-10/vitest.config.ts",
+    test: { name: "phase-10-wire-types" },
+  },
 ]);

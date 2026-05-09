@@ -11,9 +11,15 @@ import (
 
 // User mirrors the {id, username} pair the server returns from auth
 // endpoints (POST /api/auth/login, POST /api/auth/register, GET /api/auth/me).
+//
+// BoxPubkey and SignPubkey are Phase-10 identity pubkeys (decision-log
+// L2). base64 of raw 32 bytes each. Omitempty under the L26 optional-first
+// rule until #4 lands the server population.
 type User struct {
-	ID       ULID   `json:"id"`
-	Username string `json:"username"`
+	ID         ULID   `json:"id"`
+	Username   string `json:"username"`
+	BoxPubkey  string `json:"box_pubkey,omitempty"`
+	SignPubkey string `json:"sign_pubkey,omitempty"`
 }
 
 // AuthResponse is the success payload from POST /api/auth/login and

@@ -25,12 +25,19 @@ type Conversation struct {
 
 // DMMessage mirrors the dm_messages row. Immutable on the wire (L9 — no
 // edit/delete in v1).
+//
+// Envelope is the Phase-10 encrypted-message envelope (L21); shape is
+// identical to Message.Envelope but the signature scope binds
+// conversation_id (snakd-msg-v1:dm: prefix per L21) for cross-protocol
+// confusion resistance. Pointer for optional under the L26
+// optional-first rule; #983 narrows it.
 type DMMessage struct {
-	ID             ULID      `json:"id"`
-	ConversationID ULID      `json:"conversation_id"`
-	SenderUserID   ULID      `json:"sender_user_id"`
-	Body           string    `json:"body"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             ULID             `json:"id"`
+	ConversationID ULID             `json:"conversation_id"`
+	SenderUserID   ULID             `json:"sender_user_id"`
+	Body           string           `json:"body"`
+	CreatedAt      time.Time        `json:"created_at"`
+	Envelope       *MessageEnvelope `json:"envelope,omitempty"`
 }
 
 // dmsListResponse is the envelope payload for GET /api/dms.
