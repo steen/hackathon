@@ -49,7 +49,9 @@ func EnsureGeneralChannel(ctx context.Context, r *repo.Repo) error {
 		return nil
 	}
 
-	if _, err := r.CreateChannel(ctx, ids.NewULID(), GeneralChannelName, time.Now()); err != nil {
+	// #general is the public channel new users auto-join at registration
+	// (decision-log L24 + §9 — see specs/plans/phase-10/membership.md).
+	if _, err := r.CreateChannel(ctx, ids.NewULID(), GeneralChannelName, true, time.Now()); err != nil {
 		if errors.Is(err, repo.ErrChannelNameTaken) {
 			// Concurrent seeder won the race; the row exists.
 			return nil

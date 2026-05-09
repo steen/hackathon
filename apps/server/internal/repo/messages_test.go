@@ -11,7 +11,7 @@ import (
 
 func mustChannel(t *testing.T, r *repo.Repo, name string) string {
 	t.Helper()
-	ch, err := r.CreateChannel(context.Background(), ids.NewULID(), name, time.Now())
+	ch, err := r.CreateChannel(context.Background(), ids.NewULID(), name, false, time.Now())
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}

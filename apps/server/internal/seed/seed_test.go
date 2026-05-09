@@ -77,7 +77,7 @@ func TestSeedRespectsPreexistingGeneralChannel(t *testing.T) {
 
 	preID := ids.NewULID()
 	preCreated := time.Now().UTC().Truncate(time.Millisecond)
-	if _, err := r.CreateChannel(context.Background(), preID, "general", preCreated); err != nil {
+	if _, err := r.CreateChannel(context.Background(), preID, "general", true, preCreated); err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
 

@@ -96,11 +96,16 @@ func (r *Repo) GetChannel(ctx context.Context, id string) (*Channel, error) {
 // CreateChannel inserts a new channel row. The caller supplies the ULID
 // so the same id can be returned in the same envelope without a second
 // SELECT round-trip.
-func (r *Repo) CreateChannel(ctx context.Context, id, name string, now time.Time) (*Channel, error) {
+//
+// isPublic toggles the channels.is_public column added by migration 0006
+// (decision-log L24): the seeded #general row passes true so new-user
+// auto-add at registration time targets it; every other channel passes
+// false until the membership API exposes a creator-facing flag.
+func (r *Repo) CreateChannel(ctx context.Context, id, name string, isPublic bool, now time.Time) (*Channel, error) {
 	created := now.UTC()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO channels(id, name, created_at) VALUES (?, ?, ?)`,
-		id, name, created,
+		`INSERT INTO channels(id, name, is_public, created_at) VALUES (?, ?, ?, ?)`,
+		id, name, isPublic, created,
 	)
 	if err != nil {
 		if isChannelNameTakenErr(err) {
