@@ -218,3 +218,93 @@ func TestReadMarkUserConfigFromEnvIgnoresInvalid(t *testing.T) {
 		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
 	}
 }
+
+func TestWrapsNeededUserConfigDefaults(t *testing.T) {
+	got := WrapsNeededUserConfig()
+	if got.Burst != 10 {
+		t.Errorf("Burst: got %d, want 10 (decision log L31 + L36)", got.Burst)
+	}
+	if got.Refill != time.Minute {
+		t.Errorf("Refill: got %v, want 1m (decision log L31 + L36)", got.Refill)
+	}
+	if got.Capacity != 4096 {
+		t.Errorf("Capacity: got %d, want 4096", got.Capacity)
+	}
+}
+
+func TestWrapsNeededUserConfigFromEnvDefaultsWhenUnset(t *testing.T) {
+	t.Setenv(EnvWrapsNeededBurst, "")
+	t.Setenv(EnvWrapsNeededRefill, "")
+	got := WrapsNeededUserConfigFromEnv()
+	want := WrapsNeededUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestWrapsNeededUserConfigFromEnvOverrides(t *testing.T) {
+	t.Setenv(EnvWrapsNeededBurst, "4")
+	t.Setenv(EnvWrapsNeededRefill, "5s")
+	got := WrapsNeededUserConfigFromEnv()
+	if got.Burst != 4 {
+		t.Errorf("Burst: got %d want 4", got.Burst)
+	}
+	if got.Refill != 5*time.Second {
+		t.Errorf("Refill: got %v want 5s", got.Refill)
+	}
+}
+
+func TestWrapsNeededUserConfigFromEnvIgnoresInvalid(t *testing.T) {
+	t.Setenv(EnvWrapsNeededBurst, "abc")
+	t.Setenv(EnvWrapsNeededRefill, "0s")
+	got := WrapsNeededUserConfigFromEnv()
+	want := WrapsNeededUserConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
+	}
+}
+
+func TestReplayWrapConfigDefaults(t *testing.T) {
+	got := ReplayWrapConfig()
+	if got.Burst != 3 {
+		t.Errorf("Burst: got %d, want 3 (decision log L35)", got.Burst)
+	}
+	if got.Refill != 5*time.Minute {
+		t.Errorf("Refill: got %v, want 5m (decision log L35)", got.Refill)
+	}
+	if got.Capacity != 4096 {
+		t.Errorf("Capacity: got %d, want 4096", got.Capacity)
+	}
+}
+
+func TestReplayWrapConfigFromEnvDefaultsWhenUnset(t *testing.T) {
+	t.Setenv(EnvReplayWrapBurst, "")
+	t.Setenv(EnvReplayWrapRefill, "")
+	got := ReplayWrapConfigFromEnv()
+	want := ReplayWrapConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("got %+v want %+v", got, want)
+	}
+}
+
+func TestReplayWrapConfigFromEnvOverrides(t *testing.T) {
+	t.Setenv(EnvReplayWrapBurst, "9")
+	t.Setenv(EnvReplayWrapRefill, "30s")
+	got := ReplayWrapConfigFromEnv()
+	if got.Burst != 9 {
+		t.Errorf("Burst: got %d want 9", got.Burst)
+	}
+	if got.Refill != 30*time.Second {
+		t.Errorf("Refill: got %v want 30s", got.Refill)
+	}
+}
+
+func TestReplayWrapConfigFromEnvIgnoresInvalid(t *testing.T) {
+	t.Setenv(EnvReplayWrapBurst, "abc")
+	t.Setenv(EnvReplayWrapRefill, "0s")
+	got := ReplayWrapConfigFromEnv()
+	want := ReplayWrapConfig()
+	if got.Burst != want.Burst || got.Refill != want.Refill {
+		t.Errorf("invalid envs should not override; got %+v want %+v", got, want)
+	}
+}

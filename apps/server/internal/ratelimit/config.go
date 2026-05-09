@@ -38,6 +38,23 @@ const (
 	// EnvReadMarkRefill overrides ReadMarkUserConfig().Refill when set to
 	// a duration parseable by time.ParseDuration (e.g. "1m", "30s").
 	EnvReadMarkRefill = "CHAT_READ_MARK_REFILL"
+
+	// EnvWrapsNeededBurst overrides WrapsNeededUserConfig().Burst when
+	// set to a positive integer. Phase 10 default is Burst=10 (e2e
+	// decision log L31 + L36).
+	EnvWrapsNeededBurst = "CHAT_WRAPS_NEEDED_BURST"
+	// EnvWrapsNeededRefill overrides WrapsNeededUserConfig().Refill when
+	// set to a duration parseable by time.ParseDuration (e.g. "1m",
+	// "30s").
+	EnvWrapsNeededRefill = "CHAT_WRAPS_NEEDED_REFILL"
+
+	// EnvReplayWrapBurst overrides ReplayWrapConfig().Burst when set to
+	// a positive integer. Phase 10 default is Burst=3 (e2e decision log
+	// L35).
+	EnvReplayWrapBurst = "CHAT_REPLAY_WRAP_BURST"
+	// EnvReplayWrapRefill overrides ReplayWrapConfig().Refill when set
+	// to a duration parseable by time.ParseDuration (e.g. "5m", "30s").
+	EnvReplayWrapRefill = "CHAT_REPLAY_WRAP_REFILL"
 )
 
 // RegisterIPConfigFromEnv returns RegisterIPConfig with optional overrides
@@ -146,6 +163,73 @@ func ReadMarkUserConfigFromEnv() IPLimiterConfig {
 		}
 	}
 	if v := os.Getenv(EnvReadMarkRefill); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.Refill = d
+		}
+	}
+	return cfg
+}
+
+// WrapsNeededUserConfig is the shared default for the per-user
+// wraps-needed-read limiter (GET /api/channels/{id}/members/wraps-needed).
+// Burst=10 / Refill=1m matches the cadence of the lazy-wrap-on-online
+// loop: a client queries once per WS-connection lifetime per channel
+// with a 60s flap-debounce, so a friend-scale member never trips the
+// bucket while a misbehaving client cannot loop the endpoint. E2e
+// decision log L31 + L36.
+//
+// The limiter type is IPLimiter — same token-bucket semantics, same
+// bounded LRU. The "IP" name is historical; the bucket key is whatever
+// string the caller passes (a user ULID here).
+func WrapsNeededUserConfig() IPLimiterConfig {
+	return IPLimiterConfig{Burst: 10, Refill: time.Minute, Capacity: 4096}
+}
+
+// WrapsNeededUserConfigFromEnv returns WrapsNeededUserConfig with
+// optional overrides from EnvWrapsNeededBurst and EnvWrapsNeededRefill.
+// Empty, malformed, or non-positive values fall back to the production
+// default — callers do not need to validate.
+func WrapsNeededUserConfigFromEnv() IPLimiterConfig {
+	cfg := WrapsNeededUserConfig()
+	if v := os.Getenv(EnvWrapsNeededBurst); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Burst = n
+		}
+	}
+	if v := os.Getenv(EnvWrapsNeededRefill); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.Refill = d
+		}
+	}
+	return cfg
+}
+
+// ReplayWrapConfig is the shared default for the replay-wrap limiter
+// (POST /api/channels/{id}/members/{user_id}/replay-wrap). Burst=3 /
+// Refill=5m bounds loop-griefing of one recipient by a malicious
+// re-issuer; the bucket is keyed per (channel_id, member_user_id) pair
+// (handler builds the key, the config function only pins the bucket
+// shape). E2e decision log L35.
+//
+// The limiter type is IPLimiter — same token-bucket semantics, same
+// bounded LRU. The "IP" name is historical; the bucket key is whatever
+// string the caller passes.
+func ReplayWrapConfig() IPLimiterConfig {
+	return IPLimiterConfig{Burst: 3, Refill: 5 * time.Minute, Capacity: 4096}
+}
+
+// ReplayWrapConfigFromEnv returns ReplayWrapConfig with optional
+// overrides from EnvReplayWrapBurst and EnvReplayWrapRefill. Empty,
+// malformed, or non-positive values fall back to the production
+// default — callers do not need to validate.
+func ReplayWrapConfigFromEnv() IPLimiterConfig {
+	cfg := ReplayWrapConfig()
+	if v := os.Getenv(EnvReplayWrapBurst); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Burst = n
+		}
+	}
+	if v := os.Getenv(EnvReplayWrapRefill); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			cfg.Refill = d
 		}
