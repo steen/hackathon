@@ -1,4 +1,5 @@
 // sync with apps/server/internal/http/users_handlers.go::UserSummary
+// sync with packages/api-client/src/types.ts::User
 package goclient
 
 import (
