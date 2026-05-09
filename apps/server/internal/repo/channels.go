@@ -153,21 +153,29 @@ func (r *Repo) RenameChannel(ctx context.Context, id, newName string, _ time.Tim
 // read-state fields populated, in `last_message_at DESC NULLS LAST`
 // order (decision log §9 — activity-ordered listing).
 //
-// Calls MaterializeChannelReadsTx for viewerUserID first so a fresh
-// user has a `channel_reads` row pinned to each channel's
-// `last_message_id` (decision log §11 — auto-materialize on listing,
-// never-messaged channels are skipped because the column is NOT NULL).
+// Correctness rests on a single combined argument tying the
+// MaterializeChannelReadsTx precondition to the LEFT-JOIN-miss arm.
+// MaterializeChannelReadsTx (decision log §11 — auto-materialize on
+// listing) inserts a `channel_reads` row pinned to `last_message_id`
+// for every channel where the viewer lacks one AND the channel has
+// `last_message_id` set. The migration declares `last_read_message_id`
+// NOT NULL, so never-messaged channels are the only rows that
+// materialization skips. After this call, the LEFT JOIN can miss only
+// for never-messaged channels, where the predicate
+// `m.id > r.last_read_message_id` matches zero rows because the
+// channel itself has zero messages — the count is structurally 0
+// regardless of how the NULL `r.last_read_message_id` evaluates.
 //
-// The unread_count subquery counts messages with id strictly greater
-// than the viewer's last_read_message_id (decision log L6 channel
-// formula). The LEFT JOIN preserves never-messaged channels (e.g. the
-// seeded `general` row before any post) — those fall through with
-// `r.last_read_message_id` NULL, the `m.id > NULL` predicate is NULL,
-// and COUNT(*) is 0. Issue #938 dropped the prior empty-string
-// COALESCE belt: after §11 materialize-on-listing, every channel that could
-// contribute a non-zero count has a non-NULL `r.last_read_message_id`,
-// so the COALESCE branch was reachable only for the empty-channel
-// arm where the count is structurally zero either way.
+// Skipping the materialize call on a channel that does have messages
+// is a precondition violation: the LEFT JOIN misses, `m.id > NULL`
+// evaluates to NULL (falsy in WHERE), and the count comes back 0 —
+// silently undercounting unread messages for the viewer. Issue #938
+// dropped the prior empty-string COALESCE belt that masked exactly
+// this case as a different wrong answer (full-channel count instead
+// of 0); the belt was reachable only via this same precondition
+// violation. Either way, the materialize call is load-bearing for any
+// non-empty channel — see
+// TestListChannelsWithReadStateRequiresMaterializeForNonEmpty.
 func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID string) ([]Channel, error) {
 	if err := r.MaterializeChannelReadsTx(ctx, viewerUserID); err != nil {
 		return nil, err
