@@ -10,7 +10,7 @@ Discord Lite is a self-hosted, text-only chat application for friend groups unco
 
 **System-test-first**: Phase 0 stands up the server and two CLI clients exchanging real-time messages within the first hour, before any other feature work. Every later phase preserves this end-to-end testability.
 
-This PRD describes only what ships in MVP. Federation, end-to-end encryption, encryption at rest, and Postgres are **not** prepared for in code — they are listed in §13 as work that will require real schema and architecture changes at the time they ship. Designing for them now would be speculative complexity for a one-day project.
+This PRD describes only what ships in MVP. Federation, encryption at rest, and Postgres are **not** prepared for in code — they are listed in §13 as work that will require real schema and architecture changes at the time they ship. Designing for them now would be speculative complexity for a one-day project. End-to-end encryption (channels + DMs) shipped Phase 10 — see §13 "Shipped post-MVP" and `specs/plans/phase-10/`.
 
 ## 2. Mission
 
@@ -55,6 +55,8 @@ Privacy-respecting, friend-scale chat that you fully control — accessible from
 - Auth audit log (register / login success / login fail / logout)
 - Direct messages, 1:1 only (Phase 9)
 - Server-tracked read state for channels and DMs (Phase 9)
+- End-to-end encryption (channels + DMs) — NaCl `crypto_box` / `crypto_secretbox` / `crypto_sign`; static root key per channel/DM, wrapped per recipient; passphrase-derived per-user identity (Phase 10)
+- Public-vs-private channels with explicit membership — `channel_members` table, inviter-signed membership rows, `channels.is_public` flag, `#general` auto-add (Phase 10)
 
 **Technical**
 - Go HTTP + WebSocket server, single binary, embedded web assets
@@ -76,7 +78,6 @@ Privacy-respecting, friend-scale chat that you fully control — accessible from
 ### Out of Scope (deferred)
 
 - Voice / video / screen share
-- E2E encryption
 - Encryption at rest
 - Multi-server / federation
 - TUI client
@@ -264,9 +265,12 @@ This is a security-critical app — a friend-group chat that may eventually sit 
 
 ### Threat model
 
-- **In-scope attackers**: unauthenticated network attacker (port-scanning, scripted login/register attempts, XSS payloads in messages); logged-in user attempting to escalate, enumerate, flood, or deface.
-- **Trust boundary**: anyone holding a valid invite code + account is trusted with read/write to all channels in MVP (no per-channel ACLs).
-- **Out of scope**: host compromise, malicious admin, nation-state, physical access, side-channel attacks on the host.
+- **In-scope attackers**: unauthenticated network attacker (port-scanning, scripted login/register attempts, XSS payloads in messages); logged-in user attempting to escalate, enumerate, flood, or deface; passive network attacker outside the deploy (TLS / WSS termination is mandated for any non-loopback deployment); **post-Phase 10:** malicious operator with full server access (DB snapshot, RAM, live process) — for MESSAGE CONTENT only. The Phase 10 encryption design (`specs/plans/phase-10/encryption.md`, `…/membership.md`, `…/keys.md`, `…/security.md`) defends private-channel and DM bodies against an operator-with-DB+RAM access; metadata, public-channel content, and the social graph remain readable to such an operator (see R1.2 + L19).
+- **Trust boundary** (Phase 10): the wrap-list source of truth is the explicit `channel_members` relation. `#general` and any other `is_public = TRUE` channel auto-adds every authenticated user (operator-readable per R1.2). Private channels (`is_public = FALSE`, the default) are gated by inviter-signed membership rows; non-members cannot decrypt regardless of `CHAT_INVITE_CODE` possession. DMs are 1:1 — no third party can ever join.
+- **Named residual risks (Phase 10 — accepted for v1)**:
+  - **R1.1 — Modified server-delivered client.** A rogue operator can serve modified web JS or a modified `chatd` Go binary that exfiltrates the identity passphrase, fakes the wrong-passphrase canary check, or poisons the TOFU cache at first contact (the receiver caches whatever `sender_sign_pubkey` is in the first message they see). Per L40 the protocol-layer arm broadens to "rogue server with DB write access can swap stored `sender_sign_pubkey` + `signature` columns on a message envelope." Defenses (reproducible builds, pinned client checksums, code-signing, out-of-band fingerprint comparison) are out of scope for v1 — see `specs/plans/phase-10/security.md`.
+  - **R1.2 — Operator-as-public-channel-member.** An operator who registers using their own `CHAT_INVITE_CODE` becomes a member of every channel marked `is_public = TRUE` and can read its messages once any existing member's client lazy-wraps for them. Private channels (the default) remain defended via §10 inviter-signed membership; the operator cannot inject themselves because their forged `channel_members` row has no valid signature. See `specs/plans/phase-10/security.md`.
+- **Out of scope**: host compromise of an end-user device, nation-state breaking modern primitives, physical access, side-channel attacks on the host.
 
 ### Authentication
 
@@ -351,9 +355,11 @@ This is a security-critical app — a friend-group chat that may eventually sit 
 ### Security explicitly out of MVP scope
 
 - TLS — terminate at a reverse proxy if exposed; local deploy otherwise.
-- E2E encryption, encryption at rest.
-- 2FA, account recovery, email verification.
-- Per-channel ACLs / private channels — all authenticated users see all channels in MVP.
+- Encryption at rest (SQLCipher / volume-level encryption). Decision-log L19 documents that SQLCipher does NOT solve metadata exposure (operator holds the key); MLS / Signal Sealed Sender / private-information-retrieval are the roadmap families to evaluate for metadata hiding.
+- 2FA, account recovery (no server-side recovery for the Phase 10 identity passphrase — forgotten passphrase = account-wipe by design), email verification.
+- Out-of-band fingerprint / safety-number / QR verification UX. Phase 10 ships TOFU + key-change warning only (decision-log L20).
+- Per-message forward secrecy / epoch-rotated keys. Phase 10's static-root-key + member-removal-only rotation (L16) is the locked-in group-key model.
+- Reproducible builds / signed binaries (R1.1 mitigation).
 
 ## 10. API Specification
 
@@ -367,17 +373,18 @@ Base URL: `http://127.0.0.1:8080`. All JSON responses use the standard envelope.
 ### Auth
 
 ```
-POST /api/auth/register   { "username": "...", "password": "...", "invite_code": "..." }
-                          → { "token": "...", "user": { "id", "username" } }
+POST /api/auth/register   { "username": "...", "password": "...", "invite_code": "...",
+                            "box_pubkey": "<base64 32>", "sign_pubkey": "<base64 32>" }
+                          → { "token": "...", "user": { "id", "username", "box_pubkey", "sign_pubkey" } }
 
 POST /api/auth/login      { "username": "...", "password": "..." }
-                          → { "token": "...", "user": { ... } }
+                          → { "token": "...", "user": { "id", "username", "box_pubkey", "sign_pubkey" } }
 
 POST /api/auth/logout     (Bearer)
                           → { "ok": true }                  # bumps token_version, invalidates all tokens for the user
 
 GET  /api/auth/me         (Bearer)
-                          → { "user": { ... } }
+                          → { "user": { "id", "username", "box_pubkey", "sign_pubkey" } }
 
 POST /api/auth/ws-ticket  (Bearer)
                           → { "ticket": "...", "expires_at": "..." }   # single-use, 30s TTL, bound to user
@@ -386,21 +393,24 @@ POST /api/auth/ws-ticket  (Bearer)
 ### Channels
 
 ```
-GET   /api/channels                      → { "channels": [ { "id", "name", "created_at" } ] }
-POST  /api/channels        { "name" }    → { "id", "name", "created_at" }   # 200; 400 invalid name; 409 duplicate; 429 per-user rate limit
-PATCH /api/channels/{id}   { "name" }    → { "id", "name", "created_at" }   # 200; 400 invalid name; 403 on the seeded `#general` channel; 409 duplicate; 429 per-user rate limit
+GET   /api/channels                      → { "channels": [ { "id", "name", "is_public", "created_at" } ] }
+POST  /api/channels        { "name", "is_public"?, "membership", "root_key_wraps" }
+                                         → { "id", "name", "is_public", "created_at" }   # 200; 400 invalid name; 409 duplicate; 429 per-user rate limit
+PATCH /api/channels/{id}   { "name" }    → { "id", "name", "is_public", "created_at" }   # 200; 400 invalid name; 403 on the seeded `#general` channel; 409 duplicate; 429 per-user rate limit
 ```
 
-`POST` and `PATCH` share a per-user token-bucket rate limit (`CHAT_CHANNEL_WRITE_BURST` / `CHAT_CHANNEL_WRITE_REFILL`, defaults `10` / `1m`). The seeded `#general` channel cannot be renamed. Name validation reuses the same shape rules as create (lowercase, hyphenated, length cap; see `feature-channels-and-messages.md`).
+`POST` and `PATCH` share a per-user token-bucket rate limit (`CHAT_CHANNEL_WRITE_BURST` / `CHAT_CHANNEL_WRITE_REFILL`, defaults `10` / `1m`). The seeded `#general` channel cannot be renamed. Name validation reuses the same shape rules as create (lowercase, hyphenated, length cap; see `feature-channels-and-messages.md`). Phase 10: `GET /api/channels` filters to channels the viewer is a member of (decision-log §6 + L25); `is_public` defaults to `false` on `POST` (Phase 10 §9); `is_public` is **immutable after creation** (L15 — no `PATCH` for the flag). `POST /api/channels` carries a self-signed `MembershipBlock` and a single wrap-to-self in `root_key_wraps` per `specs/plans/phase-10/membership.md` and `specs/plans/phase-10/encryption.md`.
 
 ### Messages
 
 ```
 GET  /api/channels/{id}/messages?limit=50&before=<msg_id>
-                                        → { "messages": [ { "id", "channel_id", "sender_user_id", "body", "created_at" } ] }
+                                        → { "messages": [ <Message> ] }
 POST /api/channels/{id}/messages
-                          { "body" }    → <Message>
+                          { "envelope" } → <Message>
 ```
+
+Phase 10: the plaintext `body` field is removed and replaced by the signed `envelope` (see WebSocket section below for the envelope shape). The plaintext 4 KiB cap (PRD §9) is enforced **client-side** before encryption; server enforces only the existing 16 KiB REST body cap on the ciphertext payload (L17). Wire shape per `specs/plans/phase-10/encryption.md` (L21).
 
 ### Presence
 
@@ -424,13 +434,15 @@ Inbound (client → server): no application-level frames. The server reads only 
 
 Outbound (server → client):
 ```json
-{ "type": "message",  "data": { "id", "channel_id", "sender_user_id", "body", "created_at" } }
+{ "type": "message",  "data": { "id", "channel_id", "sender_user_id", "envelope": { ... }, "created_at" } }
 { "type": "presence", "data": { "kind": "join" | "leave", "user_id": "..." } }
-{ "type": "channel",  "data": { "kind": "create" | "rename", "channel": { "id", "name", "created_at" } } }
+{ "type": "channel",  "data": { "kind": "create" | "rename" | "members_changed" | "key_received" | "wrap_failed", ... } }
 { "type": "dm",       "data": { "conversation": <Conversation>, "dm_message": <DMMessage> } }
 { "type": "read",     "data": { "scope": "channel" | "dm", "target_id": "...", "last_read_message_id": "...", "unread_count": 0 } }
 { "type": "error",    "data": { "code", "message" } }
 ```
+
+Phase 10: the `message` and `dm` `data` blocks carry the signed `envelope` (`cipher_suite`, `key_generation_id`, `nonce`, `ciphertext`, `sender_sign_pubkey`, `signature`, `client_created_at`) instead of plaintext `body` — see `specs/plans/phase-10/encryption.md` (L21). The `channel` `data.kind` enum gains three Phase 10 entries: `members_changed` (broadcast to remaining members after a `POST`/`DELETE …/members/…`; carries `{channel_id, current_generation_id, members_at_rotation}`), `key_received` (fanned out to the receiving user's `user:<viewer>` topic when a wrap arrives; carries `{channel_id, generation_id}`), and `wrap_failed` (fired to the user's own `user:<viewer>` topic when `crypto_box_open` on their wrap fails; recovery via `replay-wrap` per `specs/plans/phase-10/keys.md`).
 
 Phase 9 extends the topic model: every authenticated WS connection subscribes to **two** Hub topics for its lifetime — the channel topic (per the existing `?channel=<id>` upgrade parameter, or the legacy `defaultChannel = "#general"` fallback when omitted) AND the user-inbox topic `user:<viewer>` (decision §4, §10, L15). The `?channel=` parameter remains optional under the legacy default to preserve existing go-client/CLI behavior; new clients can pass an explicit channel id. Frames are routed by topic:
 
@@ -475,6 +487,30 @@ Read state is server-authoritative and tracked per `(viewer, target)` pair so a 
 Channel listings (`GET /api/channels`) and DM listings (`GET /api/dms`) carry an additive `unread_count` field so a fresh login can render badges without N round-trips. The asymmetric initialization rules (auto-materialize for channels, lazy-NULL for DMs) are documented in §11 and `specs/plans/phase-9/read-state.md`.
 
 WebSocket emits `{type:"read"}` frames so a viewer's other devices update their badge in real time (§7). The frame is fanned out only to the originating viewer's `user:<viewer>` topic; peers do not see read receipts (L10).
+
+### Channel membership (Phase 10)
+
+```
+POST   /api/channels/{id}/members                                { "user_id", "membership": <MembershipBlock>, "root_key_wrap": <Wrap> }
+                                                                 → 201; 400; 403 non-member; 404; 409 already-member; 429
+GET    /api/channels/{id}/members                                → { "members": [ { "user_id", "username", "box_pubkey", "sign_pubkey", "added_at", "membership": <MembershipBlock> } ] }   # 200; 403 non-member
+DELETE /api/channels/{id}/members/{user_id}                      → 204; 403 on `#general` (L8) or non-member-non-self; 404
+```
+
+Phase 10 introduces the explicit `channel_members` relation (decision-log §6 + §10): every membership-add carries an Ed25519 inviter-signature (`MembershipBlock` shape per `specs/plans/phase-10/encryption.md`) so a rogue server cannot inject itself into a private channel. The same call carries the wrap of the channel's current root key for the new member (atomic insert; L7 invariant). `#general` membership is immutable (L8) — `DELETE` returns 403. `DELETE` triggers a `members_changed` WS broadcast and a key rotation (L16 — sole rotation trigger in v1) per `specs/plans/phase-10/keys.md`. See `specs/plans/phase-10/membership.md`.
+
+### Channel keys (Phase 10)
+
+```
+POST /api/channels/{id}/keys                                     { "generation_id", "wraps": [<WrapEntry>, ...] }
+                                                                 → 201; 400 invalid_generation; 403 non-member; 409 race-loss; 429 wraps-needed bucket
+GET  /api/channels/{id}/members/wraps-needed                     → { "channel_id", "is_public", "missing": [ { "user_id", "generation_id", "membership": <MembershipBlock> } ] }
+                                                                 → 200; 403 non-member; 429 wraps-needed-read bucket
+POST /api/channels/{id}/members/{user_id}/replay-wrap            { "membership": <MembershipBlock>, "root_key_wrap": <Wrap> }
+                                                                 → 200; 400; 403 (caller is recipient OR not a member OR cool-down active); 429 replay-wrap bucket
+```
+
+The standalone keys-RPC has three modes distinguished by `generation_id`'s relationship to `max(channel_keys.generation_id)`: bootstrap (`max IS NULL`, single wrap-to-self), fill-in (`generation_id == max`, single wrap to a missing member), rotation (`generation_id == max + 1`, full wrap-list). `wraps-needed` carries the `MembershipBlock` per row so the verifier-side flow (L22) checks the inviter-signature chain BEFORE computing a wrap. `replay-wrap` is the wrap-integrity recovery path (L29 + L35) — rate-limited per `(channel_id, member_user_id)` pair with a 24-hour cool-down after 3 failures in 1 hour. New rate-limit buckets `wraps-needed-read` (burst 10 / refill 1m, L36) and `replay-wrap` (burst 3 / refill 5m / per-pair, L35) live in `apps/server/internal/ratelimit/config.go`. See `specs/plans/phase-10/keys.md`.
 
 ### Design deviations from earlier PRD revisions
 
@@ -593,6 +629,79 @@ Asymmetric initialization: `GET /api/dms` does NOT auto-materialize `dm_reads` r
 
 Channel listings additively gain `unread_count` (and the embedded `last_message_id`/`last_message_at` denormalized columns become wire-visible). DM listings carry `unread_count` and the peer summary alongside the conversation row. Wire shapes for both are spelled out in `specs/plans/phase-9/dms.md` and `specs/plans/phase-9/read-state.md`.
 
+### Schema additions (Phase 10)
+
+Phase 10 adds three tables (`channel_members`, `channel_keys`, `dm_conversation_keys`) and rewrites the `messages` + `dm_messages` body columns into a seven-column signed envelope, all in a single migration `migrations/0006_encryption.sql` (locked-in default L32 — splitting risks merge conflicts on the next-sequence-number across parallel sub-issues). The migration also adds `users.box_pubkey` + `users.sign_pubkey`, `channels.is_public`, and the L37 `^[a-z0-9_-]{3,32}$` username regex tightening + `COLLATE NOCASE`. Per memory `project_no_production_deployment.md` the migration is destructive (L18 wipe-and-reset with a boot guard that aborts startup on a pre-encryption DB carrying rows). Wire shapes mirrored under CLAUDE.md "Wire types".
+
+`users` — Phase 10 adds two columns:
+
+| Column | Type | Notes |
+|---|---|---|
+| `box_pubkey` | BLOB (32 bytes) | NOT NULL; per-user X25519 wrap key (decision-log §3 + §4); base64 on the wire |
+| `sign_pubkey` | BLOB (32 bytes) | NOT NULL; per-user Ed25519 signing key; base64 on the wire |
+
+The login response, `GET /api/auth/me`, and the `User` wire type all return both pubkeys for client-side seed validation (L2). Private key material exists only on devices and in the user's password-manager vault — server stores zero recoverable secrets.
+
+`channels` — Phase 10 adds one column:
+
+| Column | Type | Notes |
+|---|---|---|
+| `is_public` | BOOLEAN | NOT NULL DEFAULT FALSE; `#general` seeded as `is_public = TRUE`; user-created channels default to private; immutable after creation (L15) |
+
+`channel_members` — explicit membership relation (decision-log §6 + §10):
+
+| Column | Type | Notes |
+|---|---|---|
+| `channel_id` | TEXT (ULID) | NOT NULL; PK part 1; FK → `channels.id` |
+| `user_id` | TEXT (ULID) | NOT NULL; PK part 2; FK → `users.id` |
+| `inviter_user_id` | TEXT (ULID) | NOT NULL; FK → `users.id`; the user who signed this row |
+| `inviter_sign_pubkey` | BLOB (32 bytes) | NOT NULL; pinned at invite time so inviter rotation does not invalidate the stored signature (L34 history-vs-current rule) |
+| `inviter_signature` | BLOB (64 bytes) NULLABLE | Ed25519; NULL is permitted ONLY for public-channel server-auto-add (R1.2 carve-out); L33 enforces NOT NULL at the application layer for any row whose channel has `is_public = FALSE` |
+| `invitee_box_pubkey` | BLOB (32 bytes) | NOT NULL; pinned at invite time (frozen to what the inviter SIGNED, not looked up live) |
+| `invitee_sign_pubkey` | BLOB (32 bytes) | NOT NULL; pinned at invite time |
+| `added_at` | TIMESTAMP | NOT NULL |
+
+Plus a non-unique partial index `idx_channel_members_null_sig (channel_id, user_id) WHERE inviter_signature IS NULL` for forensic scans of operator-injected NULL-sig rows (L33). The signature scope is `b"snakd-mship-v1:" || channel_id || b"|" || user_id || b"|" || inviter_user_id || b"|" || inviter_sign_pubkey || b"|" || invitee_box_pubkey || b"|" || invitee_sign_pubkey || b"|" || added_at_rfc3339` per `specs/plans/phase-10/encryption.md`.
+
+`channel_keys` — per-recipient root-key wraps for channels:
+
+| Column | Type | Notes |
+|---|---|---|
+| `channel_id` | TEXT (ULID) | NOT NULL; PK part 1; FK → `channels.id` |
+| `generation_id` | INTEGER | NOT NULL; PK part 2; per-channel monotonic; bumps on member-removal rotation only (L16) |
+| `member_user_id` | TEXT (ULID) | NOT NULL; PK part 3; FK → `users.id` |
+| `wrapped_key` | BLOB (48 bytes) | NOT NULL; `crypto_box` ciphertext (32 payload + 16 Poly1305 MAC) of the channel root key, encrypted to `member_user_id`'s `box_pubkey` |
+| `sender_box_pubkey` | BLOB (32 bytes) | NOT NULL; the wrapper's `box_pubkey` at wrap time (server-validated against caller per L30) |
+| `nonce` | BLOB (24 bytes) | NOT NULL; XSalsa20 random nonce |
+| `created_at` | TIMESTAMP | NOT NULL |
+
+`dm_conversation_keys` — per-recipient wraps for DM root keys (no `generation_id` column — DMs never rotate, L6):
+
+| Column | Type | Notes |
+|---|---|---|
+| `conversation_id` | TEXT (ULID) | NOT NULL; PK part 1; FK → `dm_conversations.id` |
+| `member_user_id` | TEXT (ULID) | NOT NULL; PK part 2; FK → `users.id` |
+| `wrapped_key` | BLOB (48 bytes) | NOT NULL; same shape as `channel_keys.wrapped_key` |
+| `sender_box_pubkey` | BLOB (32 bytes) | NOT NULL |
+| `nonce` | BLOB (24 bytes) | NOT NULL |
+| `created_at` | TIMESTAMP | NOT NULL |
+
+`messages` — the `body TEXT NOT NULL` column is dropped and replaced by seven envelope columns (L23):
+
+| Column | Type | Notes |
+|---|---|---|
+| `cipher_suite` | INTEGER | NOT NULL; `0x01 = naclbox-v1` in v1; future suites bump and add explicit support |
+| `key_generation_id` | INTEGER | NOT NULL; references `channel_keys.generation_id` |
+| `nonce` | BLOB (24 bytes) | NOT NULL; XSalsa20 random |
+| `ciphertext` | BLOB | NOT NULL; `crypto_secretbox(plaintext, nonce, channel_root_key)` |
+| `sender_sign_pubkey` | BLOB (32 bytes) | NOT NULL; signer's CURRENT `sign_pubkey` at send time |
+| `signature` | BLOB (64 bytes) | NOT NULL; Ed25519 over the `snakd-msg-v1:channel:` scope (L21) |
+| `client_created_at` | TIMESTAMP | NOT NULL; client-stamped, signed (rogue server cannot forge ordering) |
+
+The unsigned, server-stamped `created_at` column is preserved for delivery-time display. Existing `messages.user_id` column stays (renaming would balloon the diff per L23 even though wire-side naming is `sender_user_id`).
+
+`dm_messages` — same envelope rewrite as `messages`. The `body TEXT NOT NULL` column is dropped; the same seven envelope columns are added; `signature` covers the `snakd-msg-v1:dm:` scope (cross-protocol-confusion defense — channel and DM ciphertexts cannot be replayed across boundaries even if a malicious server swaps the wire shape).
+
 ### UX
 
 - Web does not block on send (optimistic render).
@@ -669,12 +778,10 @@ Roadmap, in roughly the order they'd be tackled post-MVP. Each item below will r
 
 - **Direct messages, 1:1 only** — shipped Phase 9. See `specs/plans/phase-9/dms.md` for wire-type definitions and the `{type:"dm"}` envelope.
 - **Server-tracked read state for channels and DMs** — shipped Phase 9. See `specs/plans/phase-9/read-state.md` for `channel_reads` / `dm_reads` schema and the `{type:"read"}` envelope.
+- **End-to-end encryption (channels + DMs)** — shipped Phase 10. NaCl `crypto_box` / `crypto_secretbox` / `crypto_sign` primitives; per-user `(box_pubkey, sign_pubkey)` derived from passphrase via Argon2id + HKDF-SHA256; static root key per channel/DM, wrapped per recipient via `crypto_box`; signed envelope (`cipher_suite`, `key_generation_id`, `nonce`, `ciphertext`, `sender_sign_pubkey`, `signature`, `client_created_at`) replaces the plaintext `body` column. See `specs/plans/phase-10/encryption.md` (wire types, signature scopes, KDF parameters), `specs/plans/phase-10/membership.md` (channel-membership relation, inviter-signed rows, `#general` auto-add), `specs/plans/phase-10/keys.md` (`channel_keys` / `dm_conversation_keys` schema, three modes of `POST /api/channels/{id}/keys`, lazy-wrap-on-online flow), and `specs/plans/phase-10/security.md` (threat model option C, R1.1 modified-client residual, R1.2 operator-as-public-channel-member residual, accepted metadata exposure).
+- **Public-vs-private channels with explicit membership** — shipped Phase 10. `channels.is_public BOOLEAN DEFAULT FALSE`; new `channel_members` table with inviter-signed rows; `#general` is the seeded `is_public = TRUE` baseline; user-created channels default to private. See `specs/plans/phase-10/membership.md`.
 
 ### Roadmap
-
-- **TUI client** — Bubble Tea three-pane reusing `packages/go-client`.
-- **E2E encryption** — libsodium sealed boxes per channel; ratcheted session keys. Adds public keys to users, ciphertext envelope (`payload`/`nonce`/`sender_key_id`/`recipient_wraps`) to messages, and key-management UX to clients.
-- **Encryption at rest** — SQLCipher build of SQLite, or volume-level encryption (LUKS, EBS) on the host.
 - **Postgres** — when SQLite limits bite. Will need a repository abstraction, mirrored migrations, and a one-shot data migration tool.
 - **Federation** — multi-server with NATS pub/sub. Adds `server_id`, `home_server_id`, and `protocol_version` to the schema and wire format; introduces a `Hub` interface with a NATS implementation.
 - **A/V** — LiveKit room per channel for voice/video, gated by channel permission.
@@ -735,4 +842,4 @@ These were inferred and should be flagged if any are wrong:
 5. Vite + React chosen for hackathon velocity, not for any future feature.
 6. Coverage = "all user stories have a passing test or scripted demo step." We do not block on `go test -cover` percentages.
 7. TLS, public hosting, account recovery deferred.
-8. E2E encryption, encryption at rest, federation, and Postgres are explicitly **not** prepared for in code. They will require schema and code changes when they ship — that is the right time to design them.
+8. E2E encryption (channels + DMs) shipped Phase 10 — see §13 "Shipped post-MVP" and `specs/plans/phase-10/`. Encryption at rest, federation, and Postgres are explicitly **not** prepared for in code. They will require schema and code changes when they ship — that is the right time to design them.
