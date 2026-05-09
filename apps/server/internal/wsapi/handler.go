@@ -210,10 +210,10 @@ func (c *connSubscriber) signalCloseFlushed() {
 // The channel topic is an upper-folded ULID supplied via
 // ?channel=<id>. The L15 default-channel fallback resolves an absent
 // ?channel= via cfg.DefaultChannelResolver when wired (see
-// specs/plans/phase-9/ws-routing.md). The handler rejects with
-// HTTP 400 when neither resolver nor lookup is wired (a test-only
-// configuration); the no-lookup-and-no-resolver path falls back to
-// testDefaultChannel. Decision log §10 / L15.
+// specs/plans/phase-9/ws-routing.md). With no resolver but a lookup
+// wired, the handler rejects an absent ?channel= with HTTP 400; the
+// no-lookup-and-no-resolver test path falls back to testDefaultChannel.
+// Decision log §10 / L15.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
