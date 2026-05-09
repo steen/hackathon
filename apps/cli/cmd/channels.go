@@ -35,6 +35,8 @@ func Channels(ctx context.Context, env *Env, args []string) error {
 			return channelsCreate(ctx, env, args[1:])
 		case "rename":
 			return channelsRename(ctx, env, args[1:])
+		case "read":
+			return channelsRead(ctx, env, args[1:])
 		}
 	}
 	fs := flag.NewFlagSet("channels", flag.ContinueOnError)
@@ -119,6 +121,48 @@ func channelsRename(ctx context.Context, env *Env, args []string) error {
 		return mapChannelError("channels rename", err)
 	}
 	_, _ = fmt.Fprintf(env.Stdout, "%s\t%s\n", updated.ID, updated.Name)
+	return nil
+}
+
+// channelsRead implements `chatd channels read <name> <message-id>`.
+// Resolves the channel name to its id via ListChannels, then advances
+// the viewer's read pointer for that channel via MarkChannelRead. The
+// server applies the advance-only rule (decision-log L5); on success
+// `ok` is printed so scripts can branch on the no-output-on-error
+// invariant. 404 surfaces as a wrapped APIError with code "not_found".
+func channelsRead(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("channels read", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 2 {
+		return fmt.Errorf("usage: chatd channels read <name> <message-id>")
+	}
+	name, messageID := rest[0], rest[1]
+	client, _, err := newClient(env, true)
+	if err != nil {
+		return wrapNotLoggedIn("channels read", err)
+	}
+	chans, err := client.ListChannels(ctx)
+	if err != nil {
+		return mapChannelError("channels read", err)
+	}
+	var found *goclient.Channel
+	for i := range chans {
+		if chans[i].Name == name {
+			found = &chans[i]
+			break
+		}
+	}
+	if found == nil {
+		return fmt.Errorf("channels read: no channel named %q", name)
+	}
+	if err := client.MarkChannelRead(ctx, found.ID.String(), messageID); err != nil {
+		return mapChannelError("channels read", err)
+	}
+	_, _ = fmt.Fprintln(env.Stdout, "ok")
 	return nil
 }
 

@@ -37,6 +37,21 @@ Commands:
   channels rename <current> <new>
                                  Rename a channel by current name; prints
                                  <id>\t<name>.
+  channels read <name> <message-id>
+                                 Mark messages up to <message-id> read in
+                                 the channel <name>; prints "ok".
+  dm list                        List DM conversations; tab-separated as
+                                 <id> <peer-username> <unread> <last-at>.
+  dm send <peer> <body|->        Send a DM; "-" reads body from stdin;
+                                 prints <message-id>\t<body>.
+  dm history <peer> [--limit N] [--before ID]
+                                 Print DM history newest-first as
+                                 <id>\t<sender>\t<body>\t<created-at>.
+  dm read <peer> <message-id>    Mark DM messages up to <message-id> read
+                                 with peer <peer>; prints "ok".
+  dm watch [<peer>] [--once]     Stream DM frames as
+                                 <conversation-id>\t<message-id>\t<sender>\t<body>;
+                                 with <peer>, filters to that conversation.
   history <channel> [--limit N] [--before ID]
                                  Print messages newest-first, tab-separated
                                  as <rfc3339> <sender> <body>.

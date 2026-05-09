@@ -10,6 +10,12 @@
 //	chatd [--server URL] whoami
 //	chatd [--server URL] logout
 //	chatd [--server URL] channels
+//	chatd [--server URL] channels read <name> <message-id>
+//	chatd [--server URL] dm list
+//	chatd [--server URL] dm send <peer> <body|->
+//	chatd [--server URL] dm history <peer> [--limit N] [--before ID]
+//	chatd [--server URL] dm read <peer> <message-id>
+//	chatd [--server URL] dm watch [<peer>]
 //	chatd [--server URL] history <channel> [--limit N] [--before ID]
 //	chatd [--server URL] send <channel> <message|->
 //	chatd [--server URL] watch <channel>
@@ -113,6 +119,8 @@ func Dispatch(ctx context.Context, env *cmd.Env, args []string) error {
 		return cmd.Logout(ctx, env, rest)
 	case "channels":
 		return cmd.Channels(ctx, env, rest)
+	case "dm":
+		return cmd.DM(ctx, env, rest)
 	case "history":
 		return cmd.History(ctx, env, rest)
 	case "send":
