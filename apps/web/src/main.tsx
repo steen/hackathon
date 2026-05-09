@@ -1,6 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { WebSocketClient, type WSConnectionState } from "@hackathon/api-client";
+import {
+  ready as sodiumReady,
+  WebSocketClient,
+  type WSConnectionState,
+} from "@hackathon/api-client";
 import { AuthProvider } from "./auth/AuthContext.js";
 import { App } from "./App.js";
 import "./styles.css";
@@ -28,10 +32,19 @@ if (rootEl === null) {
   throw new Error("missing #root element");
 }
 
-createRoot(rootEl).render(
-  <StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
-  </StrictMode>,
-);
+// Phase-10 L27: libsodium-wrappers-sumo's WebAssembly module loads
+// asynchronously. Awaiting its `ready` promise here guarantees that any
+// Login/Register form submit (which triggers Argon2id via
+// crypto_pwhash) lands on a fully-initialised sodium runtime — without
+// it, the first call would race the wasm fetch and either throw or
+// produce zero-output. The await blocks before React mounts so the
+// shell appears in one paint with crypto already armed.
+void sodiumReady().then(() => {
+  createRoot(rootEl).render(
+    <StrictMode>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </StrictMode>,
+  );
+});

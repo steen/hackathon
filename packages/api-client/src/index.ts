@@ -12,6 +12,19 @@ export type {
 } from "./ws.js";
 export { ApiError, isApiErrorCode } from "./errors.js";
 export { markChannelRead } from "./channels.js";
+export {
+  ARGON_TIME,
+  ARGON_MEMORY_BYTES,
+  ARGON_THREADS,
+  ARGON_KEY_LEN,
+  HKDF_INFO_BOX,
+  HKDF_INFO_SIGN,
+  SALT_PREFIX,
+  SALT_LEN,
+  MIN_IDENTITY_PASSPHRASE_LEN,
+} from "./identity_params.js";
+export { ready, deriveIdentity, identitySalt, b64 } from "./identity.js";
+export type { DerivedIdentity } from "./identity.js";
 export { createDM, listDMMessages, listDMs, markDMRead, sendDMMessage } from "./dms.js";
 export type {
   AuthResponse,

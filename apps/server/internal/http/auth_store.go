@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	stdhttp "net/http"
 	"time"
@@ -24,23 +25,78 @@ func newAuthStore(db *sql.DB) *authStore { return &authStore{db: db} }
 var ErrUsernameTaken = errors.New("auth_store: username already taken")
 
 // CreateUser inserts a new user row. Returns ErrUsernameTaken when the
-// UNIQUE constraint on users.username trips.
-func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash string, now time.Time) error {
+// UNIQUE constraint on users.username trips (covers the case-insensitive
+// index added in 0006_encryption.sql).
+//
+// boxPubkey and signPubkey are the raw 32-byte Phase-10 identity
+// pubkeys; pass nil/empty when the caller has not supplied them so the
+// columns stay NULL (pre-cutover behaviour, decision-log L26).
+func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash string, boxPubkey, signPubkey []byte, now time.Time) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO users(id, username, password_hash, token_version, created_at)
-		 VALUES (?, ?, ?, 0, ?)`,
+		`INSERT INTO users(id, username, password_hash, token_version, created_at, box_pubkey, sign_pubkey)
+		 VALUES (?, ?, ?, 0, ?, ?, ?)`,
 		id, username, passwordHash, now.UTC(),
+		nullableBytes(boxPubkey), nullableBytes(signPubkey),
 	)
 	if err != nil {
 		// modernc/sqlite returns a generic error; we sniff the message
 		// for "UNIQUE constraint failed: users.username" rather than
 		// adding a driver-specific dependency on its error sentinels.
-		if isUniqueViolation(err, "users.username") {
+		// The 0006 migration also adds idx_users_username_nocase, so a
+		// case-insensitive duplicate ("Bob" vs. "bob") trips the same
+		// branch.
+		if isUniqueViolation(err, "users.username") || isUniqueViolation(err, "idx_users_username_nocase") {
 			return ErrUsernameTaken
 		}
 		return err
 	}
 	return nil
+}
+
+// userDetailsRow is the post-Phase-10 row shape the auth handlers
+// echo back on register/login/me. Pubkeys are pre-base64-encoded so the
+// caller does not have to know the column type. Empty strings stand in
+// for SQL NULL.
+type userDetailsRow struct {
+	username   string
+	boxPubkey  string
+	signPubkey string
+}
+
+// LookupUserDetails returns the username + base64-encoded pubkeys for a
+// user id. Returns (nil, nil) when the row does not exist; an empty
+// pubkey string stands in for SQL NULL so callers can branch on
+// non-empty == populated without a separate sql.NullString check.
+func (s *authStore) LookupUserDetails(ctx context.Context, id string) (*userDetailsRow, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT username, box_pubkey, sign_pubkey FROM users WHERE id = ?`, id)
+	var username string
+	var box, sign []byte
+	if err := row.Scan(&username, &box, &sign); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := &userDetailsRow{username: username}
+	if len(box) > 0 {
+		out.boxPubkey = base64.StdEncoding.EncodeToString(box)
+	}
+	if len(sign) > 0 {
+		out.signPubkey = base64.StdEncoding.EncodeToString(sign)
+	}
+	return out, nil
+}
+
+// nullableBytes is the BLOB-column counterpart to nullableText: an
+// empty/nil slice becomes SQL NULL so a row whose pubkeys haven't been
+// uploaded yet stays distinguishable from one that explicitly stored
+// 0-length bytes.
+func nullableBytes(b []byte) interface{} {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 // LookupForLogin returns the bare-minimum row the auth.AuthenticateLogin

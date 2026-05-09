@@ -4,6 +4,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // libsodium-wrappers-sumo ships a ~500 KB minified loader plus
+    // ~200 KB of WASM glue (the sumo build is required for Argon2id;
+    // standard libsodium-wrappers omits crypto_pwhash). Vite's default
+    // 500 KB chunk-size warning would fire on every CI build; bump the
+    // threshold so genuine chunk-bloat regressions still surface. The
+    // observed sumo-bundled output sits around 730 KB minified.
+    chunkSizeWarningLimit: 800,
+  },
   resolve: {
     alias: {
       "@hackathon/api-client": fileURLToPath(

@@ -24,8 +24,9 @@ export function inviteCode(): string {
   return v;
 }
 
-// Per-test usernames must satisfy server regex ^[A-Za-z0-9_-]{3,32}$.
-// Hex from randomBytes is in [0-9a-f]. Prefix is fixed-ascii.
+// Per-test usernames must satisfy server regex ^[a-z0-9_-]{3,32}$
+// (L37 lowercase-only). Hex from randomBytes is in [0-9a-f]. Prefix is
+// fixed-ascii lowercase.
 export function uniqueUsername(prefix = "u"): string {
   return `${prefix}-${randomBytes(6).toString("hex")}`;
 }

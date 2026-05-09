@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	stdhttp "net/http"
 	"net/http/httptest"
@@ -212,6 +213,145 @@ func TestRegisterRejectsBadUsername(t *testing.T) {
 	}, "")
 	if rr.Code != stdhttp.StatusBadRequest {
 		t.Fatalf("status: got %d want 400", rr.Code)
+	}
+}
+
+// L37 — uppercase/mixed-case usernames are rejected by the tightened
+// regex so the Argon2id salt input on both sides is byte-identical.
+func TestRegisterRejectsMixedCaseUsername(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+	for _, u := range []string{"Alice", "ALICE", "BoB"} {
+		rr := f.post(t, "/api/auth/register", map[string]string{
+			"username":    u,
+			"password":    "correct-horse-battery",
+			"invite_code": "INVITE-OK",
+		}, "")
+		if rr.Code != stdhttp.StatusBadRequest {
+			t.Fatalf("username %q: got %d want 400", u, rr.Code)
+		}
+	}
+}
+
+// Phase-10 — register accepts and persists base64 pubkeys; subsequent
+// /api/auth/me echoes them back.
+func TestRegisterPersistsPubkeysAndMeReturnsThem(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+	rawBox := bytes.Repeat([]byte{0x01}, 32)
+	rawSign := bytes.Repeat([]byte{0x02}, 32)
+	boxB64 := base64.StdEncoding.EncodeToString(rawBox)
+	signB64 := base64.StdEncoding.EncodeToString(rawSign)
+	rr := f.post(t, "/api/auth/register", map[string]interface{}{
+		"username":    "alice",
+		"password":    "correct-horse-battery",
+		"invite_code": "INVITE-OK",
+		"box_pubkey":  boxB64,
+		"sign_pubkey": signB64,
+	}, "")
+	if rr.Code != stdhttp.StatusCreated {
+		t.Fatalf("status: got %d want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	e := mustEnvelope(t, rr)
+	if !e.OK {
+		t.Fatalf("envelope: %+v", e.Error)
+	}
+	tok, _ := e.Data["token"].(string)
+	if tok == "" {
+		t.Fatalf("missing token in %+v", e.Data)
+	}
+	user, _ := e.Data["user"].(map[string]interface{})
+	if got, _ := user["box_pubkey"].(string); got != boxB64 {
+		t.Errorf("register box_pubkey: got %q want %q", got, boxB64)
+	}
+	if got, _ := user["sign_pubkey"].(string); got != signB64 {
+		t.Errorf("register sign_pubkey: got %q want %q", got, signB64)
+	}
+
+	rr2 := f.get(t, "/api/auth/me", tok)
+	if rr2.Code != stdhttp.StatusOK {
+		t.Fatalf("me status: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	e2 := mustEnvelope(t, rr2)
+	user2, _ := e2.Data["user"].(map[string]interface{})
+	if got, _ := user2["box_pubkey"].(string); got != boxB64 {
+		t.Errorf("me box_pubkey: got %q want %q", got, boxB64)
+	}
+	if got, _ := user2["sign_pubkey"].(string); got != signB64 {
+		t.Errorf("me sign_pubkey: got %q want %q", got, signB64)
+	}
+}
+
+// Phase-10 — login response carries pubkeys for the authenticated user
+// so the client can verify the wrong-passphrase canary (decision-log L4).
+func TestLoginReturnsPubkeysForRegisteredUser(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+	rawBox := bytes.Repeat([]byte{0x03}, 32)
+	rawSign := bytes.Repeat([]byte{0x04}, 32)
+	boxB64 := base64.StdEncoding.EncodeToString(rawBox)
+	signB64 := base64.StdEncoding.EncodeToString(rawSign)
+	rr := f.post(t, "/api/auth/register", map[string]interface{}{
+		"username":    "alice",
+		"password":    "correct-horse-battery",
+		"invite_code": "INVITE-OK",
+		"box_pubkey":  boxB64,
+		"sign_pubkey": signB64,
+	}, "")
+	if rr.Code != stdhttp.StatusCreated {
+		t.Fatalf("register: %d", rr.Code)
+	}
+	rr2 := f.post(t, "/api/auth/login", map[string]string{
+		"username": "alice",
+		"password": "correct-horse-battery",
+	}, "")
+	if rr2.Code != stdhttp.StatusOK {
+		t.Fatalf("login: %d body=%s", rr2.Code, rr2.Body.String())
+	}
+	e := mustEnvelope(t, rr2)
+	user, _ := e.Data["user"].(map[string]interface{})
+	if got, _ := user["box_pubkey"].(string); got != boxB64 {
+		t.Errorf("login box_pubkey: got %q want %q", got, boxB64)
+	}
+	if got, _ := user["sign_pubkey"].(string); got != signB64 {
+		t.Errorf("login sign_pubkey: got %q want %q", got, signB64)
+	}
+}
+
+// Phase-10 — register rejects malformed pubkeys (wrong length, non-
+// base64) with a 400 + clear error code so the client can branch.
+func TestRegisterRejectsMalformedPubkeys(t *testing.T) {
+	f := newFixture(t)
+	defer f.close()
+	cases := []struct {
+		name string
+		body map[string]interface{}
+	}{
+		{"non-base64 box", map[string]interface{}{
+			"username": "alice", "password": "correct-horse-battery",
+			"invite_code": "INVITE-OK",
+			"box_pubkey":  "not~~~base64", "sign_pubkey": "",
+		}},
+		{"short box", map[string]interface{}{
+			"username": "bob", "password": "correct-horse-battery",
+			"invite_code": "INVITE-OK",
+			"box_pubkey":  base64.StdEncoding.EncodeToString([]byte{0x01, 0x02}),
+			"sign_pubkey": "",
+		}},
+		{"short sign", map[string]interface{}{
+			"username": "carol", "password": "correct-horse-battery",
+			"invite_code": "INVITE-OK",
+			"box_pubkey":  "",
+			"sign_pubkey": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x05}, 16)),
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := f.post(t, "/api/auth/register", tc.body, "")
+			if rr.Code != stdhttp.StatusBadRequest {
+				t.Fatalf("status: got %d want 400; body=%s", rr.Code, rr.Body.String())
+			}
+		})
 	}
 }
 

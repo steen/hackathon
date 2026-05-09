@@ -39,12 +39,22 @@ export class HttpClient {
     });
   }
 
-  async register(username: string, password: string, inviteCode: string): Promise<AuthResponse> {
-    return this.request<AuthResponse>("POST", "/api/auth/register", {
+  async register(
+    username: string,
+    password: string,
+    inviteCode: string,
+    identity?: { boxPubkey: string; signPubkey: string },
+  ): Promise<AuthResponse> {
+    const body: Record<string, string> = {
       username,
       password,
       invite_code: inviteCode,
-    });
+    };
+    if (identity) {
+      body.box_pubkey = identity.boxPubkey;
+      body.sign_pubkey = identity.signPubkey;
+    }
+    return this.request<AuthResponse>("POST", "/api/auth/register", body);
   }
 
   async me(): Promise<User> {

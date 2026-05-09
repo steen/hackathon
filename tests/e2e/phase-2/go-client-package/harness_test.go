@@ -200,9 +200,9 @@ func repoRoot(t *testing.T) string {
 }
 
 // randomUsername generates a 12-char ASCII username matching the
-// server's `^[A-Za-z0-9_-]{3,32}$` regex. Per-test so concurrent runs
-// in `go test -count=N` do not collide on the unique-username
-// constraint.
+// server's `^[a-z0-9_-]{3,32}$` regex (L37 lowercase-only). Per-test so
+// concurrent runs in `go test -count=N` do not collide on the unique-
+// username constraint.
 func randomUsername(t *testing.T) string {
 	t.Helper()
 	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"

@@ -127,6 +127,7 @@ describe("test_web_register_form_requires_invite_code", () => {
       "bob",
       "passw0rd-placeholder",
       "test-invite-code-placeholder",
+      undefined,
     );
   });
 });

@@ -1,5 +1,6 @@
 import type * as React from "react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { MIN_IDENTITY_PASSPHRASE_LEN } from "@hackathon/api-client";
 import { useAuth } from "../auth/AuthContext.js";
 import { registerAuthMessage } from "../lib/userFacingError.js";
 
@@ -8,6 +9,7 @@ export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
+  const [identityPassphrase, setIdentityPassphrase] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const usernameRef = useRef<HTMLInputElement | null>(null);
@@ -22,10 +24,16 @@ export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): 
       setError("invite code is required");
       return;
     }
+    if (identityPassphrase.length > 0 && identityPassphrase.length < MIN_IDENTITY_PASSPHRASE_LEN) {
+      setError(
+        `identity passphrase must be at least ${String(MIN_IDENTITY_PASSPHRASE_LEN)} characters`,
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await register(username, password, inviteCode);
+      await register(username, password, inviteCode, identityPassphrase || undefined);
     } catch (err) {
       setError(registerAuthMessage("Registration failed", err));
     } finally {
@@ -76,6 +84,19 @@ export function Register({ onSwitchToLogin }: { onSwitchToLogin: () => void }): 
               setInviteCode(e.target.value);
             }}
             required
+          />
+        </label>
+        <label>
+          <span>Identity passphrase</span>
+          <input
+            name="identity-passphrase"
+            type="password"
+            value={identityPassphrase}
+            onChange={(e) => {
+              setIdentityPassphrase(e.target.value);
+            }}
+            autoComplete="new-password"
+            minLength={MIN_IDENTITY_PASSPHRASE_LEN}
           />
         </label>
         {error !== null ? (

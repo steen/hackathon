@@ -39,10 +39,21 @@ type loginRequest struct {
 
 // registerRequest mirrors loginRequest plus the invite code the server
 // requires per PRD §9.
+//
+// Phase-10 identity pubkeys (decision-log §4 + L1) ride the same body
+// so the server can persist them in the same INSERT that creates the
+// row. Both fields are base64 of raw 32 bytes; pre-Phase-10 callers
+// that pass empty strings will emit `box_pubkey=""` / `sign_pubkey=""`
+// — the server tolerates that until the wave-6 cutover (#983) tightens
+// the columns to NOT NULL. JSON tags omit `omitempty` because the
+// server's dec.DisallowUnknownFields() decoder accepts the absent-or-
+// empty cases identically; new code paths populate them explicitly.
 type registerRequest struct {
 	Username   string `json:"username"`
 	Password   string `json:"password"`
 	InviteCode string `json:"invite_code"`
+	BoxPubkey  string `json:"box_pubkey,omitempty"`
+	SignPubkey string `json:"sign_pubkey,omitempty"`
 }
 
 // Login authenticates and stores the resulting bearer token on the
@@ -61,13 +72,26 @@ func (c *Client) Login(ctx context.Context, username, password string) (*AuthRes
 }
 
 // Register creates a new user and stores the resulting bearer token on
-// the Client. Mirrors Login's contract.
+// the Client. Mirrors Login's contract. The Phase-10 pubkey fields stay
+// empty on this path; new callers should prefer RegisterWithIdentity
+// so the user's box_pubkey + sign_pubkey are persisted in the same
+// INSERT that creates the row (decision-log §4).
 func (c *Client) Register(ctx context.Context, username, password, inviteCode string) (*AuthResponse, error) {
+	return c.RegisterWithIdentity(ctx, username, password, inviteCode, "", "")
+}
+
+// RegisterWithIdentity is Register plus the two Phase-10 identity
+// pubkeys (base64 of raw 32 bytes each). Pass "" for both to land on
+// the legacy code path. On success the bearer token is set on the
+// Client like Register does.
+func (c *Client) RegisterWithIdentity(ctx context.Context, username, password, inviteCode, boxPubkey, signPubkey string) (*AuthResponse, error) {
 	var out AuthResponse
 	if err := c.do(ctx, http.MethodPost, "/api/auth/register", registerRequest{
 		Username:   username,
 		Password:   password,
 		InviteCode: inviteCode,
+		BoxPubkey:  boxPubkey,
+		SignPubkey: signPubkey,
 	}, &out); err != nil {
 		return nil, err
 	}
