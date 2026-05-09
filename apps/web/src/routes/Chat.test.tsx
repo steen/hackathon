@@ -111,6 +111,12 @@ function happyPath(): void {
     if (method === "POST" && /^\/api\/channels\/[^/]+\/read$/.test(path)) {
       return Promise.resolve({ ok: true });
     }
+    // useDMs (Phase 9 #874) fetches /api/dms on mount; tests in this file
+    // don't assert against the DM surface, so the mock returns an empty
+    // listing rather than tripping the rejection branch on every render.
+    if (method === "GET" && path === "/api/dms") {
+      return Promise.resolve({ conversations: [] });
+    }
     return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
   });
 }

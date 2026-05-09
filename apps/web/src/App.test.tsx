@@ -39,6 +39,16 @@ vi.mock("./hooks/useMessages.js", () => ({
   }),
 }));
 
+vi.mock("./hooks/useDMs.js", () => ({
+  useDMs: () => ({
+    conversations: [],
+    loading: false,
+    error: null,
+    reload: vi.fn(),
+    startWith: vi.fn(),
+  }),
+}));
+
 import { App } from "./App.js";
 import { AuthProvider } from "./auth/AuthContext.js";
 
