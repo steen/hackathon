@@ -85,7 +85,8 @@ func (h *ChannelReadsHandlers) Mark(w stdhttp.ResponseWriter, r *stdhttp.Request
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
 	}
-	if _, ok := validULID(req.MessageID); !ok {
+	messageID, ok := validULID(req.MessageID)
+	if !ok {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "message_id must be a ULID")
 		return
 	}
@@ -98,7 +99,7 @@ func (h *ChannelReadsHandlers) Mark(w stdhttp.ResponseWriter, r *stdhttp.Request
 		WriteError(w, stdhttp.StatusNotFound, CodeNotFound, "channel not found")
 		return
 	}
-	if err := h.deps.Repo.UpsertChannelRead(r.Context(), channelID, uid, req.MessageID); err != nil {
+	if err := h.deps.Repo.UpsertChannelRead(r.Context(), channelID, uid, messageID); err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not mark channel read")
 		return
 	}
