@@ -14,25 +14,36 @@ import {
 import { useAuth } from "../auth/AuthContext.js";
 import { useChannels } from "../hooks/useChannels.js";
 import { useChatSocket } from "../hooks/useChatSocket.js";
+import { useDMs } from "../hooks/useDMs.js";
 import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
 import { useReadMarker } from "../hooks/useReadMarker.js";
 import { ChannelCreateModal } from "../components/ChannelCreateModal.js";
 import { ChannelRenameModal } from "../components/ChannelRenameModal.js";
+import { DMSidebar } from "../components/DMSidebar.js";
+import { DMThread } from "../components/DMThread.js";
+import { NewDMModal } from "../components/NewDMModal.js";
 
 export function Chat(): React.JSX.Element {
   const { user, logout } = useAuth();
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
+  // Active surface — either a channel OR a DM thread, never both. The two
+  // active-* states stay independent so flipping between them (sidebar
+  // click) doesn't perturb the other; the rendered main pane keys on
+  // `activeDM` so a DM selection wins over a stale activeChannel.
+  const [activeDM, setActiveDM] = useState<string | null>(null);
   // Single chat-page socket. Both useMessages (message frames + reconnect
   // catchup) and useChannels (channel-create/rename frames + reload-on-open)
   // attach listeners to the same WebSocketClient.
   const sharedSocket = useChatSocket(activeChannel);
   const channelsState = useChannels(true, { socket: sharedSocket.socket });
+  const dmsState = useDMs(true, { selfUserId: user?.id ?? null, socket: sharedSocket.socket });
   const messagesState = useMessages(activeChannel, user?.id ?? null, sharedSocket);
   const presenceState = usePresence(true, activeChannel);
   const [draft, setDraft] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
+  const [newDMOpen, setNewDMOpen] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -111,6 +122,30 @@ export function Chat(): React.JSX.Element {
     if (activeChannel === null) return null;
     return channelsState.channels.find((c) => c.id === activeChannel)?.name ?? null;
   }, [activeChannel, channelsState.channels]);
+
+  // Resolve the active DM conversation row for the renderer; the row
+  // carries the peer summary plus unread baseline that DMThread needs.
+  // Falls back to null when the active id was unmounted (e.g. a stale
+  // selection after a hard refresh).
+  const activeConversation = useMemo(() => {
+    if (activeDM === null) return null;
+    return dmsState.conversations.find((c) => c.id === activeDM) ?? null;
+  }, [activeDM, dmsState.conversations]);
+
+  // Sidebar mode-switch handlers. Selecting a channel clears the DM
+  // selection (and vice versa) so the main pane has exactly one active
+  // surface at a time. Reset the composer-focus latch on either switch
+  // so focus re-lands on the freshly-mounted composer.
+  const selectChannel = useCallback((id: string): void => {
+    setActiveChannel(id);
+    setActiveDM(null);
+    composerFocusedRef.current = false;
+  }, []);
+
+  const selectDM = useCallback((id: string): void => {
+    setActiveDM(id);
+    composerFocusedRef.current = false;
+  }, []);
 
   // Channel read-pointer advance (Phase 9 #873). The hook always runs (rules-
   // of-hooks); pass an empty scopeId when no channel is selected and gate
@@ -201,10 +236,20 @@ export function Chat(): React.JSX.Element {
           </div>
           <ChannelsList
             channels={channelsState.channels}
-            activeId={activeChannel}
-            onSelect={setActiveChannel}
+            activeId={activeDM === null ? activeChannel : null}
+            onSelect={selectChannel}
             loading={channelsState.loading}
             error={channelsState.error}
+          />
+          <DMSidebar
+            conversations={dmsState.conversations}
+            activeId={activeDM}
+            onSelect={selectDM}
+            onNew={() => {
+              setNewDMOpen(true);
+            }}
+            loading={dmsState.loading}
+            error={dmsState.error}
           />
           <h2>Online</h2>
           <PresenceList users={presenceState.users} />
@@ -215,57 +260,66 @@ export function Chat(): React.JSX.Element {
               phrase on each event, not just the diff. */}
           <PresenceLiveRegion text={presenceAnnouncement} />
         </Sidebar>
-        <main className="messages" aria-label={activeChannelName ?? "Messages"}>
-          <div className="messages__header-row">
-            <ChannelHeader channelName={activeChannelName} headingRef={headingRef} />
-            {activeChannelName !== null && activeChannelName !== "general" ? (
-              <button
-                type="button"
-                className="messages__rename"
-                aria-label={`Rename channel ${activeChannelName}`}
-                onClick={() => {
-                  setRenameOpen(true);
-                }}
-              >
-                Rename
-              </button>
-            ) : null}
-          </div>
-          <MessageList
-            messages={messagesState.messages}
-            resolveSender={resolveSender}
+        {activeConversation !== null ? (
+          <DMThread
+            conversation={activeConversation}
             selfUserId={user?.id ?? null}
-            error={messagesState.error}
-            showNoChannelsEmpty={showNoChannelsEmpty}
-            showEmptyChannelHint={showEmptyChannelHint && activeChannelName !== null}
-            emptyChannelHintText={
-              activeChannelName !== null
-                ? `This is the start of #${activeChannelName} — send a message to say hi.`
-                : undefined
-            }
-            canLoadOlder={messagesState.canLoadOlder}
-            isLoadingOlder={messagesState.isLoadingOlder}
-            loadOlderError={messagesState.loadOlderError}
-            onLoadOlder={() => {
-              void messagesState.loadOlder();
-            }}
-            onRetry={(id) => {
-              void messagesState.retry(id);
-            }}
-            listRef={listRef}
+            resolveSender={resolveSender}
+            socket={sharedSocket.socket}
           />
-          <MessageComposer
-            value={draft}
-            onChange={setDraft}
-            onSubmit={() => {
-              void submitDraft();
-            }}
-            disabled={activeChannel === null}
-            maxBytes={MESSAGE_MAX_BYTES}
-            placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
-            composerRef={composerRef}
-          />
-        </main>
+        ) : (
+          <main className="messages" aria-label={activeChannelName ?? "Messages"}>
+            <div className="messages__header-row">
+              <ChannelHeader channelName={activeChannelName} headingRef={headingRef} />
+              {activeChannelName !== null && activeChannelName !== "general" ? (
+                <button
+                  type="button"
+                  className="messages__rename"
+                  aria-label={`Rename channel ${activeChannelName}`}
+                  onClick={() => {
+                    setRenameOpen(true);
+                  }}
+                >
+                  Rename
+                </button>
+              ) : null}
+            </div>
+            <MessageList
+              messages={messagesState.messages}
+              resolveSender={resolveSender}
+              selfUserId={user?.id ?? null}
+              error={messagesState.error}
+              showNoChannelsEmpty={showNoChannelsEmpty}
+              showEmptyChannelHint={showEmptyChannelHint && activeChannelName !== null}
+              emptyChannelHintText={
+                activeChannelName !== null
+                  ? `This is the start of #${activeChannelName} — send a message to say hi.`
+                  : undefined
+              }
+              canLoadOlder={messagesState.canLoadOlder}
+              isLoadingOlder={messagesState.isLoadingOlder}
+              loadOlderError={messagesState.loadOlderError}
+              onLoadOlder={() => {
+                void messagesState.loadOlder();
+              }}
+              onRetry={(id) => {
+                void messagesState.retry(id);
+              }}
+              listRef={listRef}
+            />
+            <MessageComposer
+              value={draft}
+              onChange={setDraft}
+              onSubmit={() => {
+                void submitDraft();
+              }}
+              disabled={activeChannel === null}
+              maxBytes={MESSAGE_MAX_BYTES}
+              placeholder={activeChannel === null ? "Select a channel first" : "Write a message..."}
+              composerRef={composerRef}
+            />
+          </main>
+        )}
       </div>
       <ChannelCreateModal
         open={createOpen}
@@ -274,11 +328,11 @@ export function Chat(): React.JSX.Element {
         }}
         onCreate={channelsState.create}
         onCreated={(ch) => {
-          setActiveChannel(ch.id);
-          // Reset the composer-focus latch so the layout effect re-runs
-          // and lands focus on the composer of the freshly-selected
-          // channel rather than wherever Modal restored it.
-          composerFocusedRef.current = false;
+          // selectChannel switches to the new channel id, clears any DM
+          // selection, and resets the composer-focus latch so the
+          // layout effect re-runs and lands focus on the composer of
+          // the freshly-selected channel.
+          selectChannel(ch.id);
         }}
       />
       <ChannelRenameModal
@@ -289,6 +343,17 @@ export function Chat(): React.JSX.Element {
         channelId={activeChannel}
         currentName={activeChannelName}
         onRename={channelsState.rename}
+      />
+      <NewDMModal
+        open={newDMOpen}
+        onClose={() => {
+          setNewDMOpen(false);
+        }}
+        selfUserId={user?.id ?? null}
+        onCreate={dmsState.startWith}
+        onCreated={(conv) => {
+          selectDM(conv.id);
+        }}
       />
     </div>
   );
