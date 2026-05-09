@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { ApiError, type Event as WsEvent } from "@hackathon/api-client";
+import { ApiError, type Event as WsEvent, type ReadEvent } from "@hackathon/api-client";
 
 const listChannelsMock = vi.fn();
 const createChannelMock = vi.fn();
@@ -23,6 +23,7 @@ let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 interface FakeSocket extends ChatSocket {
   emitMessage: (ev: WsEvent) => void;
   emitOpen: () => void;
+  emitRead: (ev: ReadEvent) => void;
 }
 
 function makeFakeSocket(): FakeSocket {
@@ -31,6 +32,8 @@ function makeFakeSocket(): FakeSocket {
     close: new Set<ChatSocketListener<"close">>(),
     error: new Set<ChatSocketListener<"error">>(),
     message: new Set<ChatSocketListener<"message">>(),
+    dm: new Set<ChatSocketListener<"dm">>(),
+    read: new Set<ChatSocketListener<"read">>(),
   };
   return {
     subscribe: <E extends ChatSocketEventName>(event: E, fn: ChatSocketListener<E>) => {
@@ -45,6 +48,9 @@ function makeFakeSocket(): FakeSocket {
     },
     emitMessage: (ev) => {
       for (const fn of listeners.message) fn(ev);
+    },
+    emitRead: (ev) => {
+      for (const fn of listeners.read) fn(ev);
     },
   };
 }
@@ -223,6 +229,105 @@ describe("useChannels", () => {
       });
     });
     expect(result.current.channels).toHaveLength(1);
+  });
+
+  it("WS read:channel frame zeroes unread_count on the matching channel", async () => {
+    listChannelsMock.mockResolvedValueOnce([
+      {
+        id: "C1",
+        name: "general",
+        created_at: "2026-01-01T00:00:00Z",
+        unread_count: 5,
+        last_read_message_id: "M0",
+      },
+      {
+        id: "C2",
+        name: "books",
+        created_at: "2026-01-01T00:00:00Z",
+        unread_count: 2,
+        last_read_message_id: null,
+      },
+    ]);
+    const sock = makeFakeSocket();
+    const { result } = renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(2);
+    });
+    expect(result.current.channels[0]?.unread_count).toBe(5);
+    expect(result.current.channels[1]?.unread_count).toBe(2);
+
+    act(() => {
+      sock.emitRead({
+        type: "read",
+        data: {
+          scope: "channel",
+          target_id: "C1",
+          last_read_message_id: "M9",
+          unread_count: 0,
+        },
+      });
+    });
+    expect(result.current.channels[0]?.unread_count).toBe(0);
+    expect(result.current.channels[0]?.last_read_message_id).toBe("M9");
+    // Other channels untouched.
+    expect(result.current.channels[1]?.unread_count).toBe(2);
+  });
+
+  it("WS read:channel frame for an unknown id is a no-op", async () => {
+    listChannelsMock.mockResolvedValueOnce([
+      {
+        id: "C1",
+        name: "general",
+        created_at: "2026-01-01T00:00:00Z",
+        unread_count: 3,
+      },
+    ]);
+    const sock = makeFakeSocket();
+    const { result } = renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(1);
+    });
+    const before = result.current.channels;
+    act(() => {
+      sock.emitRead({
+        type: "read",
+        data: {
+          scope: "channel",
+          target_id: "C-UNKNOWN",
+          last_read_message_id: "M9",
+          unread_count: 0,
+        },
+      });
+    });
+    expect(result.current.channels).toBe(before);
+  });
+
+  it("WS read:dm frame is ignored by useChannels", async () => {
+    listChannelsMock.mockResolvedValueOnce([
+      {
+        id: "C1",
+        name: "general",
+        created_at: "2026-01-01T00:00:00Z",
+        unread_count: 4,
+      },
+    ]);
+    const sock = makeFakeSocket();
+    const { result } = renderHook(() => useChannels(true, { socket: sock }));
+    await waitFor(() => {
+      expect(result.current.channels).toHaveLength(1);
+    });
+    act(() => {
+      sock.emitRead({
+        type: "read",
+        data: {
+          scope: "dm",
+          target_id: "C1",
+          last_read_message_id: "M9",
+          unread_count: 0,
+        },
+      });
+    });
+    expect(result.current.channels[0]?.unread_count).toBe(4);
   });
 
   it("calls reload() on every WS open (initial + reconnect) for catchup", async () => {

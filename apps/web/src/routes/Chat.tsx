@@ -16,6 +16,7 @@ import { useChannels } from "../hooks/useChannels.js";
 import { useChatSocket } from "../hooks/useChatSocket.js";
 import { useMessages } from "../hooks/useMessages.js";
 import { usePresence } from "../hooks/usePresence.js";
+import { useReadMarker } from "../hooks/useReadMarker.js";
 import { ChannelCreateModal } from "../components/ChannelCreateModal.js";
 import { ChannelRenameModal } from "../components/ChannelRenameModal.js";
 
@@ -110,6 +111,44 @@ export function Chat(): React.JSX.Element {
     if (activeChannel === null) return null;
     return channelsState.channels.find((c) => c.id === activeChannel)?.name ?? null;
   }, [activeChannel, channelsState.channels]);
+
+  // Channel read-pointer advance (Phase 9 #873). The hook always runs (rules-
+  // of-hooks); pass an empty scopeId when no channel is selected and gate
+  // the markRead call on a real activeChannel below. The hook flushes
+  // pending advances on visibility/focus return, so the "focus return ->
+  // POST /read" leg is owned by useReadMarker — Chat.tsx only feeds it the
+  // latest seen message id when the channel is active.
+  const channelMarker = useReadMarker("channel", activeChannel ?? "");
+
+  // Latest committed message id in the active channel. Optimistic-pending
+  // rows have ULID-shaped client ids that the server has never seen, so
+  // skip them — POST /read against an unknown id returns 404. Picking the
+  // highest committed id from the in-view list is correct under the
+  // server's advance-only semantic (older ids are 200 no-ops).
+  const latestCommittedMessageId = useMemo<string | null>(() => {
+    for (let i = messagesState.messages.length - 1; i >= 0; i -= 1) {
+      const m = messagesState.messages[i];
+      if (m === undefined) continue;
+      if (m.status !== undefined) continue;
+      return m.id;
+    }
+    return null;
+  }, [messagesState.messages]);
+
+  // Trigger the debounced markRead whenever the active channel has a new
+  // latest committed message. The 250ms trailing debounce inside the hook
+  // (decision-log L22) collapses bursts so a fast scroll past 30 rows
+  // issues one POST. Visibility/focus return inside useReadMarker flushes
+  // any pending advance immediately.
+  const markChannelRead = channelMarker.markRead;
+  useEffect(() => {
+    if (activeChannel === null) return;
+    if (latestCommittedMessageId === null) return;
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+    markChannelRead(latestCommittedMessageId);
+  }, [activeChannel, latestCommittedMessageId, markChannelRead]);
 
   // Empty-state surfaces only after the initial channel fetch settles (no
   // loading, no error). Showing the "no channels" copy mid-load would race
