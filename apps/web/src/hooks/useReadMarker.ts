@@ -84,6 +84,7 @@ export function useReadMarker(scope: ReadMarkerScope, scopeId: string | null): U
         if (pending === null) return;
         pendingRef.current = null;
         const { scope: s, scopeId: id } = scopeRef.current;
+        // belt-and-braces: markRead's early return prevents this path; keeps the closure correct under future edits
         if (id === null) return;
         post(s, id, pending);
       }, READ_MARKER_DEBOUNCE_MS);
