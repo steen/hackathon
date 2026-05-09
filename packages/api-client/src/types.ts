@@ -1,4 +1,4 @@
-// Wire types — keep in sync with packages/go-client/{auth,channels,messages,ws,client,dms}.go.
+// Wire types — keep in sync with packages/go-client/{auth,channels,messages,users,ws,client,dms}.go.
 // When adding a JSON field here, mirror it in Go and add an e2e assertion.
 
 export interface User {
