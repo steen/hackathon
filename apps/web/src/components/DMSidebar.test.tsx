@@ -117,7 +117,7 @@ describe("DMSidebar", () => {
     const onNew = vi.fn();
     render(<DMSidebar conversations={[]} activeId={null} onSelect={vi.fn()} onNew={onNew} />);
     const u = userEvent.setup();
-    await u.click(screen.getByRole("button", { name: /start new direct message/i }));
+    await u.click(screen.getByRole("button", { name: /start new dm/i }));
     expect(onNew).toHaveBeenCalledTimes(1);
   });
 

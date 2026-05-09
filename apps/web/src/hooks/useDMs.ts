@@ -81,7 +81,13 @@ export function useDMs(enabled: boolean, opts: UseDMsOpts): UseDMs {
   const reload = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const rows = await listDMs(getClient().http);
+      // The server marshals an empty conversations slice as JSON `null`
+      // when there are no rows (Go nil slice), so listDMs may resolve to
+      // a value the typed signature doesn't admit. Cast through unknown
+      // to a nullable shape, then default to []. The TS contract
+      // (api-client/dms.ts) stays strict for non-empty paths.
+      const raw = (await listDMs(getClient().http)) as Conversation[] | null;
+      const rows = raw ?? [];
       setState({ conversations: sortByActivity(rows), loading: false, error: null });
     } catch (err) {
       const msg = bannerMessage("Failed to load direct messages", err);

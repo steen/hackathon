@@ -43,7 +43,7 @@ export function DMSidebar(props: Props): React.JSX.Element {
             <span
               className="channels-list__unread"
               data-testid="dm-aggregate-unread-badge"
-              aria-label={`${String(aggregateUnread)} unread direct messages`}
+              aria-label={`${String(aggregateUnread)} unread DMs`}
               style={{ marginLeft: "0.4rem" }}
             >
               {badgeText(aggregateUnread)}
@@ -54,7 +54,7 @@ export function DMSidebar(props: Props): React.JSX.Element {
           type="button"
           className="channels-header__create"
           onClick={onNew}
-          aria-label="Start new direct message"
+          aria-label="Start new DM"
         >
           + New DM
         </button>
@@ -65,7 +65,7 @@ export function DMSidebar(props: Props): React.JSX.Element {
           {error}
         </p>
       ) : null}
-      <ul aria-label="Direct messages" className="channels-list">
+      <ul aria-label="DMs" className="channels-list">
         {conversations.map((c) => {
           const unread = c.unread_count;
           const showBadge = unread > 0;
