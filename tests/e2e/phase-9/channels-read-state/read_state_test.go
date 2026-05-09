@@ -308,6 +308,68 @@ func TestPostReadAdvancesCursorAndPublishesFrame(t *testing.T) {
 	}
 }
 
+// TestPostReadLowercaseMessageIDNormalizedOnPersist asserts the #947
+// regression: a lowercase Crockford-base32 message_id POSTed to
+// /api/channels/{id}/read is upper-folded before persistence so the
+// stored cursor matches server-issued (uppercase) ULIDs under SQLite's
+// BINARY collation. Without the fix the lowercase id would be written
+// as-is and every uppercase row in the unread-count subquery would
+// sort below it (bytes 'a'-'z' all exceed 'Z'), inflating unread_count.
+func TestPostReadLowercaseMessageIDNormalizedOnPersist(t *testing.T) {
+	srv := testsupport.StartServer(t, testsupport.StartOptions{})
+
+	authorName := "phase9-rlc-author-" + testsupport.RandomSecret(t, 4)
+	authorPass := testsupport.RandomSecret(t, 12)
+	_, authorToken := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, authorName, authorPass)
+
+	general := lookupSeededGeneralChannelID(t, srv, authorToken)
+
+	viewerName := "phase9-rlc-viewer-" + testsupport.RandomSecret(t, 4)
+	viewerPass := testsupport.RandomSecret(t, 12)
+	viewerID, viewerToken := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, viewerName, viewerPass)
+
+	// Materialize the viewer's baseline (general must have a tip).
+	_ = postMessage(t, srv.HTTPURL, authorToken, general, "lc-pre-baseline")
+	_ = listChannels(t, srv.HTTPURL, viewerToken)
+
+	advanceTarget := postMessage(t, srv.HTTPURL, authorToken, general, "lc-advance-target")
+	lowered := toLowerASCII(advanceTarget)
+	if lowered == advanceTarget {
+		t.Fatalf("expected server-issued ULID %q to contain uppercase letters", advanceTarget)
+	}
+
+	status, _, raw := postReadMark(t, srv.HTTPURL, viewerToken, general, lowered)
+	if status != http.StatusNoContent {
+		t.Fatalf("POST /read (lowercase): status %d body=%s want 204", status, raw)
+	}
+
+	db := openDBReadOnly(t, srv.DBPath)
+	var stored sql.NullString
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT last_read_message_id FROM channel_reads WHERE channel_id = ? AND user_id = ?`,
+		general, viewerID,
+	).Scan(&stored); err != nil {
+		t.Fatalf("select channel_reads: %v", err)
+	}
+	if !stored.Valid || stored.String != advanceTarget {
+		t.Fatalf("channel_reads.last_read_message_id = %v, want %q (uppercase normalized form of %q)",
+			stored, advanceTarget, lowered)
+	}
+}
+
+// toLowerASCII lowercases ASCII letters in s without touching digits.
+// ULIDs are Crockford-base32 (digits + uppercase letters) so this is
+// the inverse of the validULID upper-fold for the regression test.
+func toLowerASCII(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
+}
+
 // TestPostReadUnknownChannelReturns404 asserts the 404 branch when
 // the path id is well-formed but not in the channels table.
 func TestPostReadUnknownChannelReturns404(t *testing.T) {
