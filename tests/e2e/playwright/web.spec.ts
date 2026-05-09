@@ -40,8 +40,11 @@ test.describe("Web e2e (real browser via Playwright)", () => {
     const u1 = uniqueUsername("u-web-A");
     const u2 = uniqueUsername("u-web-B");
     const r1 = await registerViaApi(u1);
-    await registerViaApi(u2);
-    const channel = await createChannelViaApi(r1.token, uniqueUsername("ch"));
+    const r2 = await registerViaApi(u2);
+    // Phase-10 L25: u2 registered before the channel existed, so the
+    // §9 auto-add at registration does not cover them. Pass the id
+    // explicitly so the helper invites u2 to the new public channel.
+    const channel = await createChannelViaApi(r1.token, uniqueUsername("ch"), [r2.user.id]);
 
     const ctxA: BrowserContext = await browser.newContext();
     const ctxB: BrowserContext = await browser.newContext();
@@ -82,7 +85,9 @@ test.describe("Web e2e (real browser via Playwright)", () => {
     const other = uniqueUsername("u-web-other");
     const reg = await registerViaApi(username);
     const otherReg = await registerViaApi(other);
-    const channel = await createChannelViaApi(reg.token, uniqueUsername("ch"));
+    // Phase-10 L25: otherReg posts to the channel below; they need
+    // explicit membership since they registered before the channel.
+    const channel = await createChannelViaApi(reg.token, uniqueUsername("ch"), [otherReg.user.id]);
 
     // Track every server-side WS handle so we can close them on demand. New
     // sockets opened by the api-client's reconnect path land here too.

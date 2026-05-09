@@ -61,15 +61,24 @@ export async function registerViaApi(username: string): Promise<RegisterResponse
 // is a member of. The Playwright suite predates the explicit
 // channel-members relation and routinely creates a channel as user A
 // then loads user B's view to assert cross-user visibility. The
-// auto-add at registration covers the case where users register
-// AFTER a public channel exists; the more common test order is
-// register-then-create, which leaves pre-existing users out. The
-// helper bridges that gap by creating the channel as public AND
-// iterating /api/users to invite every other user to it under the
-// public-channel server-auto-fill carve-out. Tightening to a real
-// inviter-signature flow would require wiring crypto pubkeys into
-// the Playwright fixture (deferred to #984).
-export async function createChannelViaApi(token: string, name: string): Promise<ChannelRow> {
+// helper bridges that gap by creating the channel as public — the §9
+// auto-add at registration time covers users who register AFTER the
+// channel exists. For the register-then-create order, callers pass
+// `inviteUserIds` so the helper invites them under the public-channel
+// server-auto-fill carve-out. Tightening to a real inviter-signature
+// flow would require wiring crypto pubkeys into the Playwright
+// fixture (deferred to #984).
+//
+// The helper used to GET /api/users and invite every registered user;
+// that floods the per-user channel-write rate-limit bucket (PRD §9 —
+// burst 10) when the test database has already accumulated users from
+// prior tests, dropping invites silently and producing flaky cross-
+// receive timeouts.
+export async function createChannelViaApi(
+  token: string,
+  name: string,
+  inviteUserIds: string[] = [],
+): Promise<ChannelRow> {
   const res = await fetch(baseUrl() + "/api/channels", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -78,23 +87,15 @@ export async function createChannelViaApi(token: string, name: string): Promise<
   const env = (await res.json()) as Envelope<ChannelRow>;
   if (!env.ok || !env.data) throw new Error(`create channel failed: ${JSON.stringify(env)}`);
   const channel = env.data;
-  // Invite every other registered user so legacy specs that register
-  // viewer-then-create-channel still see cross-user visibility.
-  const usersRes = await fetch(baseUrl() + "/api/users", {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const usersEnv = (await usersRes.json()) as Envelope<{
-    users: { id: string }[];
-  }>;
-  if (usersEnv.ok && usersEnv.data) {
-    for (const u of usersEnv.data.users) {
-      // POST /api/channels/{id}/members — public-channel auto-fill
-      // accepts an empty membership block.
-      await fetch(baseUrl() + `/api/channels/${channel.id}/members`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ user_id: u.id }),
-      });
+  for (const userId of inviteUserIds) {
+    const inviteRes = await fetch(baseUrl() + `/api/channels/${channel.id}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (!inviteRes.ok) {
+      const text = await inviteRes.text();
+      throw new Error(`invite ${userId} failed: ${String(inviteRes.status)} ${text}`);
     }
   }
   return channel;
