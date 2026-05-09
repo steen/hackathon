@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { WebSocketClient, type Event as WsEvent } from "@hackathon/api-client";
+import {
+  WebSocketClient,
+  type DMEvent,
+  type Event as WsEvent,
+  type ReadEvent,
+} from "@hackathon/api-client";
 import type { ConnectionStatus } from "@hackathon/chat-ui";
 import { getClient } from "../api.js";
 import { bannerMessage, reportAppError } from "../lib/userFacingError.js";
@@ -16,16 +21,27 @@ import { bannerMessage, reportAppError } from "../lib/userFacingError.js";
 // lifecycle. When channelId flips to null, the socket closes and the
 // connection state collapses to "idle". When channelId changes to a new
 // value, the previous socket closes before the new one opens.
+//
+// Per-kind frame routing: in addition to the raw `message` event,
+// consumers can subscribe to typed slots `dm` and `read` (Phase 9 #872).
+// These dispatch the same WS frames as `message` — no replacement, no
+// double-fan-out suppression — but pre-narrow the payload so consumers
+// receive a fully typed `DMEvent` / `ReadEvent` without writing their own
+// type guard. The channel-kind dispatch stays on the `message` slot
+// (consumers narrow inline) so the existing useChannels surface is
+// unchanged.
 
 export const BACKOFF_MS = [500, 1000, 2000, 5000, 10000, 20000, 30000];
 
-export type ChatSocketEventName = "open" | "close" | "error" | "message";
+export type ChatSocketEventName = "open" | "close" | "error" | "message" | "dm" | "read";
 
 export interface ChatSocketEventMap {
   open: undefined;
   close: { code: number; reason: string };
   error: unknown;
   message: WsEvent;
+  dm: DMEvent;
+  read: ReadEvent;
 }
 
 export type ChatSocketListener<E extends ChatSocketEventName> = (
@@ -50,6 +66,14 @@ export interface UseChatSocket {
   socket: ChatSocket;
 }
 
+function isDMEvent(ev: WsEvent): ev is DMEvent {
+  return ev.type === "dm";
+}
+
+function isReadEvent(ev: WsEvent): ev is ReadEvent {
+  return ev.type === "read";
+}
+
 /**
  * Shared WebSocket lifecycle hook. Returns connection state plus a
  * subscribe helper. Pure refactor of the WS plumbing previously inlined
@@ -68,11 +92,15 @@ export function useChatSocket(channelId: string | null): UseChatSocket {
     close: Set<ChatSocketListener<"close">>;
     error: Set<ChatSocketListener<"error">>;
     message: Set<ChatSocketListener<"message">>;
+    dm: Set<ChatSocketListener<"dm">>;
+    read: Set<ChatSocketListener<"read">>;
   }>({
     open: new Set(),
     close: new Set(),
     error: new Set(),
     message: new Set(),
+    dm: new Set(),
+    read: new Set(),
   });
 
   // Stable subscribe API — same identity across renders so consumers can
@@ -129,6 +157,11 @@ export function useChatSocket(channelId: string | null): UseChatSocket {
     ws.on("message", (ev) => {
       if (cancelled) return;
       for (const fn of listenersRef.current.message) fn(ev);
+      if (isDMEvent(ev)) {
+        for (const fn of listenersRef.current.dm) fn(ev);
+      } else if (isReadEvent(ev)) {
+        for (const fn of listenersRef.current.read) fn(ev);
+      }
     });
 
     /* eslint-disable @typescript-eslint/no-unnecessary-condition --
