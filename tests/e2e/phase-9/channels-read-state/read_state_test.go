@@ -169,6 +169,61 @@ func TestListChannelsAdditiveFieldsAndOrder(t *testing.T) {
 	}
 }
 
+// TestSecondListingDoesNotRewriteChannelReads asserts the issue #937
+// short-circuit: once a viewer is fully materialized, a follow-up
+// GET /api/channels must not bump channel_reads.updated_at. The first
+// listing materializes the row; the second listing must leave the
+// stored timestamp byte-identical.
+func TestSecondListingDoesNotRewriteChannelReads(t *testing.T) {
+	srv := testsupport.StartServer(t, testsupport.StartOptions{})
+
+	authorName := "phase9-sc-author-" + testsupport.RandomSecret(t, 4)
+	authorPass := testsupport.RandomSecret(t, 12)
+	_, authorToken := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, authorName, authorPass)
+
+	general := lookupSeededGeneralChannelID(t, srv, authorToken)
+	postMessage(t, srv.HTTPURL, authorToken, general, "sc-pre")
+
+	viewerName := "phase9-sc-viewer-" + testsupport.RandomSecret(t, 4)
+	viewerPass := testsupport.RandomSecret(t, 12)
+	viewerID, viewerToken := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, viewerName, viewerPass)
+
+	// First listing materializes the baseline.
+	_ = listChannels(t, srv.HTTPURL, viewerToken)
+
+	db := openDBReadOnly(t, srv.DBPath)
+	var firstUpdatedAt string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT updated_at FROM channel_reads WHERE channel_id = ? AND user_id = ?`,
+		general, viewerID,
+	).Scan(&firstUpdatedAt); err != nil {
+		t.Fatalf("select channel_reads after first list: %v", err)
+	}
+
+	// SQLite's CURRENT_TIMESTAMP-equivalent here is `time.Now().UTC()`
+	// from MaterializeChannelReadsTx. Sleep past the millisecond
+	// boundary so any rewrite would be detectable as a strictly later
+	// timestamp.
+	time.Sleep(50 * time.Millisecond)
+
+	// Second listing: viewer is fully materialized, so the
+	// MaterializeChannelReadsTx pre-check must short-circuit and the
+	// stored timestamp must not advance.
+	_ = listChannels(t, srv.HTTPURL, viewerToken)
+
+	var secondUpdatedAt string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT updated_at FROM channel_reads WHERE channel_id = ? AND user_id = ?`,
+		general, viewerID,
+	).Scan(&secondUpdatedAt); err != nil {
+		t.Fatalf("select channel_reads after second list: %v", err)
+	}
+	if secondUpdatedAt != firstUpdatedAt {
+		t.Fatalf("channel_reads.updated_at advanced on second listing: first=%q second=%q (expected short-circuit per #937)",
+			firstUpdatedAt, secondUpdatedAt)
+	}
+}
+
 // TestPostReadAdvancesCursorAndPublishesFrame asserts the full
 // POST /api/channels/{id}/read contract:
 //
