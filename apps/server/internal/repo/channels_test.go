@@ -36,7 +36,7 @@ func TestCreateChannelPersistsAndReturnsIt(t *testing.T) {
 	r, db := newRepo(t)
 
 	id := ids.NewULID()
-	ch, err := r.CreateChannel(context.Background(), id, "general", time.Now())
+	ch, err := r.CreateChannel(context.Background(), id, "general", false, time.Now())
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -55,10 +55,10 @@ func TestCreateChannelPersistsAndReturnsIt(t *testing.T) {
 // US-4 — duplicate name is rejected with the typed sentinel.
 func TestCreateChannelRejectsDuplicateName(t *testing.T) {
 	r, _ := newRepo(t)
-	if _, err := r.CreateChannel(context.Background(), ids.NewULID(), "dup", time.Now()); err != nil {
+	if _, err := r.CreateChannel(context.Background(), ids.NewULID(), "dup", false, time.Now()); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	_, err := r.CreateChannel(context.Background(), ids.NewULID(), "dup", time.Now())
+	_, err := r.CreateChannel(context.Background(), ids.NewULID(), "dup", false, time.Now())
 	if !errors.Is(err, repo.ErrChannelNameTaken) {
 		t.Fatalf("second err: got %v want ErrChannelNameTaken", err)
 	}
@@ -67,8 +67,8 @@ func TestCreateChannelRejectsDuplicateName(t *testing.T) {
 // US-3 — ListChannels returns rows ordered chronologically by id.
 func TestListChannelsReturnsSeededChannels(t *testing.T) {
 	r, _ := newRepo(t)
-	a, _ := r.CreateChannel(context.Background(), ids.NewULID(), "alpha", time.Now())
-	b, _ := r.CreateChannel(context.Background(), ids.NewULID(), "beta", time.Now())
+	a, _ := r.CreateChannel(context.Background(), ids.NewULID(), "alpha", false, time.Now())
+	b, _ := r.CreateChannel(context.Background(), ids.NewULID(), "beta", false, time.Now())
 	got, err := r.ListChannels(context.Background())
 	if err != nil {
 		t.Fatalf("ListChannels: %v", err)
@@ -94,7 +94,7 @@ func TestGetChannelReturnsNilForMissing(t *testing.T) {
 
 func TestRenameChannelPersistsNewName(t *testing.T) {
 	r, db := newRepo(t)
-	created, err := r.CreateChannel(context.Background(), ids.NewULID(), "old", time.Now())
+	created, err := r.CreateChannel(context.Background(), ids.NewULID(), "old", false, time.Now())
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
@@ -124,11 +124,11 @@ func TestRenameChannelReturnsNotFound(t *testing.T) {
 
 func TestRenameChannelReturnsNameTakenOnCollision(t *testing.T) {
 	r, _ := newRepo(t)
-	a, err := r.CreateChannel(context.Background(), ids.NewULID(), "alpha", time.Now())
+	a, err := r.CreateChannel(context.Background(), ids.NewULID(), "alpha", false, time.Now())
 	if err != nil {
 		t.Fatalf("create alpha: %v", err)
 	}
-	if _, err := r.CreateChannel(context.Background(), ids.NewULID(), "beta", time.Now()); err != nil {
+	if _, err := r.CreateChannel(context.Background(), ids.NewULID(), "beta", false, time.Now()); err != nil {
 		t.Fatalf("create beta: %v", err)
 	}
 	_, err = r.RenameChannel(context.Background(), a.ID, "beta", time.Now())

@@ -92,7 +92,9 @@ func (h *ChannelsHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		return
 	}
 	id := ids.NewULID()
-	ch, err := h.deps.Repo.CreateChannel(r.Context(), id, name, h.deps.Now())
+	// is_public defaults to false; the membership-creator flow (#981)
+	// will surface the toggle on the request body.
+	ch, err := h.deps.Repo.CreateChannel(r.Context(), id, name, false, h.deps.Now())
 	if err != nil {
 		if errors.Is(err, repo.ErrChannelNameTaken) {
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "channel name already taken")
