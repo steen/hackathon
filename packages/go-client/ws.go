@@ -49,13 +49,49 @@ const EventTypeDM = "dm"
 // the bytes; callers decode Raw on demand.
 const EventTypeRead = "read"
 
-// ChannelEvent is the typed payload for {type:"channel",data:{kind,channel}}
-// frames. Kind is "create" or "rename"; Channel carries the post-change
-// channel state. Mirrors the TS ChannelEvent in
-// packages/api-client/src/types.ts.
+// ChannelEventKind values — the discriminator in {type:"channel",data:{kind,...}}
+// frames. Phase 8 covered "create"/"rename"; Phase 10 adds three more
+// per decision-log L9 + L29:
+//
+//   - "members_changed": broadcast after POST/DELETE on
+//     /api/channels/{id}/members so recipients can race-rotate or compute
+//     lazy-wrap fill-ins. Carries channel_id + current_generation_id +
+//     members_at_rotation.
+//   - "key_received": routed to the receiving user's user:<viewer> topic
+//     when their wrap is filled in or rotated (closes the lazy-wrap loop).
+//     Carries channel_id + generation_id.
+//   - "wrap_failed": routed to the user's own user:<viewer> topic when
+//     their local crypto_box_open on a wrap fails — recovery is
+//     replay-wrap (L29 + L35). Carries channel_id + generation_id.
+const (
+	ChannelEventKindCreate         = "create"
+	ChannelEventKindRename         = "rename"
+	ChannelEventKindMembersChanged = "members_changed"
+	ChannelEventKindKeyReceived    = "key_received"
+	ChannelEventKindWrapFailed     = "wrap_failed"
+)
+
+// ChannelEvent is the typed payload for {type:"channel",data:{...}}
+// frames. The shape is a discriminated union keyed on Kind; the field
+// set populated for each kind matches the TS ChannelEventData union in
+// packages/api-client/src/types.ts:
+//
+//   - "create" / "rename": Channel is non-zero; the rest are zero values.
+//   - "members_changed": ChannelID + CurrentGenerationID + MembersAtRotation
+//     are populated; Channel is zero.
+//   - "key_received" / "wrap_failed": ChannelID + GenerationID are
+//     populated; the rest are zero.
+//
+// Every Phase-10 field carries `omitempty` so old "create"/"rename" frames
+// round-trip byte-for-byte (no spurious channel_id:"" when Kind is
+// "create"). Decoders that need exhaustive guards switch on Kind first.
 type ChannelEvent struct {
-	Kind    string  `json:"kind"`
-	Channel Channel `json:"channel"`
+	Kind                string   `json:"kind"`
+	Channel             *Channel `json:"channel,omitempty"`
+	ChannelID           ULID     `json:"channel_id,omitempty"`
+	CurrentGenerationID *uint32  `json:"current_generation_id,omitempty"`
+	GenerationID        *uint32  `json:"generation_id,omitempty"`
+	MembersAtRotation   []User   `json:"members_at_rotation,omitempty"`
 }
 
 // Event is the typed view of a single inbound WS frame. When the frame
