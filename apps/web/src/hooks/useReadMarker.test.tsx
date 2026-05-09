@@ -183,13 +183,7 @@ describe("useReadMarker", () => {
     expect(markChannelReadMock).not.toHaveBeenCalled();
   });
 
-  it("scope flip to null between schedule and trailing-fire discards the advance", () => {
-    // Cleanup-on-scope-change runs flush() with the OLD scope (so a
-    // legitimate A→B switch posts A's pointer). The hazard the null
-    // guard targets is the rarer race where the debounce timer is
-    // already drained before the cleanup runs but the scope has
-    // flipped — the trailing post() call should drop, not POST to
-    // /api/channels//read.
+  it("markRead post-flip-to-null is a no-op (rerender path)", () => {
     const { result, rerender } = renderHook(
       ({ scope, id }: { scope: "channel" | "dm"; id: string | null }) => useReadMarker(scope, id),
       { initialProps: { scope: "channel" as const, id: "C1" } },

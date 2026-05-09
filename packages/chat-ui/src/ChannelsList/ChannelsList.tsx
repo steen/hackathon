@@ -23,6 +23,7 @@ interface Props {
 // out the sidebar layout. Matches the Slack/Discord convention; the exact
 // number lives on hover/focus via the aria-label so SR users still hear
 // "23 unread" rather than the truncated text.
+// keep in sync with the "99+" literal in badgeText below
 const UNREAD_DISPLAY_CAP = 99;
 
 function badgeText(n: number): string {
