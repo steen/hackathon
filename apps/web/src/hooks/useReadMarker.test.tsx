@@ -166,4 +166,52 @@ describe("useReadMarker", () => {
     expect(markChannelReadMock).toHaveBeenCalledWith({ sentinel: "test-http" }, "C1", "M1");
     expect(markDMReadMock).not.toHaveBeenCalled();
   });
+
+  it("markRead is a no-op when scopeId is null (no debounce timer scheduled)", () => {
+    const { result } = renderHook(() => useReadMarker("channel", null));
+    act(() => {
+      result.current.markRead("M1");
+    });
+    act(() => {
+      vi.advanceTimersByTime(READ_MARKER_DEBOUNCE_MS * 2);
+    });
+    expect(markChannelReadMock).not.toHaveBeenCalled();
+    // Subsequent flush has nothing pending → still no POST.
+    act(() => {
+      result.current.flush();
+    });
+    expect(markChannelReadMock).not.toHaveBeenCalled();
+  });
+
+  it("scope flip to null between schedule and trailing-fire discards the advance", () => {
+    // Cleanup-on-scope-change runs flush() with the OLD scope (so a
+    // legitimate A→B switch posts A's pointer). The hazard the null
+    // guard targets is the rarer race where the debounce timer is
+    // already drained before the cleanup runs but the scope has
+    // flipped — the trailing post() call should drop, not POST to
+    // /api/channels//read.
+    const { result, rerender } = renderHook(
+      ({ scope, id }: { scope: "channel" | "dm"; id: string | null }) => useReadMarker(scope, id),
+      { initialProps: { scope: "channel" as const, id: "C1" } },
+    );
+    act(() => {
+      result.current.markRead("M1");
+    });
+    // Flip scope to null AND drain the pending cleanup flush (which
+    // posts to C1 — the legitimate prior-scope flush). pendingRef is
+    // now empty.
+    act(() => {
+      rerender({ scope: "channel" as const, id: null });
+    });
+    markChannelReadMock.mockReset();
+    // After scope is null, any further markRead is a no-op (no timer
+    // scheduled, no POST possible).
+    act(() => {
+      result.current.markRead("M2");
+    });
+    act(() => {
+      vi.advanceTimersByTime(READ_MARKER_DEBOUNCE_MS * 2);
+    });
+    expect(markChannelReadMock).not.toHaveBeenCalled();
+  });
 });

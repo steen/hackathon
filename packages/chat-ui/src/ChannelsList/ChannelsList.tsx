@@ -26,7 +26,7 @@ interface Props {
 const UNREAD_DISPLAY_CAP = 99;
 
 function badgeText(n: number): string {
-  return n > UNREAD_DISPLAY_CAP ? `${String(UNREAD_DISPLAY_CAP)}+` : String(n);
+  return n > UNREAD_DISPLAY_CAP ? "99+" : String(n);
 }
 
 export function ChannelsList({

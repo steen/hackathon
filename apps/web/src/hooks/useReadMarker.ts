@@ -28,12 +28,12 @@ export interface UseReadMarker {
   flush: () => void;
 }
 
-export function useReadMarker(scope: ReadMarkerScope, scopeId: string): UseReadMarker {
+export function useReadMarker(scope: ReadMarkerScope, scopeId: string | null): UseReadMarker {
   // Hold the most-recent pending id in a ref so successive calls within
   // the debounce window collapse without rerendering the consumer.
   const pendingRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scopeRef = useRef({ scope, scopeId });
+  const scopeRef = useRef<{ scope: ReadMarkerScope; scopeId: string | null }>({ scope, scopeId });
 
   // Track the current scope so a flush triggered by scope change posts to
   // the previous scope (the id the user actually saw) rather than the
@@ -61,11 +61,21 @@ export function useReadMarker(scope: ReadMarkerScope, scopeId: string): UseReadM
     if (messageId === null) return;
     pendingRef.current = null;
     const { scope: s, scopeId: id } = scopeRef.current;
+    // No active scope — discard the pending advance rather than POST to
+    // an empty/sentinel id. Happens when the scope flips to null between
+    // the debounce schedule and the trailing fire (e.g. user deselects a
+    // channel just as the timer elapses).
+    if (id === null) return;
     post(s, id, messageId);
   }, [post]);
 
   const markRead = useCallback(
     (messageId: string): void => {
+      // No-op when no scope is active. Prevents POSTing to /api/channels//read
+      // (404) and avoids burning a debounce timer that would never have a
+      // valid target — the gating is here rather than at the call-site so
+      // each consumer doesn't repeat the guard.
+      if (scopeRef.current.scopeId === null) return;
       pendingRef.current = messageId;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
@@ -74,6 +84,7 @@ export function useReadMarker(scope: ReadMarkerScope, scopeId: string): UseReadM
         if (pending === null) return;
         pendingRef.current = null;
         const { scope: s, scopeId: id } = scopeRef.current;
+        if (id === null) return;
         post(s, id, pending);
       }, READ_MARKER_DEBOUNCE_MS);
     },
