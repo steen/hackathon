@@ -158,12 +158,16 @@ func (r *Repo) RenameChannel(ctx context.Context, id, newName string, _ time.Tim
 // `last_message_id` (decision log §11 — auto-materialize on listing,
 // never-messaged channels are skipped because the column is NOT NULL).
 //
-// The unread_count subquery counts messages with id > the viewer's
-// last_read_message_id (decision log L6 channel formula). The
-// COALESCE guards the (rare in practice after materialization) row
-// where the viewer has no channel_reads entry — empty string sorts
-// before every ULID so all messages would count, but a never-messaged
-// channel has zero messages either way.
+// The unread_count subquery counts messages with id strictly greater
+// than the viewer's last_read_message_id (decision log L6 channel
+// formula). The LEFT JOIN preserves never-messaged channels (e.g. the
+// seeded `general` row before any post) — those fall through with
+// `r.last_read_message_id` NULL, the `m.id > NULL` predicate is NULL,
+// and COUNT(*) is 0. Issue #938 dropped the prior empty-string
+// COALESCE belt: after §11 materialize-on-listing, every channel that could
+// contribute a non-zero count has a non-NULL `r.last_read_message_id`,
+// so the COALESCE branch was reachable only for the empty-channel
+// arm where the count is structurally zero either way.
 func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID string) ([]Channel, error) {
 	if err := r.MaterializeChannelReadsTx(ctx, viewerUserID); err != nil {
 		return nil, err
@@ -174,7 +178,7 @@ func (r *Repo) ListChannelsWithReadState(ctx context.Context, viewerUserID strin
 		        r.last_read_message_id,
 		        (SELECT COUNT(*) FROM messages m
 		          WHERE m.channel_id = c.id
-		            AND m.id > COALESCE(r.last_read_message_id, '')) AS unread_count
+		            AND m.id > r.last_read_message_id) AS unread_count
 		   FROM channels c
 		   LEFT JOIN channel_reads r
 		     ON r.channel_id = c.id AND r.user_id = ?
