@@ -222,6 +222,62 @@ func TestListChannelsWithReadStateReportsUnread(t *testing.T) {
 	}
 }
 
+// AC for issue #938 — after the first ListChannelsWithReadState call
+// (which runs MaterializeChannelReadsTx), every row representing a
+// non-empty channel must carry a non-nil LastReadMessageID. This is
+// the invariant that makes the unread_count subquery's COALESCE
+// redundant: r.last_read_message_id is non-NULL on every row that
+// could contribute a non-zero count, so `m.id > r.last_read_message_id`
+// is well-defined without a fallback.
+func TestListChannelsWithReadStateMaterializesNonEmptyChannels(t *testing.T) {
+	r, _ := newRepo(t)
+	viewer := mustUserUnique(t, r)
+	author := mustUserUnique(t, r)
+
+	withMsg := mustChannel(t, r, "alpha")
+	empty := mustChannel(t, r, "beta")
+	tip := ids.NewULID()
+	if _, err := r.InsertMessageTx(context.Background(), tip, withMsg, author, "m", time.Now()); err != nil {
+		t.Fatalf("InsertMessageTx: %v", err)
+	}
+
+	got, err := r.ListChannelsWithReadState(context.Background(), viewer)
+	if err != nil {
+		t.Fatalf("ListChannelsWithReadState: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len: got %d want 2", len(got))
+	}
+
+	var sawWithMsg, sawEmpty bool
+	for _, c := range got {
+		switch c.ID {
+		case withMsg:
+			sawWithMsg = true
+			if c.LastReadMessageID == nil {
+				t.Fatalf("non-empty channel %q: LastReadMessageID nil — materialize-on-listing invariant broken", c.ID)
+			}
+			if *c.LastReadMessageID != tip {
+				t.Fatalf("non-empty channel %q: LastReadMessageID = %q want %q", c.ID, *c.LastReadMessageID, tip)
+			}
+			if c.UnreadCount == nil || *c.UnreadCount != 0 {
+				t.Fatalf("non-empty channel %q: UnreadCount = %v want 0 after first-list materialization", c.ID, c.UnreadCount)
+			}
+		case empty:
+			sawEmpty = true
+			if c.LastReadMessageID != nil {
+				t.Fatalf("never-messaged channel %q: LastReadMessageID = %q want nil", c.ID, *c.LastReadMessageID)
+			}
+			if c.UnreadCount == nil || *c.UnreadCount != 0 {
+				t.Fatalf("never-messaged channel %q: UnreadCount = %v want 0", c.ID, c.UnreadCount)
+			}
+		}
+	}
+	if !sawWithMsg || !sawEmpty {
+		t.Fatalf("listing missing rows: sawWithMsg=%v sawEmpty=%v", sawWithMsg, sawEmpty)
+	}
+}
+
 func readCursor(t *testing.T, db *sql.DB, channelID, userID string) string {
 	t.Helper()
 	var got string
