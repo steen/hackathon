@@ -77,10 +77,12 @@ func (h *MessagesHandlers) List(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}
 	before := q.Get("before")
 	if before != "" {
-		if _, ok := validULID(before); !ok {
+		normalized, ok := validULID(before)
+		if !ok {
 			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "before must be a ULID")
 			return
 		}
+		before = normalized
 	}
 	msgs, err := h.deps.Repo.ListMessages(r.Context(), channelID, before, limit)
 	if err != nil {
@@ -152,18 +154,27 @@ func (h *MessagesHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	WriteOK(w, stdhttp.StatusCreated, msg)
 }
 
-// validULID is a cheap shape check (Crockford base32, 26 chars). We
-// accept lowercase here because some clients normalize URLs to lower.
+// validULID is a cheap shape check (Crockford base32, 26 chars). Lowercase
+// input is accepted and upper-folded on return so SQLite's BINARY collation
+// matches server-issued (uppercase) ULIDs in cursor comparisons and id
+// lookups.
 func validULID(s string) (string, bool) {
 	if len(s) != 26 {
 		return "", false
 	}
+	b := make([]byte, 26)
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		ok := (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-		if !ok {
+		switch {
+		case c >= '0' && c <= '9':
+			b[i] = c
+		case c >= 'A' && c <= 'Z':
+			b[i] = c
+		case c >= 'a' && c <= 'z':
+			b[i] = c - ('a' - 'A')
+		default:
 			return "", false
 		}
 	}
-	return s, true
+	return string(b), true
 }

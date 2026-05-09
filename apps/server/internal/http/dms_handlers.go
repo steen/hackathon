@@ -218,10 +218,12 @@ func (h *DMsHandlers) ListMessages(w stdhttp.ResponseWriter, r *stdhttp.Request)
 	}
 	before := q.Get("before")
 	if before != "" {
-		if _, ok := validULID(before); !ok {
+		normalized, ok := validULID(before)
+		if !ok {
 			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "before must be a ULID")
 			return
 		}
+		before = normalized
 	}
 	msgs, err := h.deps.Repo.ListDMMessages(r.Context(), conv.ID, before, limit)
 	if err != nil {
