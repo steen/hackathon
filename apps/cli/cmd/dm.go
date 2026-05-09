@@ -1,14 +1,12 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"time"
 
@@ -93,11 +91,11 @@ func dmSend(ctx context.Context, env *Env, args []string) error {
 			return fmt.Errorf("dm send: stdin produced an empty message")
 		}
 	}
-	client, cfg, err := newClient(env, true)
+	client, _, err := newClient(env, true)
 	if err != nil {
 		return wrapNotLoggedIn("dm send", err)
 	}
-	peerID, err := resolvePeer(ctx, env, cfg.Token, client, peer)
+	peerID, err := resolvePeer(ctx, env, client, peer)
 	if err != nil {
 		return fmt.Errorf("dm send: %w", err)
 	}
@@ -130,11 +128,11 @@ func dmHistory(ctx context.Context, env *Env, args []string) error {
 		return fmt.Errorf("usage: chatd dm history <peer-username-or-id> [--limit N] [--before ID]")
 	}
 	peer := positional[0]
-	client, cfg, err := newClient(env, true)
+	client, _, err := newClient(env, true)
 	if err != nil {
 		return wrapNotLoggedIn("dm history", err)
 	}
-	peerID, err := resolvePeer(ctx, env, cfg.Token, client, peer)
+	peerID, err := resolvePeer(ctx, env, client, peer)
 	if err != nil {
 		return fmt.Errorf("dm history: %w", err)
 	}
@@ -170,11 +168,11 @@ func dmRead(ctx context.Context, env *Env, args []string) error {
 		return fmt.Errorf("usage: chatd dm read <peer-username-or-id> <message-id>")
 	}
 	peer, messageID := rest[0], rest[1]
-	client, cfg, err := newClient(env, true)
+	client, _, err := newClient(env, true)
 	if err != nil {
 		return wrapNotLoggedIn("dm read", err)
 	}
-	peerID, err := resolvePeer(ctx, env, cfg.Token, client, peer)
+	peerID, err := resolvePeer(ctx, env, client, peer)
 	if err != nil {
 		return fmt.Errorf("dm read: %w", err)
 	}
@@ -208,14 +206,14 @@ func dmWatch(ctx context.Context, env *Env, args []string) error {
 		return fmt.Errorf("usage: chatd dm watch [<peer-username-or-id>]")
 	}
 
-	client, cfg, err := newClient(env, true)
+	client, _, err := newClient(env, true)
 	if err != nil {
 		return wrapNotLoggedIn("dm watch", err)
 	}
 
 	wantConvID := ""
 	if len(rest) == 1 {
-		peerID, err := resolvePeer(ctx, env, cfg.Token, client, rest[0])
+		peerID, err := resolvePeer(ctx, env, client, rest[0])
 		if err != nil {
 			return fmt.Errorf("dm watch: %w", err)
 		}
@@ -299,14 +297,14 @@ func dmStreamOnce(ctx context.Context, env *Env, client *goclient.Client, wantCo
 // already has the id avoids a /api/users round-trip; otherwise the
 // directory is fetched and a case-sensitive username match is required.
 // The directory is small (per-invite, PRD §4) so a full GET is fine.
-func resolvePeer(ctx context.Context, _ *Env, token string, client *goclient.Client, peer string) (string, error) {
+func resolvePeer(ctx context.Context, _ *Env, client *goclient.Client, peer string) (string, error) {
 	if peer == "" {
 		return "", fmt.Errorf("peer must not be empty")
 	}
 	if goclient.ULID(peer).Valid() {
 		return peer, nil
 	}
-	users, err := fetchUsers(ctx, token, client.BaseURL())
+	users, err := client.ListUsers(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -316,73 +314,6 @@ func resolvePeer(ctx context.Context, _ *Env, token string, client *goclient.Cli
 		}
 	}
 	return "", fmt.Errorf("no user named %q in directory", peer)
-}
-
-// userSummary mirrors the server-side http.UserSummary shape returned by
-// GET /api/users. Local mirror because the server type lives under an
-// internal/ package; drift would surface as a JSON-decode failure on
-// first call. The server response is `{users:[{id,username},...]}`.
-type userSummary struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-}
-
-type usersListResponse struct {
-	Users []userSummary `json:"users"`
-}
-
-// fetchUsers issues GET /api/users via the standard http.Client because
-// the go-client does not expose a typed method for it (out of footprint
-// for this PR). The request mirrors goclient.Client.do: bearer auth,
-// JSON envelope decode, MaxResponseBytes-bounded read.
-func fetchUsers(ctx context.Context, token, baseURL string) ([]userSummary, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/users", nil)
-	if err != nil {
-		return nil, fmt.Errorf("build request: %w", err)
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, goclient.MaxResponseBytes))
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-	if len(bytes.TrimSpace(raw)) == 0 {
-		if resp.StatusCode >= 400 {
-			return nil, fmt.Errorf("users list: status %d", resp.StatusCode)
-		}
-		return nil, nil
-	}
-	var env struct {
-		OK    bool            `json:"ok"`
-		Data  json.RawMessage `json:"data"`
-		Error *struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("decode envelope (status %d): %w", resp.StatusCode, err)
-	}
-	if !env.OK {
-		code, msg := "unknown", resp.Status
-		if env.Error != nil {
-			code, msg = env.Error.Code, env.Error.Message
-		}
-		return nil, fmt.Errorf("users list: %s: %s", code, msg)
-	}
-	var out usersListResponse
-	if len(env.Data) > 0 && string(env.Data) != "null" {
-		if err := json.Unmarshal(env.Data, &out); err != nil {
-			return nil, fmt.Errorf("decode users: %w", err)
-		}
-	}
-	return out.Users, nil
 }
 
 // mapDMError mirrors mapChannelError for the DM surface. Surfaces typed
