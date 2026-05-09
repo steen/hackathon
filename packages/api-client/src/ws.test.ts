@@ -132,6 +132,9 @@ describe("decodeFrame", () => {
     };
     expect(create.data.kind).toBe("create");
     expect(rename.data.kind).toBe("rename");
+    if (rename.data.kind !== "rename" || create.data.kind !== "create") {
+      throw new Error("union narrowing failed");
+    }
     expect(rename.data.channel.id).toBe(create.data.channel.id);
   });
 });

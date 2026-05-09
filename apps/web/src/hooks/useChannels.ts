@@ -83,6 +83,12 @@ export function useChannels(enabled: boolean, opts: UseChannelsOpts = {}): UseCh
     if (!enabled || socket === undefined) return;
     const offMessage = socket.subscribe("message", (ev) => {
       if (!isChannelEvent(ev)) return;
+      // Phase-10 extends ChannelEventData with members_changed /
+      // key_received / wrap_failed kinds (decision-log L9 + L29) that do
+      // not carry a `channel` field; the channel-list merge here only
+      // cares about create/rename. Non-Phase-10 sub-issues consume the
+      // new kinds in their own hooks.
+      if (ev.data.kind !== "create" && ev.data.kind !== "rename") return;
       const next = ev.data.channel;
       setState((s) => {
         const existing = s.channels.find((c) => c.id === next.id);

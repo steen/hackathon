@@ -320,6 +320,7 @@ describe("phase-8 wire-drift canary: channel WS frame parity across Go + TS clie
 
     expect(tsEvent.type).toBe("channel");
     expect(tsEvent.data.kind).toBe("create");
+    if (tsEvent.data.kind !== "create") throw new Error("waitFor returned non-create");
     expect(tsEvent.data.channel.id).toBe(created.id);
     expect(tsEvent.data.channel.name).toBe(created.name);
     expect(typeof tsEvent.data.channel.created_at).toBe("string");
@@ -361,6 +362,7 @@ describe("phase-8 wire-drift canary: channel WS frame parity across Go + TS clie
     expect(goLine.name).toBe(newName);
 
     expect(tsEvent.data.kind).toBe("rename");
+    if (tsEvent.data.kind !== "rename") throw new Error("waitFor returned non-rename");
     expect(tsEvent.data.channel.id).toBe(created.id);
     expect(tsEvent.data.channel.name).toBe(newName);
 
