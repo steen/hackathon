@@ -16,6 +16,9 @@
   color: var(--fg-muted);
   transition: background 0.08s ease;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .channels-list li button:hover {
@@ -27,4 +30,25 @@
   background: var(--bg-active);
   color: var(--fg);
   font-weight: 600;
+}
+
+.channels-list__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channels-list__unread {
+  flex: 0 0 auto;
+  min-width: 1.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--badge-bg, #d04444);
+  color: var(--badge-fg, #fff);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.1;
 }

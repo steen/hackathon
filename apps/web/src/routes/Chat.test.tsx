@@ -104,6 +104,13 @@ function happyPath(): void {
     if (method === "GET" && (path === "/api/presence" || path === "/api/users")) {
       return Promise.resolve({ users: [] });
     }
+    // The chat shell now wires `useReadMarker("channel", activeId)` (Phase 9
+    // #873) and posts `/api/channels/{id}/read` whenever the latest committed
+    // message id changes. Tests don't assert against this endpoint — accept
+    // it so the rejection branch isn't tripped on every channel-open.
+    if (method === "POST" && /^\/api\/channels\/[^/]+\/read$/.test(path)) {
+      return Promise.resolve({ ok: true });
+    }
     return Promise.reject(new Error(`unexpected http.request: ${method} ${path}`));
   });
 }
@@ -2171,5 +2178,63 @@ describe("test_web_message_list_respects_user_scroll_when_live_message_arrives",
 
     expect(screen.getByText("live arrival at 9px past boundary")).toBeInTheDocument();
     expect(list.scrollTop).toBe(scrollTop);
+  });
+});
+
+describe("test_web_chat_marks_channel_read_when_active_and_visible", () => {
+  it("posts /api/channels/{id}/read with the latest committed message id after history loads", async () => {
+    happyPath();
+    render(
+      <AuthProvider>
+        <Chat />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("hello from history")).toBeInTheDocument();
+    });
+
+    // The 250ms trailing debounce inside useReadMarker collapses bursts.
+    // Wait long enough for one POST to fire under the active+visible
+    // gate established in Chat.tsx.
+    await waitFor(
+      () => {
+        expect(
+          httpRequestMock.mock.calls.some(
+            ([method, path, body]) =>
+              method === "POST" &&
+              path === "/api/channels/C1/read" &&
+              (body as { message_id: string } | undefined)?.message_id === "M1",
+          ),
+        ).toBe(true);
+      },
+      { timeout: 1000 },
+    );
+  });
+
+  it("skips the markRead post when document.visibilityState is hidden at the moment messages settle", async () => {
+    happyPath();
+    const visibilitySpy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      render(
+        <AuthProvider>
+          <Chat />
+        </AuthProvider>,
+      );
+      await waitFor(() => {
+        expect(screen.getByText("hello from history")).toBeInTheDocument();
+      });
+      // Wait past the 250ms debounce window — no POST should fire while
+      // the tab remains hidden.
+      await new Promise<void>((r) => setTimeout(r, 400));
+      expect(
+        httpRequestMock.mock.calls.some(
+          ([method, path]) =>
+            method === "POST" && typeof path === "string" && path.endsWith("/read"),
+        ),
+      ).toBe(false);
+    } finally {
+      visibilitySpy.mockRestore();
+    }
   });
 });

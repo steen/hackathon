@@ -101,11 +101,37 @@ export function useChannels(enabled: boolean, opts: UseChannelsOpts = {}): UseCh
         };
       });
     });
+    // Cross-tab/device sync: a `{type:"read", scope:"channel"}` frame is
+    // routed to the originating viewer's user:<viewer> topic on every
+    // POST /channels/{id}/read commit (server emits after UPSERT — see
+    // specs/plans/phase-9/read-state.md). When tab A advances, tab B's
+    // socket receives this frame; we overwrite the local unread_count
+    // for the matching channel id per decision-log §12 (reconcile-
+    // overwrite, never max). last_read_message_id is also kept in sync
+    // so a subsequent listing fetch doesn't see a stale baseline.
+    const offRead = socket.subscribe("read", (ev) => {
+      if (ev.data.scope !== "channel") return;
+      const targetId = ev.data.target_id;
+      const lastReadId = ev.data.last_read_message_id;
+      const unread = ev.data.unread_count;
+      setState((s) => {
+        if (!s.channels.some((c) => c.id === targetId)) return s;
+        return {
+          ...s,
+          channels: s.channels.map((c) =>
+            c.id === targetId
+              ? { ...c, unread_count: unread, last_read_message_id: lastReadId }
+              : c,
+          ),
+        };
+      });
+    });
     const offOpen = socket.subscribe("open", () => {
       void reload();
     });
     return () => {
       offMessage();
+      offRead();
       offOpen();
     };
   }, [enabled, socket, reload]);
