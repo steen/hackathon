@@ -12,7 +12,10 @@ export function uniqueUsername(prefix: string): string {
     .padStart(6, "0");
   const t = Date.now().toString(36).slice(-6);
   const head = prefix.slice(0, 18);
-  return `${head}-${t}-${r}`;
+  // L37: server regex is ^[a-z0-9_-]{3,32}$; lowercase the assembled
+  // name so callers can keep readable suffixes ("u-web-A"/"u-pres-B")
+  // without each spec re-coding the L37 constraint.
+  return `${head}-${t}-${r}`.toLowerCase();
 }
 
 export function baseUrl(): string {
