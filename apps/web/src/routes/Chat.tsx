@@ -148,18 +148,28 @@ export function Chat(): React.JSX.Element {
   }, []);
 
   // Channel read-pointer advance (Phase 9 #873). The hook always runs (rules-
-  // of-hooks); pass an empty scopeId when no channel is selected and gate
-  // the markRead call on a real activeChannel below. The hook flushes
-  // pending advances on visibility/focus return, so the "focus return ->
-  // POST /read" leg is owned by useReadMarker — Chat.tsx only feeds it the
-  // latest seen message id when the channel is active.
-  const channelMarker = useReadMarker("channel", activeChannel ?? "");
+  // of-hooks); pass `null` when no channel is selected so the hook no-ops
+  // its markRead/flush internals rather than POSTing to a sentinel id. The
+  // hook flushes pending advances on visibility/focus return, so the
+  // "focus return -> POST /read" leg is owned by useReadMarker — Chat.tsx
+  // only feeds it the latest seen message id when the channel is active.
+  const channelMarker = useReadMarker("channel", activeChannel);
 
   // Latest committed message id in the active channel. Optimistic-pending
   // rows have ULID-shaped client ids that the server has never seen, so
   // skip them — POST /read against an unknown id returns 404. Picking the
   // highest committed id from the in-view list is correct under the
   // server's advance-only semantic (older ids are 200 no-ops).
+  //
+  // Reverse scan over messages is bounded by the in-view window
+  // (CATCHUP_LIMIT=50 plus loaded older pages, capped by server history).
+  // Typical case is O(1): the tail row is committed (the last WS frame
+  // was an inbound or self-echo, both committed), the loop returns on the
+  // first iteration. Pathological case is a long suffix of pending/failed
+  // self-sends, which only happens during outage windows. Maintaining an
+  // O(1) lastCommittedRef would require threading updates through every
+  // setMessages call site in useMessages — not worth the surface-area
+  // expansion at current scale.
   const latestCommittedMessageId = useMemo<string | null>(() => {
     for (let i = messagesState.messages.length - 1; i >= 0; i -= 1) {
       const m = messagesState.messages[i];
