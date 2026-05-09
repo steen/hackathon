@@ -1,0 +1,3 @@
+### Tests
+
+- `tests/e2e/phase-9/web-read-marker/`: promote the parked Playwright placeholder (#944) to live tests covering the two `useReadMarker` AC scenarios — five WS-driven `markRead` calls collapse to a single `POST /api/channels/{id}/read` inside the 250ms trailing-debounce window, and a `visibilitychange` → `visible` (or `window.focus`) event flushes a pending advance under 200ms (strictly under the 250ms timer). `apps/web/playwright.config.ts` broadens `testDir` to `tests/e2e/` and uses `testMatch` to opt this directory in alongside `playwright/`; sibling phase-9 placeholder dirs stay invisible until each gets its own follow-up.

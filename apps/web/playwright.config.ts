@@ -7,13 +7,22 @@ import { dirname, resolve } from "node:path";
 // suite is logically a cross-app e2e (server + api-client + web), but the
 // Playwright config has to sit next to the app it serves so `pnpm exec
 // playwright test` from the web package finds its own browsers.
+//
+// Discovery surface: `testDir` is the `tests/e2e/` parent (not just
+// `playwright/`) so phase-scoped specs that live next to their feature
+// footprint can opt in by listing themselves in `testMatch`. Today the
+// only opt-in entry outside `playwright/` is
+// `phase-9/web-read-marker/web-read-marker.spec.ts` (#944); the other
+// `phase-9/*` placeholders are still test.skip-only and explicitly NOT
+// matched here so they stay invisible until their own follow-up wires
+// them in. Add a path here when promoting a placeholder to live tests.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const e2eDir = resolve(here, "..", "..", "tests", "e2e");
 
 export default defineConfig({
-  testDir: resolve(e2eDir, "playwright"),
-  testMatch: /.*\.spec\.ts/,
+  testDir: e2eDir,
+  testMatch: ["playwright/**/*.spec.ts", "phase-9/web-read-marker/**/*.spec.ts"],
   // Server fixture + Vite startup is slow on cold caches; one-shot retries
   // keep flaky CI from spinning forever while still surfacing real bugs on
   // the second failure.
