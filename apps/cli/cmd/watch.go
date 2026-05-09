@@ -76,8 +76,18 @@ func streamOnce(ctx context.Context, env *Env, client *goclient.Client, channel 
 	if err != nil {
 		return err
 	}
+	warn := &warnThrottle{interval: unparseableFrameWarnInterval}
 	for ev := range events {
 		if ev.Message == nil {
+			// A {type:"message"} envelope whose data field failed to
+			// decode upstream surfaces here as Type set but Message
+			// nil — the parse error is swallowed by goclient.decodeEvent,
+			// so all we can flag is the shape mismatch. Other types
+			// (channel, dm, read) intentionally leave Message nil and
+			// must not warn.
+			if ev.Type == goclient.EventTypeMessage && warn.allow() {
+				_, _ = fmt.Fprintln(env.Stderr, "watch: drop unparseable frame: malformed message payload")
+			}
 			continue
 		}
 		m := ev.Message
