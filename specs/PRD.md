@@ -503,7 +503,7 @@ Phase 10 introduces the explicit `channel_members` relation (decision-log §6 + 
 
 ```
 POST /api/channels/{id}/keys                                     { "generation_id", "wraps": [<WrapEntry>, ...] }
-                                                                 → 201; 400 invalid_generation; 403 non-member; 409 race-loss; 429 wraps-needed bucket
+                                                                 → 201; 400 invalid_generation; 403 non-member; 409 race-loss; 429
 GET  /api/channels/{id}/members/wraps-needed                     → { "channel_id", "is_public", "missing": [ { "user_id", "generation_id", "membership": <MembershipBlock> } ] }
                                                                  → 200; 403 non-member; 429 wraps-needed-read bucket
 POST /api/channels/{id}/members/{user_id}/replay-wrap            { "membership": <MembershipBlock>, "root_key_wrap": <Wrap> }
