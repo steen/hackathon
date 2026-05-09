@@ -279,9 +279,11 @@ describe("Phase-10 wire types — Go-side mirror (drift guard, L10)", () => {
 
   it("ws.go::ChannelEvent declares Phase-10 kind constants and union fields", () => {
     const src = readGo("ws.go");
-    expect(src).toContain('ChannelEventKindMembersChanged  = "members_changed"');
-    expect(src).toContain('ChannelEventKindKeyReceived     = "key_received"');
-    expect(src).toContain('ChannelEventKindWrapFailed      = "wrap_failed"');
+    // gofmt collapses const-block alignment to a single padding column,
+    // so match the post-gofmt single-space form.
+    expect(src).toMatch(/ChannelEventKindMembersChanged\s+=\s+"members_changed"/);
+    expect(src).toMatch(/ChannelEventKindKeyReceived\s+=\s+"key_received"/);
+    expect(src).toMatch(/ChannelEventKindWrapFailed\s+=\s+"wrap_failed"/);
     expect(src).toContain('`json:"channel_id,omitempty"`');
     expect(src).toContain('`json:"current_generation_id,omitempty"`');
     expect(src).toContain('`json:"generation_id,omitempty"`');
