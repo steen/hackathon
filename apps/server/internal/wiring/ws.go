@@ -41,12 +41,11 @@ func registerWS(mux *http.ServeMux, deps Deps, tickets *auth.TicketStore) {
 // `general` channel id and caches it. The first call hits the DB; every
 // subsequent call returns the cached id without a DB round-trip.
 //
-// Concurrency: the first concurrent resolvers race to populate the
-// cache via sync.Once; later callers read the atomic pointer without
-// synchronization. A failed first resolution is not cached (the Once
-// resets via the err channel below), so a transient DB error retries
-// on the next upgrade rather than wedging the fallback for the whole
-// process lifetime.
+// Concurrency: double-checked locking on a sync.Mutex, with the cached
+// id stored in an atomic.Pointer so the fast path takes no lock.
+// Failures bail before the atomic.Store, so a transient DB error
+// retries on the next upgrade rather than wedging the fallback for the
+// whole process lifetime.
 func newDefaultChannelResolver(deps Deps) func(ctx context.Context) (string, error) {
 	var (
 		cached atomic.Pointer[string]
