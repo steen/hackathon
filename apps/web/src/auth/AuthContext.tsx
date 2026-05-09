@@ -9,8 +9,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { User } from "@hackathon/api-client";
+import { b64, deriveIdentity, ready as sodiumReady, type User } from "@hackathon/api-client";
 import { getClient, readToken, writeToken } from "../api.js";
+import { writeIdentitySeed, clearIdentitySeed } from "../lib/identityStore.js";
 import { bannerMessage } from "../lib/userFacingError.js";
 
 interface AuthState {
@@ -20,9 +21,27 @@ interface AuthState {
   error: string | null;
 }
 
+// WrongPassphraseError is the typed signal Login.tsx checks for so the
+// "wrong identity passphrase" branch surfaces a specific message rather
+// than the generic 401 fallback. Decision-log §4 + L4: wrong-passphrase
+// detection happens client-side by comparing the locally-derived
+// sign_pubkey against the server-stored one before any sensitive
+// operation runs.
+export class WrongPassphraseError extends Error {
+  constructor(message = "wrong identity passphrase") {
+    super(message);
+    this.name = "WrongPassphraseError";
+  }
+}
+
 interface AuthContextValue extends AuthState {
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string, inviteCode: string) => Promise<void>;
+  login: (username: string, password: string, identityPassphrase?: string) => Promise<void>;
+  register: (
+    username: string,
+    password: string,
+    inviteCode: string,
+    identityPassphrase?: string,
+  ) => Promise<void>;
   logout: () => Promise<void>;
   dismissError: () => void;
 }
@@ -65,17 +84,52 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
     })();
   }, [state.token, state.user]);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const out = await getClient().login(username, password);
-    writeToken(out.token);
-    setState({ token: out.token, user: out.user, loading: false, error: null });
-  }, []);
+  const login = useCallback(
+    async (username: string, password: string, identityPassphrase?: string) => {
+      const out = await getClient().login(username, password);
+      if (identityPassphrase !== undefined && identityPassphrase.length > 0) {
+        await sodiumReady();
+        const id = await deriveIdentity(identityPassphrase, username);
+        const localSignPub = b64(id.signPub);
+        const remoteSignPub = out.user.sign_pubkey ?? "";
+        if (remoteSignPub !== "" && remoteSignPub !== localSignPub) {
+          // Server-stored sign_pubkey is the canary (decision-log §4 +
+          // L4). Refuse to keep the freshly-issued token when the
+          // derived identity does not match — the user typed the wrong
+          // identity passphrase.
+          await getClient()
+            .logout()
+            .catch(() => undefined);
+          writeToken(null);
+          throw new WrongPassphraseError();
+        }
+        await writeIdentitySeed(out.user.id, id.rootSeed);
+      }
+      writeToken(out.token);
+      setState({ token: out.token, user: out.user, loading: false, error: null });
+    },
+    [],
+  );
 
-  const register = useCallback(async (username: string, password: string, inviteCode: string) => {
-    const out = await getClient().register(username, password, inviteCode);
-    writeToken(out.token);
-    setState({ token: out.token, user: out.user, loading: false, error: null });
-  }, []);
+  const register = useCallback(
+    async (username: string, password: string, inviteCode: string, identityPassphrase?: string) => {
+      let identity: { boxPubkey: string; signPubkey: string } | undefined;
+      let rootSeed: Uint8Array | undefined;
+      if (identityPassphrase !== undefined && identityPassphrase.length > 0) {
+        await sodiumReady();
+        const id = await deriveIdentity(identityPassphrase, username);
+        identity = { boxPubkey: b64(id.boxPub), signPubkey: b64(id.signPub) };
+        rootSeed = id.rootSeed;
+      }
+      const out = await getClient().register(username, password, inviteCode, identity);
+      if (rootSeed) {
+        await writeIdentitySeed(out.user.id, rootSeed);
+      }
+      writeToken(out.token);
+      setState({ token: out.token, user: out.user, loading: false, error: null });
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     let serverError: string | null = null;
@@ -85,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }): React.JSX.E
       serverError = bannerMessage("Signed out locally, but the server did not acknowledge", err);
     }
     writeToken(null);
+    await clearIdentitySeed().catch(() => undefined);
     setState({ token: null, user: null, loading: false, error: serverError });
   }, []);
 

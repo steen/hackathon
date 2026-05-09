@@ -46,8 +46,13 @@ export class Client {
     return out;
   }
 
-  async register(username: string, password: string, inviteCode: string): Promise<AuthResponse> {
-    const out = await this.http.register(username, password, inviteCode);
+  async register(
+    username: string,
+    password: string,
+    inviteCode: string,
+    identity?: { boxPubkey: string; signPubkey: string },
+  ): Promise<AuthResponse> {
+    const out = await this.http.register(username, password, inviteCode, identity);
     this.setTokenFn(out.token);
     return out;
   }

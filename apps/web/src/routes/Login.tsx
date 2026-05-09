@@ -1,6 +1,6 @@
 import type * as React from "react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { useAuth } from "../auth/AuthContext.js";
+import { useAuth, WrongPassphraseError } from "../auth/AuthContext.js";
 import { formAuthMessage } from "../lib/userFacingError.js";
 
 export function Login({
@@ -11,6 +11,7 @@ export function Login({
   const { login } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [identityPassphrase, setIdentityPassphrase] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const usernameRef = useRef<HTMLInputElement | null>(null);
@@ -24,9 +25,13 @@ export function Login({
     setBusy(true);
     setError(null);
     try {
-      await login(username, password);
+      await login(username, password, identityPassphrase || undefined);
     } catch (err) {
-      setError(formAuthMessage("Login failed", err));
+      if (err instanceof WrongPassphraseError) {
+        setError("Wrong identity passphrase. Please try again.");
+      } else {
+        setError(formAuthMessage("Login failed", err));
+      }
     } finally {
       setBusy(false);
     }
@@ -64,6 +69,18 @@ export function Login({
             }}
             autoComplete="current-password"
             required
+          />
+        </label>
+        <label>
+          <span>Identity passphrase</span>
+          <input
+            name="identity-passphrase"
+            type="password"
+            value={identityPassphrase}
+            onChange={(e) => {
+              setIdentityPassphrase(e.target.value);
+            }}
+            autoComplete="current-password"
           />
         </label>
         {error !== null ? (

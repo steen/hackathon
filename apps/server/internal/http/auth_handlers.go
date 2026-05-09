@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -18,6 +19,11 @@ import (
 	"hackathon/apps/server/internal/ratelimit"
 )
 
+// pubkeyByteLen is the raw byte length of a Phase-10 identity pubkey
+// (X25519 box_pubkey or Ed25519 sign_pubkey). Both are 32 bytes; the
+// wire form is base64. Decision-log §4.
+const pubkeyByteLen = 32
+
 // auth_events kinds — kept here as constants so test code can assert
 // against the same strings the handlers write.
 const (
@@ -31,8 +37,16 @@ const (
 
 // usernameRe is the validation regex for new usernames. PRD §9 does
 // not pin a specific regex; we pick a friend-group-safe set: 3-32
-// chars, ASCII letters + digits + dash + underscore.
-var usernameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{3,32}$`)
+// chars, lowercase ASCII + digits + dash + underscore.
+//
+// L37 (`lt -p e2e-encryption 3`): the lowercase-only restriction makes
+// the Argon2id salt — SHA-256("snakd-identity:v1:" + username)[:16] —
+// a function of byte-identical input on both sides of the wire, so
+// `Bob` and `bob` cannot derive different identities for the same
+// account. The case-insensitive UNIQUE INDEX in 0006_encryption.sql
+// closes the same loop at the storage layer for any pre-existing
+// mixed-case rows.
+var usernameRe = regexp.MustCompile(`^[a-z0-9_-]{3,32}$`)
 
 // AuthDeps is everything the auth handlers need wired in. Held as a
 // struct so AuthHandlers stays a thin constructor and main can build
@@ -100,9 +114,21 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		Username   string `json:"username"`
 		Password   string `json:"password"`
 		InviteCode string `json:"invite_code"`
+		// Phase-10 identity pubkeys (decision-log §4 + L1). base64 of
+		// raw 32 bytes each. Empty values are accepted in this PR so the
+		// server unit tests that pre-date Phase 10 still POST a body the
+		// dec.DisallowUnknownFields() decoder accepts; #983's wave-6
+		// cutover is what hard-requires the columns to be NOT NULL.
+		BoxPubkey  string `json:"box_pubkey"`
+		SignPubkey string `json:"sign_pubkey"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
+		return
+	}
+	boxPub, signPub, perr := decodePubkeys(req.BoxPubkey, req.SignPubkey)
+	if perr != nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, perr.Error())
 		return
 	}
 	// Capture the attempted username up-front so every register_failed
@@ -127,7 +153,7 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if !usernameRe.MatchString(username) {
 		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
-			"username must be 3-32 chars: letters, digits, dash, underscore")
+			"username must be 3-32 chars: lowercase letters, digits, dash, underscore")
 		return
 	}
 	if err := auth.EnforcePolicy(req.Password); err != nil {
@@ -151,7 +177,7 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	id := ids.NewULID()
-	if err := h.store.CreateUser(r.Context(), id, username, hash, h.deps.Now()); err != nil {
+	if err := h.store.CreateUser(r.Context(), id, username, hash, boxPub, signPub, h.deps.Now()); err != nil {
 		h.logEvent(r.Context(), "", attempted, AuthEventRegisterFailed, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
 		if errors.Is(err, ErrUsernameTaken) {
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "username already taken")
@@ -168,10 +194,7 @@ func (h *AuthHandlers) Register(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	}
 	WriteOK(w, stdhttp.StatusCreated, map[string]interface{}{
 		"token": tok,
-		"user": map[string]string{
-			"id":       id,
-			"username": username,
-		},
+		"user":  userPayload(id, username, req.BoxPubkey, req.SignPubkey),
 	})
 }
 
@@ -235,15 +258,15 @@ func (h *AuthHandlers) Login(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	h.logEvent(r.Context(), user.ID, username, AuthEventLoginSuccess, clientIP(r, h.deps.TrustedProxy), r.UserAgent())
-	if u, ok := h.lookupUsername(r, user.ID); ok {
-		username = u
+	var boxPub, signPub string
+	if u, ok := h.lookupUserDetails(r, user.ID); ok {
+		username = u.username
+		boxPub = u.boxPubkey
+		signPub = u.signPubkey
 	}
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
 		"token": tok,
-		"user": map[string]string{
-			"id":       user.ID,
-			"username": username,
-		},
+		"user":  userPayload(user.ID, username, boxPub, signPub),
 	})
 }
 
@@ -260,11 +283,14 @@ func (h *AuthHandlers) Me(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	uname, _ := auth.UsernameFromContext(r.Context())
+	var boxPub, signPub string
+	if u, ok := h.lookupUserDetails(r, uid); ok {
+		uname = u.username
+		boxPub = u.boxPubkey
+		signPub = u.signPubkey
+	}
 	WriteOK(w, stdhttp.StatusOK, map[string]interface{}{
-		"user": map[string]string{
-			"id":       uid,
-			"username": uname,
-		},
+		"user": userPayload(uid, uname, boxPub, signPub),
 	})
 }
 
@@ -325,12 +351,81 @@ func (h *AuthHandlers) logEvent(ctx context.Context, userID, username, kind, ip,
 	}
 }
 
-func (h *AuthHandlers) lookupUsername(r *stdhttp.Request, id string) (string, bool) {
-	u, err := h.store.LookupUserByID(r.Context(), id)
+// userDetails carries the post-Phase-10 fields the auth handlers need to
+// echo back on the success path. Pubkeys are base64-encoded ready for
+// the wire; empty when the row's BLOB column is still NULL.
+type userDetails struct {
+	username   string
+	boxPubkey  string
+	signPubkey string
+}
+
+func (h *AuthHandlers) lookupUserDetails(r *stdhttp.Request, id string) (userDetails, bool) {
+	u, err := h.store.LookupUserDetails(r.Context(), id)
 	if err != nil || u == nil {
-		return "", false
+		return userDetails{}, false
 	}
-	return u.Username, true
+	return userDetails{
+		username:   u.username,
+		boxPubkey:  u.boxPubkey,
+		signPubkey: u.signPubkey,
+	}, true
+}
+
+// userPayload builds the {id, username, box_pubkey?, sign_pubkey?} map
+// the auth endpoints return. Empty pubkey strings are dropped so the
+// JSON shape matches the omitempty TS+Go wire contract — a User row that
+// has not yet been re-registered post-Phase-10 (so boxPubkey/signPubkey
+// are NULL in the DB) returns the bare {id, username} the pre-Phase-10
+// clients tolerate.
+func userPayload(id, username, boxPub, signPub string) map[string]interface{} {
+	out := map[string]interface{}{
+		"id":       id,
+		"username": username,
+	}
+	if boxPub != "" {
+		out["box_pubkey"] = boxPub
+	}
+	if signPub != "" {
+		out["sign_pubkey"] = signPub
+	}
+	return out
+}
+
+// decodePubkeys validates that the wire-form base64 pubkeys decode to
+// pubkeyByteLen raw bytes when present. Empty strings are accepted —
+// the Phase-10-rollout PR (this one) does not yet hard-require them so
+// pre-existing tests keep passing; #983 (wave 6) tightens this to a
+// non-empty check once every consumer of legacy users is migrated.
+//
+// Returns the decoded raw bytes (or nil for empty input) and a single
+// joined error suitable for returning to the client when validation
+// fails. The error message names the offending field so the client can
+// branch.
+func decodePubkeys(boxB64, signB64 string) ([]byte, []byte, error) {
+	box, err := decodeOnePubkey("box_pubkey", boxB64)
+	if err != nil {
+		return nil, nil, err
+	}
+	sign, err := decodeOnePubkey("sign_pubkey", signB64)
+	if err != nil {
+		return nil, nil, err
+	}
+	return box, sign, nil
+}
+
+func decodeOnePubkey(field, value string) ([]byte, error) {
+	if value == "" {
+		return nil, nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return nil, errors.New(field + " must be base64-encoded")
+	}
+	if len(raw) != pubkeyByteLen {
+		return nil, errors.New(field + " must decode to 32 bytes")
+	}
+	return raw, nil
 }
 
 // decodeJSON enforces strict decoding: unknown fields are rejected so

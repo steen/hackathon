@@ -44,6 +44,9 @@ importers:
       '@hackathon/chat-ui':
         specifier: workspace:*
         version: link:../../packages/chat-ui
+      libsodium-wrappers-sumo:
+        specifier: ^0.8.4
+        version: 0.8.4
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -63,6 +66,9 @@ importers:
       '@testing-library/user-event':
         specifier: ^14.5.2
         version: 14.6.1(@testing-library/dom@10.4.1)
+      '@types/libsodium-wrappers-sumo':
+        specifier: ^0.8.2
+        version: 0.8.2
       '@types/react':
         specifier: ^18.3.12
         version: 18.3.28
@@ -86,7 +92,14 @@ importers:
         version: 2.1.9(@types/node@25.6.0)(jsdom@25.0.1)
 
   packages/api-client:
+    dependencies:
+      libsodium-wrappers-sumo:
+        specifier: ^0.8.4
+        version: 0.8.4
     devDependencies:
+      '@types/libsodium-wrappers-sumo':
+        specifier: ^0.8.2
+        version: 0.8.2
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -697,6 +710,10 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
+  '@types/libsodium-wrappers-sumo@0.8.2':
+    resolution: {integrity: sha512-uFOBpg/r21hExVlh2ty8YpDfSR+Yy3Jn8XS4+SSjitbhTxdYq+pBz/49XRxyUFe8SzqujHf/Wu0/O4d+FUtNfQ==}
+    deprecated: This is a stub types definition. libsodium-wrappers-sumo provides its own type definitions, so you do not need this installed.
+
   '@types/node@25.6.0':
     resolution: {integrity: sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ==}
 
@@ -1205,6 +1222,12 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libsodium-sumo@0.8.4:
+    resolution: {integrity: sha512-TMtHShQfVVsaxDygyapvUC3o7YsPgXa/hRWeIgzyFz6w5k/1hirGptCxp1U7XwW3rCskaTTYKgV10v86UiGgNw==}
+
+  libsodium-wrappers-sumo@0.8.4:
+    resolution: {integrity: sha512-ql7hcgulKZ3ekfa2DGAogcCKsWU0diA/0nArz1CFzh93WQdb46/Kj18ka/Hifq6uA3Ush34Pc6vU/6HXeRwUkg==}
 
   locate-path@6.0.0:
     resolution: {integrity: sha512-iPZK6eYjbxRu3uB4/WZ3EsEIMJFMqAoopl3R+zuq0UjcAm/MO6KCweDgPfP3elTztoKP3KtnVHxTn2NHBSDVUw==}
@@ -2039,6 +2062,10 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
+  '@types/libsodium-wrappers-sumo@0.8.2':
+    dependencies:
+      libsodium-wrappers-sumo: 0.8.4
+
   '@types/node@25.6.0':
     dependencies:
       undici-types: 7.19.2
@@ -2606,6 +2633,12 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libsodium-sumo@0.8.4: {}
+
+  libsodium-wrappers-sumo@0.8.4:
+    dependencies:
+      libsodium-sumo: 0.8.4
 
   locate-path@6.0.0:
     dependencies:

@@ -20,7 +20,11 @@
     "test": "vitest run",
     "lint": "eslint ."
   },
+  "dependencies": {
+    "libsodium-wrappers-sumo": "^0.8.4"
+  },
   "devDependencies": {
+    "@types/libsodium-wrappers-sumo": "^0.8.2",
     "typescript": "^6.0.3",
     "vitest": "^2.1.9"
   }

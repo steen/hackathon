@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	stdhttp "net/http"
 	"sort"
 )
@@ -10,9 +11,16 @@ import (
 // UserSummary is the {id, username} pair returned by GET /api/users.
 // Same shape as PresenceUser so the frontend can merge the two
 // directories with a single key.
+//
+// BoxPubkey/SignPubkey are Phase-10 identity pubkeys (decision-log L2).
+// base64 of raw 32 bytes each; omitempty so a row whose columns are
+// still NULL renders {id, username} for clients that don't yet read
+// pubkeys.
 type UserSummary struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	BoxPubkey  string `json:"box_pubkey,omitempty"`
+	SignPubkey string `json:"sign_pubkey,omitempty"`
 }
 
 // UsersDeps wires the users handler. Reads user rows directly from the
@@ -63,7 +71,7 @@ func (h *UsersHandlers) List(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 // for the session, so a full scan is acceptable; if the directory
 // grows past hundreds we'd switch to paged or filtered queries.
 func listAllUsers(ctx context.Context, db *sql.DB) ([]UserSummary, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, username FROM users`)
+	rows, err := db.QueryContext(ctx, `SELECT id, username, box_pubkey, sign_pubkey FROM users`)
 	if err != nil {
 		return nil, err
 	}
@@ -71,8 +79,15 @@ func listAllUsers(ctx context.Context, db *sql.DB) ([]UserSummary, error) {
 	out := make([]UserSummary, 0, 16)
 	for rows.Next() {
 		var u UserSummary
-		if err := rows.Scan(&u.ID, &u.Username); err != nil {
+		var box, sign []byte
+		if err := rows.Scan(&u.ID, &u.Username, &box, &sign); err != nil {
 			return nil, err
+		}
+		if len(box) > 0 {
+			u.BoxPubkey = base64.StdEncoding.EncodeToString(box)
+		}
+		if len(sign) > 0 {
+			u.SignPubkey = base64.StdEncoding.EncodeToString(sign)
 		}
 		out = append(out, u)
 	}

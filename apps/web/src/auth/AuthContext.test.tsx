@@ -322,7 +322,7 @@ describe("test_web_auth_successful_register_clears_prior_error", () => {
     expect(screen.getByTestId("error")).toHaveTextContent("none");
     expect(screen.getByTestId("token")).toHaveTextContent("fresh-jwt-token-placeholder");
     expect(screen.getByTestId("user")).toHaveTextContent("bob");
-    expect(registerMock).toHaveBeenCalledWith("alice", "pw", "invite-code-placeholder");
+    expect(registerMock).toHaveBeenCalledWith("alice", "pw", "invite-code-placeholder", undefined);
     expect(writeTokenMock).toHaveBeenLastCalledWith("fresh-jwt-token-placeholder");
   });
 });

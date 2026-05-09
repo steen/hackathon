@@ -127,7 +127,8 @@ func Save(override string, f *File) error {
 	return nil
 }
 
-// Clear removes the config file. A missing file is not an error.
+// Clear removes the config file plus the Phase-10 identity seed
+// (decision-log L11). Either missing file is not an error.
 func Clear(override string) error {
 	p, err := Path(override)
 	if err != nil {
@@ -136,5 +137,82 @@ func Clear(override string) error {
 	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", p, err)
 	}
+	seedPath, err := SeedPath(override)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(seedPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove %s: %w", seedPath, err)
+	}
 	return nil
+}
+
+// SeedPath returns the on-disk location of the identity seed file under
+// Dir(override). Decision-log §4 + L11 (`~/.config/chatd/identity.seed`).
+func SeedPath(override string) (string, error) {
+	d, err := Dir(override)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(d, "identity.seed"), nil
+}
+
+// WriteIdentitySeed atomically writes the 32-byte derived root seed to
+// SeedPath with 0600 permissions. The temp-file + rename keeps the file
+// from existing in a half-written state if the process is killed mid-
+// write — same pattern as Save's config write.
+func WriteIdentitySeed(override string, seed []byte) error {
+	dir, err := Dir(override)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	final := filepath.Join(dir, "identity.seed")
+	tmp, err := os.CreateTemp(dir, "identity-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if _, err := tmp.Write(seed); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, final); err != nil {
+		cleanup()
+		return fmt.Errorf("rename %s -> %s: %w", tmpPath, final, err)
+	}
+	return nil
+}
+
+// ReadIdentitySeed returns the 32-byte derived root seed at SeedPath, or
+// (nil, nil) when the file is absent (treated as "not yet logged in
+// post-Phase-10"). Permission/parse failures surface as-is so the
+// caller can fail loudly on a corrupted seed rather than silently
+// re-prompting.
+func ReadIdentitySeed(override string) ([]byte, error) {
+	p, err := SeedPath(override)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(p) //nolint:gosec // path is derived from XDG/HOME; user-controlled scope is intentional
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", p, err)
+	}
+	return data, nil
 }
