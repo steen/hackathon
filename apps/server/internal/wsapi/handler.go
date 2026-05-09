@@ -204,15 +204,16 @@ func (c *connSubscriber) signalCloseFlushed() {
 // any patterns in cfg.OriginPatterns. A mismatch yields HTTP 403.
 //
 // Each authenticated connection subscribes to TWO Hub topics for its
-// lifetime: the channel topic (upper-folded ULID supplied via
-// ?channel=<id>; the L15 default-channel fallback in
-// specs/plans/phase-9/ws-routing.md resolves an absent ?channel= to
-// the id returned by cfg.DefaultChannelResolver when set, or rejects
-// with HTTP 400 when neither resolver nor lookup is wired by tests
-// that need an absent param to fail; the no-lookup-and-no-resolver
-// test path falls back to testDefaultChannel) AND the inbox topic
-// `user:<viewer>` derived from the redeemed ws-ticket. Decision log
-// §10 / L15.
+// lifetime: the channel topic and the inbox topic `user:<viewer>`
+// derived from the redeemed ws-ticket.
+//
+// The channel topic is an upper-folded ULID supplied via
+// ?channel=<id>. The L15 default-channel fallback resolves an absent
+// ?channel= via cfg.DefaultChannelResolver when wired (see
+// specs/plans/phase-9/ws-routing.md). With no resolver but a lookup
+// wired, the handler rejects an absent ?channel= with HTTP 400; the
+// no-lookup-and-no-resolver test path falls back to testDefaultChannel.
+// Decision log §10 / L15.
 func Handler(h *hub.Hub, ts *auth.TicketStore, cfg Config) http.HandlerFunc {
 	acceptOpts := &websocket.AcceptOptions{
 		OriginPatterns: cfg.OriginPatterns,
