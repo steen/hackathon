@@ -269,12 +269,16 @@ func dmStreamOnce(ctx context.Context, env *Env, client *goclient.Client, wantCo
 	if err != nil {
 		return err
 	}
+	warn := &warnThrottle{interval: unparseableFrameWarnInterval}
 	for ev := range events {
 		if ev.Type != goclient.EventTypeDM {
 			continue
 		}
 		var frame dmFrame
 		if err := json.Unmarshal(ev.Raw, &frame); err != nil {
+			if warn.allow() {
+				_, _ = fmt.Fprintf(env.Stderr, "dm watch: drop unparseable frame: %v\n", err)
+			}
 			continue
 		}
 		if wantConvID != "" && frame.Data.DMMessage.ConversationID.String() != wantConvID {
