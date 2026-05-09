@@ -322,6 +322,8 @@ func resolvePeer(ctx context.Context, _ *Env, token string, client *goclient.Cli
 // GET /api/users. Local mirror because the server type lives under an
 // internal/ package; drift would surface as a JSON-decode failure on
 // first call. The server response is `{users:[{id,username},...]}`.
+//
+// sync with apps/server/internal/http/users_handlers.go::UserSummary
 type userSummary struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
