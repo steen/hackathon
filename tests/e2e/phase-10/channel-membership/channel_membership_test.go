@@ -98,17 +98,17 @@ type fixtureUser struct {
 	SignSeed []byte
 }
 
-func registerFixture(t *testing.T, srv *testsupport.Server, prefix string) fixtureUser {
+func registerFixture(t *testing.T, srv *testsupport.Server, prefix string, signSeedByte, boxSeedByte byte) fixtureUser {
 	t.Helper()
 	name := prefix + "-" + testsupport.RandomSecret(t, 4)
 	pw := "test-passphrase-" + testsupport.RandomSecret(t, 8)
-	signSeed := bytesRepeat(0xCC, 32)
+	signSeed := bytesRepeat(signSeedByte, 32)
 	signPriv := ed25519.NewKeyFromSeed(signSeed)
 	signPub, ok := signPriv.Public().(ed25519.PublicKey)
 	if !ok {
 		t.Fatal("ed25519: NewKeyFromSeed did not return a PublicKey")
 	}
-	boxSeed := bytesRepeat(0xAB, 32)
+	boxSeed := bytesRepeat(boxSeedByte, 32)
 	boxPub, boxPriv := boxSeedKeypair(boxSeed)
 	uid, tok := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, name, pw, testsupport.RegisterOptions{
 		ExtraFields: map[string]any{
@@ -294,7 +294,7 @@ func getJSON(t *testing.T, httpURL, path, bearer string) (int, testsupport.Envel
 // GET /api/channels.
 func TestRegistrationAutoJoinsGeneral(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
 	ids := listChannelIDs(t, srv.HTTPURL, alice.Token)
 	if len(ids) != 1 {
 		t.Fatalf("listing on fresh registration: got %d channels want 1 (#general); ids=%v", len(ids), ids)
@@ -308,8 +308,8 @@ func TestRegistrationAutoJoinsGeneral(t *testing.T) {
 // inserts (channel_members, channel_keys) per L7.
 func TestPrivateChannelInviteFlow(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 
 	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "secret-"+testsupport.RandomSecret(t, 4))
 
@@ -361,8 +361,8 @@ func TestPrivateChannelInviteFlow(t *testing.T) {
 // inserted (L7 — the atomic transaction rolls back).
 func TestPrivateInviteRejectsBadSignature(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 
 	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "badsig-"+testsupport.RandomSecret(t, 4))
 
@@ -395,8 +395,8 @@ func TestPrivateInviteRejectsBadSignature(t *testing.T) {
 // sender_pubkey_mismatch.
 func TestPrivateInviteRejectsSenderPubkeyMismatch(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 
 	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "l30-"+testsupport.RandomSecret(t, 4))
 
@@ -431,8 +431,8 @@ func TestPrivateInviteRejectsSenderPubkeyMismatch(t *testing.T) {
 // byte length returns 400 wrap_size_invalid.
 func TestPrivateInviteRejectsBadWrapSize(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 
 	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "l39-"+testsupport.RandomSecret(t, 4))
 
@@ -473,8 +473,8 @@ func TestPrivateInviteRejectsBadWrapSize(t *testing.T) {
 // auto-fill path so no membership block is needed.
 func TestKickRemovesMember(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 
 	chID := createPublicChannel(t, srv.HTTPURL, alice.Token, "kick-"+testsupport.RandomSecret(t, 4))
 
@@ -498,8 +498,8 @@ func TestKickRemovesMember(t *testing.T) {
 // TestSelfLeaveSucceeds — a member can leave a non-#general channel.
 func TestSelfLeaveSucceeds(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 	chID := createPublicChannel(t, srv.HTTPURL, alice.Token, "leave-"+testsupport.RandomSecret(t, 4))
 	if status, _, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token,
 		map[string]any{"user_id": bob.UserID}); status != http.StatusCreated {
@@ -514,7 +514,7 @@ func TestSelfLeaveSucceeds(t *testing.T) {
 // TestSelfLeaveOnGeneralIs403 — L8: #general membership is immutable.
 func TestSelfLeaveOnGeneralIs403(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
 	ids := listChannelIDs(t, srv.HTTPURL, alice.Token)
 	if len(ids) != 1 {
 		t.Fatalf("expected #general only on fresh listing; got %v", ids)
@@ -529,8 +529,8 @@ func TestSelfLeaveOnGeneralIs403(t *testing.T) {
 // TestKickOnGeneralIs403 — L8: also rejects kick attempts on #general.
 func TestKickOnGeneralIs403(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 	ids := listChannelIDs(t, srv.HTTPURL, alice.Token)
 	generalID := ids[0]
 	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+generalID+"/members/"+bob.UserID, alice.Token)
@@ -542,8 +542,8 @@ func TestKickOnGeneralIs403(t *testing.T) {
 // TestListMembersRequiresMembership — non-members get 403.
 func TestListMembersRequiresMembership(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "private-"+testsupport.RandomSecret(t, 4))
 
 	status, _, _ := getJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", bob.Token)
@@ -572,8 +572,8 @@ func TestListMembersRequiresMembership(t *testing.T) {
 // flips — clients must supply both blocks).
 func TestPrivateChannelInviteWithoutWrapRejected(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	alice := registerFixture(t, srv, "alice")
-	bob := registerFixture(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
+	bob := registerFixture(t, srv, "bob", 0xDD, 0xBC)
 	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "nowrap-"+testsupport.RandomSecret(t, 4))
 	status, env, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token,
 		map[string]any{"user_id": bob.UserID})
