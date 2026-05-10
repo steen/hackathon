@@ -393,13 +393,17 @@ POST /api/auth/ws-ticket  (Bearer)
 ### Channels
 
 ```
-GET   /api/channels                      → { "channels": [ { "id", "name", "is_public", "created_at" } ] }
-POST  /api/channels        { "name", "is_public"?, "membership", "root_key_wraps" }
-                                         → { "id", "name", "is_public", "created_at" }   # 200; 400 invalid name; 409 duplicate; 429 per-user rate limit
-PATCH /api/channels/{id}   { "name" }    → { "id", "name", "is_public", "created_at" }   # 200; 400 invalid name; 403 on the seeded `#general` channel; 409 duplicate; 429 per-user rate limit
+GET    /api/channels                              → { "channels": [ { "id", "name", "is_public", "created_at" } ] }
+POST   /api/channels                { "name", "is_public"? }   # full §10 form below adds "membership" + "root_key_wraps" once #984 lands
+                                                  → { "id", "name", "is_public", "created_at" }   # 200; 400 invalid name; 409 duplicate; 429 per-user rate limit
+PATCH  /api/channels/{id}           { "name" }    → { "id", "name", "is_public", "created_at" }   # 200; 400 invalid name; 403 on the seeded `#general` channel; 409 duplicate; 429 per-user rate limit
+GET    /api/channels/{id}/members                 → { "members": [ <ChannelMember> ] }            # 403 to non-members
+POST   /api/channels/{id}/members   { "user_id", "membership"? }   # membership block byte-shape required for is_public=FALSE; #984 wires the wrap row
+                                                  → <ChannelMember>                                # 201; 400 missing/malformed membership on private channel; 403 caller not a member; 404 channel/invitee unknown; 409 already a member; 429 per-user rate limit
+DELETE /api/channels/{id}/members/{user_id}        → 204                                           # caller must be a member or the user themselves; 403 on the seeded `#general` channel (L8); 404 if the row does not exist
 ```
 
-`POST` and `PATCH` share a per-user token-bucket rate limit (`CHAT_CHANNEL_WRITE_BURST` / `CHAT_CHANNEL_WRITE_REFILL`, defaults `10` / `1m`). The seeded `#general` channel cannot be renamed. Name validation reuses the same shape rules as create (lowercase, hyphenated, length cap; see `feature-channels-and-messages.md`). Phase 10: `GET /api/channels` filters to channels the viewer is a member of (decision-log §6 + L25); `is_public` defaults to `false` on `POST` (Phase 10 §9); `is_public` is **immutable after creation** (L15 — no `PATCH` for the flag). `POST /api/channels` carries a self-signed `MembershipBlock` and a single wrap-to-self in `root_key_wraps` per `specs/plans/phase-10/membership.md` and `specs/plans/phase-10/encryption.md`.
+`POST /api/channels` and `PATCH /api/channels/{id}` share a per-user token-bucket rate limit (`CHAT_CHANNEL_WRITE_BURST` / `CHAT_CHANNEL_WRITE_REFILL`, defaults `10` / `1m`); `POST /api/channels/{id}/members` and `DELETE /api/channels/{id}/members/{user_id}` join the same bucket so a flood of invites contends with channel renames per PRD §9. The seeded `#general` channel cannot be renamed. Name validation reuses the same shape rules as create (lowercase, hyphenated, length cap; see `feature-channels-and-messages.md`). Phase 10: `GET /api/channels` filters to channels the viewer is a member of (decision-log §6 + L25); `is_public` defaults to `false` on `POST` (Phase 10 §9); `is_public` is **immutable after creation** (L15 — no `PATCH` for the flag). The seeded `#general` channel is `is_public = TRUE` and every newly registered user is auto-added to every `is_public = TRUE` channel inside the same transaction as the `users` insert (decision-log §9 + R1.2 carve-out — NULL `inviter_signature` is accepted only for public-channel server-auto-add per L33). The full `POST /api/channels` form with `MembershipBlock` and a single wrap-to-self in `root_key_wraps` ships with the wrap loop in #984 per `specs/plans/phase-10/membership.md` and `specs/plans/phase-10/encryption.md`.
 
 ### Messages
 

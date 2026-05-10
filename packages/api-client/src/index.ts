@@ -32,6 +32,7 @@ export type {
   ChannelEvent,
   ChannelEventData,
   ChannelEventKind,
+  ChannelMember,
   Conversation,
   DMEvent,
   DMMessage,

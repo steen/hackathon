@@ -49,7 +49,7 @@ describe("ChannelCreateModal", () => {
     await u.type(screen.getByLabelText(/channel name/i), "books");
     await u.click(screen.getByRole("button", { name: /^create$/i }));
     await waitFor(() => {
-      expect(onCreate).toHaveBeenCalledWith("books");
+      expect(onCreate).toHaveBeenCalledWith("books", { isPublic: false });
     });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onCreated).toHaveBeenCalledWith(created);

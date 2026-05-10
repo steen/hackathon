@@ -2,8 +2,10 @@ import { ApiError } from "./errors.js";
 import type {
   AuthResponse,
   Channel,
+  ChannelMember,
   Envelope,
   ListMessagesOptions,
+  MembershipBlock,
   Message,
   User,
   WSTicket,
@@ -75,8 +77,36 @@ export class HttpClient {
     return data.channels;
   }
 
-  async createChannel(name: string): Promise<Channel> {
-    return this.request<Channel>("POST", "/api/channels", { name });
+  async createChannel(name: string, options: { isPublic?: boolean } = {}): Promise<Channel> {
+    const body: { name: string; is_public?: boolean } = { name };
+    if (options.isPublic !== undefined) {
+      body.is_public = options.isPublic;
+    }
+    return this.request<Channel>("POST", "/api/channels", body);
+  }
+
+  async listChannelMembers(channelId: string): Promise<ChannelMember[]> {
+    const path = `/api/channels/${encodeURIComponent(channelId)}/members`;
+    const data = await this.request<{ members: ChannelMember[] }>("GET", path);
+    return data.members;
+  }
+
+  async inviteChannelMember(
+    channelId: string,
+    userId: string,
+    membership?: MembershipBlock,
+  ): Promise<ChannelMember> {
+    const path = `/api/channels/${encodeURIComponent(channelId)}/members`;
+    const body: { user_id: string; membership?: MembershipBlock } = { user_id: userId };
+    if (membership) {
+      body.membership = membership;
+    }
+    return this.request<ChannelMember>("POST", path, body);
+  }
+
+  async kickChannelMember(channelId: string, userId: string): Promise<void> {
+    const path = `/api/channels/${encodeURIComponent(channelId)}/members/${encodeURIComponent(userId)}`;
+    await this.request<unknown>("DELETE", path);
   }
 
   async renameChannel(id: string, name: string): Promise<Channel> {

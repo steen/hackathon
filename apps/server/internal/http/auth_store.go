@@ -31,14 +31,32 @@ var ErrUsernameTaken = errors.New("auth_store: username already taken")
 // boxPubkey and signPubkey are the raw 32-byte Phase-10 identity
 // pubkeys; pass nil/empty when the caller has not supplied them so the
 // columns stay NULL (pre-cutover behaviour, decision-log L26).
+//
+// Phase-10 §9 + R1.2: the user is auto-added to every existing
+// is_public = TRUE channel inside the same transaction so a fresh
+// registration cannot observe a window where the row exists but
+// #general membership has not landed. The auto-add row uses
+// self-invite semantics (inviter_user_id = user_id, inviter_signature
+// NULL — accepted by L33's public-channel carve-out). pubkey columns
+// pin the new user's keys; on a NULL-pubkey legacy registration
+// (decision-log L26) those columns end up empty and the wrap layer in
+// #984 will skip the user until they re-register with a Phase-10
+// identity. The downstream lazy-wrap-on-online flow (#984) decides
+// whether to wrap based on the presence of pubkeys, not on the
+// inviter_signature.
 func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash string, boxPubkey, signPubkey []byte, now time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	created := now.UTC()
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO users(id, username, password_hash, token_version, created_at, box_pubkey, sign_pubkey)
 		 VALUES (?, ?, ?, 0, ?, ?, ?)`,
-		id, username, passwordHash, now.UTC(),
+		id, username, passwordHash, created,
 		nullableBytes(boxPubkey), nullableBytes(signPubkey),
-	)
-	if err != nil {
+	); err != nil {
 		// modernc/sqlite returns a generic error; we sniff the message
 		// for "UNIQUE constraint failed: users.username" rather than
 		// adding a driver-specific dependency on its error sentinels.
@@ -50,7 +68,58 @@ func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash s
 		}
 		return err
 	}
-	return nil
+	// Auto-join every is_public = TRUE channel in the same tx.
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM channels WHERE is_public = TRUE`)
+	if err != nil {
+		return err
+	}
+	publicIDs := make([]string, 0)
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		publicIDs = append(publicIDs, s)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, channelID := range publicIDs {
+		// L33 public-channel carve-out: inviter_signature is NULL,
+		// inviter_user_id = user_id (self-invite — see decision-log
+		// §9). Pubkeys may be empty for a legacy NULL-pubkey
+		// registration; the schema requires NOT NULL so we substitute
+		// a 32-byte zero placeholder. The lazy-wrap layer (#984)
+		// gates wrap computation on the user's actual pubkeys (looked
+		// up at wrap time), so the placeholder is a structural
+		// satisfaction, not a key claim. Once #983 hard-requires
+		// pubkeys at registration this branch goes away.
+		boxPin := boxPubkey
+		signPin := signPubkey
+		if len(boxPin) == 0 {
+			boxPin = make([]byte, 32)
+		}
+		if len(signPin) == 0 {
+			signPin = make([]byte, 32)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO channel_members(
+			    channel_id, user_id, inviter_user_id,
+			    inviter_sign_pubkey, inviter_signature,
+			    invitee_box_pubkey, invitee_sign_pubkey,
+			    added_at)
+			 VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
+			channelID, id, id, signPin, boxPin, signPin, created,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // userDetailsRow is the post-Phase-10 row shape the auth handlers

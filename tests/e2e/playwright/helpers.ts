@@ -57,15 +57,48 @@ export async function registerViaApi(username: string): Promise<RegisterResponse
   return env.data;
 }
 
-export async function createChannelViaApi(token: string, name: string): Promise<ChannelRow> {
+// Phase-10 §6 + L25: GET /api/channels filters to channels the viewer
+// is a member of. The Playwright suite predates the explicit
+// channel-members relation and routinely creates a channel as user A
+// then loads user B's view to assert cross-user visibility. The
+// helper bridges that gap by creating the channel as public — the §9
+// auto-add at registration time covers users who register AFTER the
+// channel exists. For the register-then-create order, callers pass
+// `inviteUserIds` so the helper invites them under the public-channel
+// server-auto-fill carve-out. Tightening to a real inviter-signature
+// flow would require wiring crypto pubkeys into the Playwright
+// fixture (deferred to #984).
+//
+// The helper used to GET /api/users and invite every registered user;
+// that floods the per-user channel-write rate-limit bucket (PRD §9 —
+// burst 10) when the test database has already accumulated users from
+// prior tests, dropping invites silently and producing flaky cross-
+// receive timeouts.
+export async function createChannelViaApi(
+  token: string,
+  name: string,
+  inviteUserIds: string[] = [],
+): Promise<ChannelRow> {
   const res = await fetch(baseUrl() + "/api/channels", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, is_public: true }),
   });
   const env = (await res.json()) as Envelope<ChannelRow>;
   if (!env.ok || !env.data) throw new Error(`create channel failed: ${JSON.stringify(env)}`);
-  return env.data;
+  const channel = env.data;
+  for (const userId of inviteUserIds) {
+    const inviteRes = await fetch(baseUrl() + `/api/channels/${channel.id}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (!inviteRes.ok) {
+      const text = await inviteRes.text();
+      throw new Error(`invite ${userId} failed: ${String(inviteRes.status)} ${text}`);
+    }
+  }
+  return channel;
 }
 
 // Waits for the chat shell to finish its first render after auth by

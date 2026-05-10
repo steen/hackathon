@@ -1,21 +1,20 @@
 import type * as React from "react";
 import { useId, useState } from "react";
-import { ApiError, type Channel } from "@hackathon/api-client";
+import { ApiError, type ChannelMember } from "@hackathon/api-client";
 import { Modal } from "./Modal.js";
-import { CHANNEL_NAME_HELPER_TEXT, isValidChannelName } from "../lib/channelName.js";
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreate: (name: string, options: { isPublic: boolean }) => Promise<Channel>;
-  /** Called once after a successful create so the parent can switch focus
-   *  to the new channel. */
-  onCreated?: (ch: Channel) => void;
+  /** Inviter callback: parent issues the actual API call so the modal
+   *  stays free of the auth-state plumbing. The modal validates that
+   *  the user id field is non-empty before invoking the callback. */
+  onInvite: (userId: string) => Promise<ChannelMember>;
+  /** Called once after a successful invite so the parent can refresh
+   *  the panel without a full reload round-trip. */
+  onInvited?: (member: ChannelMember) => void;
 }
 
-// Pulls the inline error copy from the server's structured envelope.
-// Anything else (network error, 5xx with empty body) falls back to a
-// short generic line; details land on console via the api-client.
 function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     return err.message.length > 0 ? err.message : `Request failed (${String(err.status)})`;
@@ -23,19 +22,16 @@ function describeError(err: unknown): string {
   return "Could not reach the server. Check your connection and try again.";
 }
 
-export function ChannelCreateModal(props: Props): React.JSX.Element {
-  const { open, onClose, onCreate, onCreated } = props;
-  const [name, setName] = useState("");
-  const [isPublic, setIsPublic] = useState(false);
+export function ChannelInviteModal(props: Props): React.JSX.Element {
+  const { open, onClose, onInvite, onInvited } = props;
+  const [userId, setUserId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const helperId = useId();
   const errorId = useId();
-  const publicHintId = useId();
 
   function reset(): void {
-    setName("");
-    setIsPublic(false);
+    setUserId("");
     setSubmitting(false);
     setError(null);
   }
@@ -48,26 +44,25 @@ export function ChannelCreateModal(props: Props): React.JSX.Element {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
-    if (!isValidChannelName(name) || submitting) return;
+    if (userId.trim().length === 0 || submitting) return;
     setSubmitting(true);
     setError(null);
     try {
-      const ch = await onCreate(name, { isPublic });
-      // Success: close, reset, hand off to the parent.
+      const member = await onInvite(userId.trim());
       reset();
       onClose();
-      onCreated?.(ch);
+      onInvited?.(member);
     } catch (err) {
       setError(describeError(err));
       setSubmitting(false);
     }
   }
 
-  const valid = isValidChannelName(name);
+  const valid = userId.trim().length > 0;
   const describedBy = error !== null ? `${helperId} ${errorId}` : helperId;
 
   return (
-    <Modal open={open} onClose={handleClose} title="Create channel">
+    <Modal open={open} onClose={handleClose} title="Invite member">
       <form
         onSubmit={(e) => {
           void handleSubmit(e);
@@ -75,12 +70,12 @@ export function ChannelCreateModal(props: Props): React.JSX.Element {
         className="channel-modal-form"
       >
         <label className="channel-modal-form__label">
-          <span>Channel name</span>
+          <span>User id</span>
           <input
             type="text"
-            value={name}
+            value={userId}
             onChange={(e) => {
-              setName(e.target.value);
+              setUserId(e.target.value);
               if (error !== null) setError(null);
             }}
             disabled={submitting}
@@ -88,27 +83,12 @@ export function ChannelCreateModal(props: Props): React.JSX.Element {
             spellCheck={false}
             aria-describedby={describedBy}
             aria-invalid={error !== null}
-            placeholder="books"
+            placeholder="01HZZ…"
           />
         </label>
         <p id={helperId} className="channel-modal-form__helper">
-          {CHANNEL_NAME_HELPER_TEXT}
-        </p>
-        <label className="channel-modal-form__checkbox">
-          <input
-            type="checkbox"
-            checked={isPublic}
-            onChange={(e) => {
-              setIsPublic(e.target.checked);
-            }}
-            disabled={submitting}
-            aria-describedby={publicHintId}
-          />
-          <span>Public — visible to every registered user</span>
-        </label>
-        <p id={publicHintId} className="channel-modal-form__helper">
-          Public channels are operator-readable (decision-log R1.2). Private channels (the default)
-          only become visible to other users when you invite them.
+          Paste the recipient&rsquo;s user id (visible in their profile or via
+          <code> /api/users</code>).
         </p>
         {error !== null ? (
           <p id={errorId} role="alert" className="channel-modal-form__error">
@@ -120,7 +100,7 @@ export function ChannelCreateModal(props: Props): React.JSX.Element {
             Cancel
           </button>
           <button type="submit" disabled={!valid || submitting}>
-            {submitting ? "Creating…" : "Create"}
+            {submitting ? "Inviting…" : "Invite"}
           </button>
         </div>
       </form>

@@ -46,16 +46,21 @@ func TestCreateChannel(t *testing.T) {
 			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
 		}
 		b, _ := io.ReadAll(r.Body)
-		var got map[string]string
+		var got map[string]any
 		if err := json.Unmarshal(b, &got); err != nil {
 			t.Fatalf("non-JSON body: %s", b)
 		}
 		if got["name"] != "random" {
 			t.Errorf("name = %q", got["name"])
 		}
+		// Phase-10: CreateChannel(name) defaults to is_public=false; the
+		// wire body now carries the explicit flag (decision-log §9 + L24).
+		if v, ok := got["is_public"].(bool); !ok || v != false {
+			t.Errorf("is_public = %v, want false", got["is_public"])
+		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(envelopeJSON(
-			`{"id":"01ABCDEFGHJKMNPQRSTVWXYZ01","name":"random","created_at":"2026-05-03T10:00:00Z"}`,
+			`{"id":"01ABCDEFGHJKMNPQRSTVWXYZ01","name":"random","is_public":false,"created_at":"2026-05-03T10:00:00Z"}`,
 		)))
 	}))
 	defer srv.Close()
@@ -67,6 +72,38 @@ func TestCreateChannel(t *testing.T) {
 	}
 	if ch.Name != "random" || ch.ID == "" {
 		t.Fatalf("channel = %+v", ch)
+	}
+	if ch.IsPublic == nil || *ch.IsPublic != false {
+		t.Fatalf("is_public on response = %v want false", ch.IsPublic)
+	}
+}
+
+// TestCreateChannelOptsPublic exercises the explicit is_public=true
+// path so a regression that drops the flag from the body fails CI.
+func TestCreateChannelOptsPublic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		var got map[string]any
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("non-JSON body: %s", b)
+		}
+		if v, ok := got["is_public"].(bool); !ok || v != true {
+			t.Errorf("is_public = %v, want true", got["is_public"])
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(envelopeJSON(
+			`{"id":"01ABCDEFGHJKMNPQRSTVWXYZ03","name":"public-room","is_public":true,"created_at":"2026-05-03T10:00:00Z"}`,
+		)))
+	}))
+	defer srv.Close()
+
+	c := goclient.New(srv.URL, goclient.WithToken("tok"))
+	ch, err := c.CreateChannelOpts(context.Background(), "public-room", true)
+	if err != nil {
+		t.Fatalf("CreateChannelOpts: %v", err)
+	}
+	if ch.IsPublic == nil || *ch.IsPublic != true {
+		t.Fatalf("is_public on response = %v want true", ch.IsPublic)
 	}
 }
 

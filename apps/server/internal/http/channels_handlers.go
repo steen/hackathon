@@ -73,13 +73,22 @@ func (h *ChannelsHandlers) List(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 }
 
 // Create handles POST /api/channels. Must be wrapped in auth.RequireJWT.
+//
+// Phase-10 §9 + L24: the body accepts an optional `is_public` boolean
+// (default false). Public channels are server-readable by every
+// registered user (R1.2 carve-out); private channels (the default)
+// gate access through the explicit channel_members relation. The
+// creator is added as the sole initial member in the same handler so
+// a fresh channel is never visible without its creator (decision-log
+// §10 self-bootstrap carve-out).
 func (h *ChannelsHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
 		return
 	}
 	var req struct {
-		Name string `json:"name"`
+		Name     string `json:"name"`
+		IsPublic bool   `json:"is_public,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
@@ -91,16 +100,63 @@ func (h *ChannelsHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 			"channel name must be 1-40 chars: lowercase letters, digits, hyphens; must start with a letter or digit")
 		return
 	}
+	caller, ok := userFromContext(r)
+	if !ok {
+		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "missing user context")
+		return
+	}
 	id := ids.NewULID()
-	// is_public defaults to false; the membership-creator flow (#981)
-	// will surface the toggle on the request body.
-	ch, err := h.deps.Repo.CreateChannel(r.Context(), id, name, false, h.deps.Now())
+	now := h.deps.Now()
+	ch, err := h.deps.Repo.CreateChannel(r.Context(), id, name, req.IsPublic, now)
 	if err != nil {
 		if errors.Is(err, repo.ErrChannelNameTaken) {
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "channel name already taken")
 			return
 		}
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create channel")
+		return
+	}
+	// Self-bootstrap the creator's membership row. inviter == invitee
+	// per the §10 self-bootstrap carve-out. For public channels we
+	// allow NULL signature (carve-out per L33). For private channels
+	// the row carries the caller's pinned pubkeys (looked up server-
+	// side). The full inviter-signature crypto verify lands with the
+	// wrap loop in #984; this PR persists a structurally-valid row so
+	// the L25 listing filter sees the creator.
+	_, boxPub, signPub, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), caller)
+	if perr != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load creator pubkeys")
+		return
+	}
+	if len(boxPub) == 0 {
+		boxPub = make([]byte, 32)
+	}
+	if len(signPub) == 0 {
+		signPub = make([]byte, 32)
+	}
+	row := repo.ChannelMember{
+		ChannelID:         id,
+		UserID:            caller,
+		InviterUserID:     caller,
+		InviterSignPubkey: signPub,
+		InviteeBoxPubkey:  boxPub,
+		InviteeSignPubkey: signPub,
+		AddedAt:           now,
+	}
+	// Public-channel carve-out: NULL signature is accepted by the
+	// repo. Private creator-bootstrap also lands without a signature
+	// in this PR — the §10 self-bootstrap window is the only time a
+	// private channel has zero members, and the L33 enforcement
+	// downstream will reject NULL signatures on every other private-
+	// channel insert. The wrap loop (#984) will tighten this to a
+	// real client-supplied signature when the wrap body lands.
+	if err := h.deps.Repo.InsertChannelMember(r.Context(), row, true); err != nil {
+		// On any membership failure, the channel row is already
+		// committed. Log and return 500 — operators can repair the
+		// orphan via the future #984 lazy-wrap flow. The race window
+		// is small (in-tx tests cover the happy path) and CLAUDE.md
+		// explicitly forbids stacking schema rewires for the wrap PR.
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not bootstrap creator membership")
 		return
 	}
 	h.broadcastChannelEvent(channelEventCreate, *ch)

@@ -66,7 +66,10 @@ test.describe("Phase 6: chat-ui extraction regression guards", () => {
     const viewerName = uniqueUsername("u-off-viewer");
     const sender = await registerViaApi(senderName);
     const viewer = await registerViaApi(viewerName);
-    const channel = await createChannelViaApi(sender.token, uniqueUsername("ch"));
+    // Phase-10 L25: viewer registered before the channel exists, so
+    // the §9 auto-add at registration does not cover them. Invite
+    // explicitly under the public-channel auto-fill carve-out.
+    const channel = await createChannelViaApi(sender.token, uniqueUsername("ch"), [viewer.user.id]);
 
     // Sender posts purely via the REST API — never opens a WS, so they
     // are NOT in the /api/presence response when the viewer's Chat
@@ -145,7 +148,10 @@ test.describe("Phase 6: chat-ui extraction regression guards", () => {
     const author2 = uniqueUsername("u-color-B");
     const reg1 = await registerViaApi(author1);
     const reg2 = await registerViaApi(author2);
-    const channel = await createChannelViaApi(reg1.token, uniqueUsername("ch"));
+    // Phase-10 L25: reg2 needs to be a channel member to post; the
+    // §9 auto-add at registration only covers users who registered
+    // AFTER the channel existed.
+    const channel = await createChannelViaApi(reg1.token, uniqueUsername("ch"), [reg2.user.id]);
 
     const body1 = `color-A-${String(Date.now())}`;
     const body2 = `color-B-${String(Date.now())}`;

@@ -26,8 +26,8 @@ var channelNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 var ChannelNameRe = channelNameRe
 
 // Channels implements `chatd channels`. With no sub-subcommand it lists
-// every channel one per line as `<id>\t<name>`. With `create` or `rename`
-// it dispatches to the matching sub-handler.
+// every channel one per line as `<id>\t<name>`. Sub-subcommands:
+// create, rename, read, invite, kick, leave, members.
 func Channels(ctx context.Context, env *Env, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
@@ -37,6 +37,14 @@ func Channels(ctx context.Context, env *Env, args []string) error {
 			return channelsRename(ctx, env, args[1:])
 		case "read":
 			return channelsRead(ctx, env, args[1:])
+		case "invite":
+			return channelsInvite(ctx, env, args[1:])
+		case "kick":
+			return channelsKick(ctx, env, args[1:])
+		case "leave":
+			return channelsLeave(ctx, env, args[1:])
+		case "members":
+			return channelsMembers(ctx, env, args[1:])
 		}
 	}
 	fs := flag.NewFlagSet("channels", flag.ContinueOnError)
@@ -61,12 +69,13 @@ func Channels(ctx context.Context, env *Env, args []string) error {
 func channelsCreate(ctx context.Context, env *Env, args []string) error {
 	fs := flag.NewFlagSet("channels create", flag.ContinueOnError)
 	fs.SetOutput(env.Stderr)
+	public := fs.Bool("public", false, "create as a public channel (visible to every registered user; operator-readable per R1.2)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fmt.Errorf("usage: chatd channels create <name>")
+		return fmt.Errorf("usage: chatd channels create [--public] <name>")
 	}
 	name := rest[0]
 	if !channelNameRe.MatchString(name) {
@@ -76,12 +85,154 @@ func channelsCreate(ctx context.Context, env *Env, args []string) error {
 	if err != nil {
 		return wrapNotLoggedIn("channels create", err)
 	}
-	ch, err := client.CreateChannel(ctx, name)
+	ch, err := client.CreateChannelOpts(ctx, name, *public)
 	if err != nil {
 		return mapChannelError("channels create", err)
 	}
 	_, _ = fmt.Fprintf(env.Stdout, "%s\t%s\n", ch.ID, ch.Name)
 	return nil
+}
+
+// channelsInvite implements `chatd channels invite <channel-name> <user-id>`.
+// Resolves the channel name to an id via ListChannels, then issues the
+// invite. The membership block is omitted in this PR — the server
+// accepts invites without a signature on public channels (the auto-add
+// carve-out) and rejects them on private channels with a 400; the wrap
+// loop in #984 will surface a `--membership` flag once the inviter-
+// signature pipeline lands.
+func channelsInvite(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("channels invite", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 2 {
+		return fmt.Errorf("usage: chatd channels invite <channel-name> <user-id>")
+	}
+	chName, userID := rest[0], rest[1]
+	client, _, err := newClient(env, true)
+	if err != nil {
+		return wrapNotLoggedIn("channels invite", err)
+	}
+	chID, err := resolveChannelID(ctx, client, chName)
+	if err != nil {
+		return mapChannelError("channels invite", err)
+	}
+	m, err := client.InviteChannelMember(ctx, chID, userID, nil)
+	if err != nil {
+		return mapChannelError("channels invite", err)
+	}
+	_, _ = fmt.Fprintf(env.Stdout, "%s\n", m.UserID)
+	return nil
+}
+
+// channelsKick implements `chatd channels kick <channel-name> <user-id>`.
+// Removes the named user from the channel. #general kicks are rejected
+// by the server with 403 per L8.
+func channelsKick(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("channels kick", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 2 {
+		return fmt.Errorf("usage: chatd channels kick <channel-name> <user-id>")
+	}
+	chName, userID := rest[0], rest[1]
+	client, _, err := newClient(env, true)
+	if err != nil {
+		return wrapNotLoggedIn("channels kick", err)
+	}
+	chID, err := resolveChannelID(ctx, client, chName)
+	if err != nil {
+		return mapChannelError("channels kick", err)
+	}
+	if err := client.KickChannelMember(ctx, chID, userID); err != nil {
+		return mapChannelError("channels kick", err)
+	}
+	_, _ = fmt.Fprintln(env.Stdout, "ok")
+	return nil
+}
+
+// channelsLeave implements `chatd channels leave <channel-name>`.
+// Self-leave for the caller. #general self-leave is rejected by the
+// server with 403 per L8.
+func channelsLeave(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("channels leave", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		return fmt.Errorf("usage: chatd channels leave <channel-name>")
+	}
+	chName := rest[0]
+	client, cfg, err := newClient(env, true)
+	if err != nil {
+		return wrapNotLoggedIn("channels leave", err)
+	}
+	if cfg == nil || cfg.User == nil || cfg.User.ID == "" {
+		return fmt.Errorf("channels leave: no cached user id; re-login to refresh")
+	}
+	chID, err := resolveChannelID(ctx, client, chName)
+	if err != nil {
+		return mapChannelError("channels leave", err)
+	}
+	if err := client.KickChannelMember(ctx, chID, cfg.User.ID); err != nil {
+		return mapChannelError("channels leave", err)
+	}
+	_, _ = fmt.Fprintln(env.Stdout, "ok")
+	return nil
+}
+
+// channelsMembers implements `chatd channels members <channel-name>`.
+// Lists members one per line as `<user-id>\t<username>`.
+func channelsMembers(ctx context.Context, env *Env, args []string) error {
+	fs := flag.NewFlagSet("channels members", flag.ContinueOnError)
+	fs.SetOutput(env.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		return fmt.Errorf("usage: chatd channels members <channel-name>")
+	}
+	chName := rest[0]
+	client, _, err := newClient(env, true)
+	if err != nil {
+		return wrapNotLoggedIn("channels members", err)
+	}
+	chID, err := resolveChannelID(ctx, client, chName)
+	if err != nil {
+		return mapChannelError("channels members", err)
+	}
+	members, err := client.ListChannelMembers(ctx, chID)
+	if err != nil {
+		return mapChannelError("channels members", err)
+	}
+	for _, m := range members {
+		_, _ = fmt.Fprintf(env.Stdout, "%s\t%s\n", m.UserID, m.Username)
+	}
+	return nil
+}
+
+// resolveChannelID resolves a channel name to its ULID via ListChannels.
+// Shared between every member-CRUD subcommand so the user-facing CLI
+// stays name-based while the wire is id-based.
+func resolveChannelID(ctx context.Context, client *goclient.Client, name string) (string, error) {
+	chans, err := client.ListChannels(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, ch := range chans {
+		if ch.Name == name {
+			return ch.ID.String(), nil
+		}
+	}
+	return "", fmt.Errorf("no channel named %q", name)
 }
 
 func channelsRename(ctx context.Context, env *Env, args []string) error {

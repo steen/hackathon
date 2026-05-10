@@ -3,8 +3,10 @@ import { WebSocketClient, watch as watchGen, type WebSocketCtor } from "./ws.js"
 import type {
   AuthResponse,
   Channel,
+  ChannelMember,
   Event as WsEvent,
   ListMessagesOptions,
+  MembershipBlock,
   Message,
   User,
   WSTicket,
@@ -74,12 +76,28 @@ export class Client {
     return this.http.listChannels();
   }
 
-  async createChannel(name: string): Promise<Channel> {
-    return this.http.createChannel(name);
+  async createChannel(name: string, options: { isPublic?: boolean } = {}): Promise<Channel> {
+    return this.http.createChannel(name, options);
   }
 
   async renameChannel(id: string, name: string): Promise<Channel> {
     return this.http.renameChannel(id, name);
+  }
+
+  async listChannelMembers(channelId: string): Promise<ChannelMember[]> {
+    return this.http.listChannelMembers(channelId);
+  }
+
+  async inviteChannelMember(
+    channelId: string,
+    userId: string,
+    membership?: MembershipBlock,
+  ): Promise<ChannelMember> {
+    return this.http.inviteChannelMember(channelId, userId, membership);
+  }
+
+  async kickChannelMember(channelId: string, userId: string): Promise<void> {
+    return this.http.kickChannelMember(channelId, userId);
   }
 
   async listMessages(channelId: string, opts?: ListMessagesOptions): Promise<Message[]> {
