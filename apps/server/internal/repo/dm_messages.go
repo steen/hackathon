@@ -7,14 +7,19 @@ import (
 )
 
 // DMMessage mirrors a row in the dm_messages table. Wire shape from
-// specs/plans/phase-9/dms.md "DMMessage" — immutable on the wire (L9),
-// body shares MaxMessageBodyBytes = 4096 with channel messages (L16).
+// decision-log L21: `{id, conversation_id, sender_user_id, envelope,
+// created_at}`. `body` is gone with migration 0007.
+//
+// The signature inside Envelope binds the conversation_id under the
+// snakd-msg-v1:dm: prefix (CRYPTO-3), distinct from the channel-message
+// prefix; cross-protocol replay (DM ciphertext into a channel send, or
+// vice versa) cannot pass signature verification.
 type DMMessage struct {
-	ID             string    `json:"id"`
-	ConversationID string    `json:"conversation_id"`
-	SenderUserID   string    `json:"sender_user_id"`
-	Body           string    `json:"body"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             string          `json:"id"`
+	ConversationID string          `json:"conversation_id"`
+	SenderUserID   string          `json:"sender_user_id"`
+	Envelope       MessageEnvelope `json:"envelope"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 // ListDMMessages mirrors ListMessages: ULID-cursor newest-first
@@ -28,13 +33,16 @@ func (r *Repo) ListDMMessages(ctx context.Context, conversationID, before string
 	if limit > MaxMessagesLimit {
 		limit = MaxMessagesLimit
 	}
+	const cols = `id, conversation_id, sender_user_id,
+	              cipher_suite, key_generation_id, nonce, ciphertext,
+	              sender_sign_pubkey, signature, client_created_at, created_at`
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if before == "" {
 		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, conversation_id, sender_user_id, body, created_at
+			`SELECT `+cols+`
 			   FROM dm_messages
 			  WHERE conversation_id = ?
 			  ORDER BY id DESC
@@ -42,7 +50,7 @@ func (r *Repo) ListDMMessages(ctx context.Context, conversationID, before string
 			conversationID, limit)
 	} else {
 		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, conversation_id, sender_user_id, body, created_at
+			`SELECT `+cols+`
 			   FROM dm_messages
 			  WHERE conversation_id = ? AND id < ?
 			  ORDER BY id DESC
@@ -56,7 +64,13 @@ func (r *Repo) ListDMMessages(ctx context.Context, conversationID, before string
 	out := make([]DMMessage, 0, limit)
 	for rows.Next() {
 		var m DMMessage
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderUserID, &m.Body, &m.CreatedAt); err != nil {
+		if err := rows.Scan(
+			&m.ID, &m.ConversationID, &m.SenderUserID,
+			&m.Envelope.CipherSuite, &m.Envelope.KeyGenerationID,
+			&m.Envelope.Nonce, &m.Envelope.Ciphertext,
+			&m.Envelope.SenderSignPubkey, &m.Envelope.Signature,
+			&m.Envelope.ClientCreatedAt, &m.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -64,16 +78,16 @@ func (r *Repo) ListDMMessages(ctx context.Context, conversationID, before string
 	return out, rows.Err()
 }
 
-// InsertDMMessageTx persists a single DM, atomically updates the
+// InsertDMMessageTx persists an encrypted DM, atomically updates the
 // owning conversation's denormalized last_message_id / last_message_at,
 // and advances the sender's dm_reads row to the new message id —
-// decision-log §11 + L21. The shape mirrors InsertMessageTx; the
-// extra UPSERT branch lives in dm_reads.go via upsertDMReadAdvance.
+// decision-log §11 + L21. The shape mirrors InsertMessageTx; the extra
+// UPSERT branch lives in dm_reads.go via upsertDMReadAdvanceTx.
 //
 // Returns the persisted message and the *post-update* DMConversation
 // row so the broadcast emitter can build a self-sufficient
 // {type:"dm"} frame (decision-log §8) without a second SELECT.
-func (r *Repo) InsertDMMessageTx(ctx context.Context, id, conversationID, senderID, body string, now time.Time) (*DMMessage, *DMConversation, error) {
+func (r *Repo) InsertDMMessageTx(ctx context.Context, id, conversationID, senderID string, env MessageEnvelope, now time.Time) (*DMMessage, *DMConversation, error) {
 	created := now.UTC()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -82,9 +96,14 @@ func (r *Repo) InsertDMMessageTx(ctx context.Context, id, conversationID, sender
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO dm_messages(id, conversation_id, sender_user_id, body, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		id, conversationID, senderID, body, created,
+		`INSERT INTO dm_messages(
+		    id, conversation_id, sender_user_id,
+		    cipher_suite, key_generation_id, nonce, ciphertext,
+		    sender_sign_pubkey, signature, client_created_at, created_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, conversationID, senderID,
+		env.CipherSuite, env.KeyGenerationID, env.Nonce, env.Ciphertext,
+		env.SenderSignPubkey, env.Signature, env.ClientCreatedAt.UTC(), created,
 	); err != nil {
 		return nil, nil, err
 	}
@@ -116,7 +135,7 @@ func (r *Repo) InsertDMMessageTx(ctx context.Context, id, conversationID, sender
 		ID:             id,
 		ConversationID: conversationID,
 		SenderUserID:   senderID,
-		Body:           body,
+		Envelope:       env,
 		CreatedAt:      created,
 	}, &c, nil
 }

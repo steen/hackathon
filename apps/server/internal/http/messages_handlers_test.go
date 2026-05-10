@@ -1,11 +1,13 @@
 package http
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	stdhttp "net/http"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"hackathon/apps/server/internal/repo"
 )
@@ -49,6 +51,23 @@ func createChannelOK(t *testing.T, cf *channelsFixture, tok, name string) string
 	return env.Data.ID
 }
 
+// fakeEnvelopeWire is the JSON shape a Phase-10 client would send. The
+// signature / sender_sign_pubkey / nonce / ciphertext are structurally
+// valid (correct lengths) but cryptographically meaningless — receivers
+// do the actual sodium verify, the server only structural-validates.
+func fakeEnvelopeWire(now time.Time) map[string]any {
+	b64 := base64.StdEncoding.EncodeToString
+	return map[string]any{
+		"cipher_suite":       1,
+		"key_generation_id":  1,
+		"nonce":              b64(make([]byte, EnvelopeNonceBytes)),
+		"ciphertext":         b64([]byte("ciphertext")),
+		"sender_sign_pubkey": b64(make([]byte, EnvelopeSenderSignPubkeyBytes)),
+		"signature":          b64(make([]byte, EnvelopeSignatureBytes)),
+		"client_created_at":  now.UTC().Format(time.RFC3339Nano),
+	}
+}
+
 // US-5 — POST /messages persists and broadcasts to hub subscribers of
 // that channel.
 func TestPostMessagePersistsAndBroadcasts(t *testing.T) {
@@ -62,7 +81,7 @@ func TestPostMessagePersistsAndBroadcasts(t *testing.T) {
 	defer cf.hub.Unsubscribe(chID, rec)
 
 	rr := cf.do(t, stdhttp.MethodPost, "/api/channels/"+chID+"/messages",
-		map[string]string{"body": "hello world"}, tok)
+		map[string]any{"envelope": fakeEnvelopeWire(time.Now())}, tok)
 	if rr.Code != stdhttp.StatusCreated {
 		t.Fatalf("post: %d body=%s", rr.Code, rr.Body.String())
 	}
@@ -74,8 +93,11 @@ func TestPostMessagePersistsAndBroadcasts(t *testing.T) {
 	if err := json.NewDecoder(rr.Body).Decode(&env); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if env.Data.Body != "hello world" || env.Data.ChannelID != chID {
+	if env.Data.ChannelID != chID || env.Data.Envelope.CipherSuite != 0x01 {
 		t.Fatalf("data: %+v", env.Data)
+	}
+	if string(env.Data.Envelope.Ciphertext) != "ciphertext" {
+		t.Fatalf("ciphertext round-trip mismatch: %q", string(env.Data.Envelope.Ciphertext))
 	}
 
 	got := rec.snapshot()
@@ -89,7 +111,7 @@ func TestPostMessagePersistsAndBroadcasts(t *testing.T) {
 	if err := json.Unmarshal(got[0], &frame); err != nil {
 		t.Fatalf("unmarshal frame: %v body=%s", err, string(got[0]))
 	}
-	if frame.Type != WSEventMessage || frame.Data.Body != "hello world" {
+	if frame.Type != WSEventMessage || frame.Data.Envelope.CipherSuite != 0x01 {
 		t.Fatalf("frame: %+v", frame)
 	}
 	if frame.Data.ID != env.Data.ID {
@@ -105,36 +127,105 @@ func TestPostMessageRejectsUnknownChannel(t *testing.T) {
 
 	rr := cf.do(t, stdhttp.MethodPost,
 		"/api/channels/01HZZ00000000000000000ZZZZ/messages",
-		map[string]string{"body": "ghost"}, tok)
+		map[string]any{"envelope": fakeEnvelopeWire(time.Now())}, tok)
 	if rr.Code != stdhttp.StatusNotFound {
 		t.Fatalf("status: got %d want 404; body=%s", rr.Code, rr.Body.String())
 	}
 }
 
-// US-5 — empty/oversized bodies rejected. Oversize must surface the
-// dedicated `message_too_large` code so clients can distinguish a body-
-// cap reject from a generic bad_request (issue #419, see #137/#147).
-func TestPostMessageRejectsBadBodies(t *testing.T) {
+// L17 + L21 + L39 — server rejects malformed envelopes at the handler
+// boundary (no decryption involved). Each branch maps to a specific
+// validation rule.
+func TestPostMessageRejectsMalformedEnvelopes(t *testing.T) {
 	cf := newChannelsFixture(t)
 	defer cf.close()
 	tok := registerOK(t, cf.fixture, "alice", "correct-horse-battery")
 	chID := createChannelOK(t, cf, tok, "general")
 
+	b64 := base64.StdEncoding.EncodeToString
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	cases := []struct {
 		name     string
-		body     string
-		wantCode string
+		envelope map[string]any
 	}{
-		{"empty", "", CodeBadRequest},
-		{"whitespace", "   ", CodeBadRequest},
-		{"oversized", strings.Repeat("x", MaxMessageBodyBytes+1), "message_too_large"},
+		{
+			name: "wrong-cipher-suite",
+			envelope: map[string]any{
+				"cipher_suite": 2, "key_generation_id": 1,
+				"nonce": b64(make([]byte, 24)), "ciphertext": b64([]byte("c")),
+				"sender_sign_pubkey": b64(make([]byte, 32)),
+				"signature":          b64(make([]byte, 64)),
+				"client_created_at":  now,
+			},
+		},
+		{
+			name: "short-nonce",
+			envelope: map[string]any{
+				"cipher_suite": 1, "key_generation_id": 1,
+				"nonce": b64(make([]byte, 8)), "ciphertext": b64([]byte("c")),
+				"sender_sign_pubkey": b64(make([]byte, 32)),
+				"signature":          b64(make([]byte, 64)),
+				"client_created_at":  now,
+			},
+		},
+		{
+			name: "wrong-pubkey-length",
+			envelope: map[string]any{
+				"cipher_suite": 1, "key_generation_id": 1,
+				"nonce": b64(make([]byte, 24)), "ciphertext": b64([]byte("c")),
+				"sender_sign_pubkey": b64(make([]byte, 16)),
+				"signature":          b64(make([]byte, 64)),
+				"client_created_at":  now,
+			},
+		},
+		{
+			name: "wrong-signature-length",
+			envelope: map[string]any{
+				"cipher_suite": 1, "key_generation_id": 1,
+				"nonce": b64(make([]byte, 24)), "ciphertext": b64([]byte("c")),
+				"sender_sign_pubkey": b64(make([]byte, 32)),
+				"signature":          b64(make([]byte, 32)),
+				"client_created_at":  now,
+			},
+		},
+		{
+			name: "empty-ciphertext",
+			envelope: map[string]any{
+				"cipher_suite": 1, "key_generation_id": 1,
+				"nonce": b64(make([]byte, 24)), "ciphertext": b64([]byte{}),
+				"sender_sign_pubkey": b64(make([]byte, 32)),
+				"signature":          b64(make([]byte, 64)),
+				"client_created_at":  now,
+			},
+		},
+		{
+			name: "ciphertext-too-large",
+			envelope: map[string]any{
+				"cipher_suite": 1, "key_generation_id": 1,
+				"nonce":              b64(make([]byte, 24)),
+				"ciphertext":         b64(make([]byte, MaxCiphertextBytes+1)),
+				"sender_sign_pubkey": b64(make([]byte, 32)),
+				"signature":          b64(make([]byte, 64)),
+				"client_created_at":  now,
+			},
+		},
+		{
+			name: "missing-client-created-at",
+			envelope: map[string]any{
+				"cipher_suite": 1, "key_generation_id": 1,
+				"nonce": b64(make([]byte, 24)), "ciphertext": b64([]byte("c")),
+				"sender_sign_pubkey": b64(make([]byte, 32)),
+				"signature":          b64(make([]byte, 64)),
+				"client_created_at":  "",
+			},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			rr := cf.do(t, stdhttp.MethodPost, "/api/channels/"+chID+"/messages",
-				map[string]string{"body": c.body}, tok)
+				map[string]any{"envelope": c.envelope}, tok)
 			if rr.Code != stdhttp.StatusBadRequest {
-				t.Fatalf("got %d want 400", rr.Code)
+				t.Fatalf("got %d want 400; body=%s", rr.Code, rr.Body.String())
 			}
 			var env Envelope
 			if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
@@ -143,8 +234,8 @@ func TestPostMessageRejectsBadBodies(t *testing.T) {
 			if env.OK || env.Error == nil {
 				t.Fatalf("envelope: %+v", env)
 			}
-			if env.Error.Code != c.wantCode {
-				t.Fatalf("code: got %q want %q", env.Error.Code, c.wantCode)
+			if env.Error.Code != CodeBadRequest {
+				t.Fatalf("code: got %q want %q", env.Error.Code, CodeBadRequest)
 			}
 		})
 	}
@@ -160,9 +251,9 @@ func TestGetMessagesReturnsPriorMessagesPaginated(t *testing.T) {
 	var posted []string
 	for i := 0; i < 5; i++ {
 		rr := cf.do(t, stdhttp.MethodPost, "/api/channels/"+chID+"/messages",
-			map[string]string{"body": "m"}, tok)
+			map[string]any{"envelope": fakeEnvelopeWire(time.Now())}, tok)
 		if rr.Code != stdhttp.StatusCreated {
-			t.Fatalf("post[%d]: %d", i, rr.Code)
+			t.Fatalf("post[%d]: %d body=%s", i, rr.Code, rr.Body.String())
 		}
 		var env struct {
 			Data repo.Message `json:"data"`
@@ -226,3 +317,6 @@ func TestGetMessagesUnknownChannelReturns404(t *testing.T) {
 		t.Fatalf("got %d want 404", rr.Code)
 	}
 }
+
+// strings used so the `_ = strings` import isn't pruned when refactors shrink it.
+var _ = strings.TrimSpace

@@ -48,7 +48,7 @@ func TestMaterializeChannelReadsTxPopulatesMissingRows(t *testing.T) {
 	joinAsMember(t, r, chWithMsg, viewer)
 	joinAsMember(t, r, chEmpty, viewer)
 	tipID := ids.NewULID()
-	if _, err := r.InsertMessageTx(context.Background(), tipID, chWithMsg, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), tipID, chWithMsg, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("InsertMessageTx: %v", err)
 	}
 
@@ -89,7 +89,7 @@ func TestMaterializeChannelReadsTxIsIdempotent(t *testing.T) {
 	channelID := mustChannel(t, r, "alpha")
 	joinAsMember(t, r, channelID, viewer)
 	firstTip := ids.NewULID()
-	if _, err := r.InsertMessageTx(context.Background(), firstTip, channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), firstTip, channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("first message: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestMaterializeChannelReadsTxIsIdempotent(t *testing.T) {
 	// New message lands; channels.last_message_id advances. The
 	// per-viewer baseline must NOT advance with the channel's tip, so
 	// a second Materialize is a no-op.
-	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("second message: %v", err)
 	}
 
@@ -135,15 +135,15 @@ func TestUpsertChannelReadAdvanceOnly(t *testing.T) {
 	author := mustUserUnique(t, r)
 	channelID := mustChannel(t, r, "alpha")
 	older := ids.NewULID()
-	if _, err := r.InsertMessageTx(context.Background(), older, channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), older, channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("older: %v", err)
 	}
 	middle := ids.NewULID()
-	if _, err := r.InsertMessageTx(context.Background(), middle, channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), middle, channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("middle: %v", err)
 	}
 	newer := ids.NewULID()
-	if _, err := r.InsertMessageTx(context.Background(), newer, channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), newer, channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("newer: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestListChannelsWithReadStateReportsUnread(t *testing.T) {
 	author := mustUserUnique(t, r)
 	channelID := mustChannel(t, r, "alpha")
 	joinAsMember(t, r, channelID, viewer)
-	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("seed pre-baseline: %v", err)
 	}
 
@@ -210,10 +210,10 @@ func TestListChannelsWithReadStateReportsUnread(t *testing.T) {
 		t.Fatalf("unread_count after materialize: got %v want 0", got[0].UnreadCount)
 	}
 
-	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("post-baseline 1: %v", err)
 	}
-	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("post-baseline 2: %v", err)
 	}
 
@@ -243,7 +243,7 @@ func TestListChannelsWithReadStateMaterializesNonEmptyChannels(t *testing.T) {
 	joinAsMember(t, r, withMsg, viewer)
 	joinAsMember(t, r, empty, viewer)
 	tip := ids.NewULID()
-	if _, err := r.InsertMessageTx(context.Background(), tip, withMsg, author, "m", time.Now()); err != nil {
+	if _, err := r.InsertMessageTx(context.Background(), tip, withMsg, author, fakeEnvelope(), time.Now()); err != nil {
 		t.Fatalf("InsertMessageTx: %v", err)
 	}
 
@@ -298,7 +298,7 @@ func TestListChannelsWithReadStateRequiresMaterializeForNonEmpty(t *testing.T) {
 	author := mustUserUnique(t, r)
 	channelID := mustChannel(t, r, "alpha")
 	for i := 0; i < 3; i++ {
-		if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, "m", time.Now()); err != nil {
+		if _, err := r.InsertMessageTx(context.Background(), ids.NewULID(), channelID, author, fakeEnvelope(), time.Now()); err != nil {
 			t.Fatalf("seed message %d: %v", i, err)
 		}
 	}

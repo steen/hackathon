@@ -37,11 +37,12 @@ func TestInsertMessageTxPersistsRow(t *testing.T) {
 	uid := mustUser(t, r)
 
 	id := ids.NewULID()
-	m, err := r.InsertMessageTx(context.Background(), id, chID, uid, "hi", time.Now())
+	env := fakeEnvelope()
+	m, err := r.InsertMessageTx(context.Background(), id, chID, uid, env, time.Now())
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
-	if m.ID != id || m.ChannelID != chID || m.Body != "hi" {
+	if m.ID != id || m.ChannelID != chID || m.Envelope.CipherSuite != 0x01 {
 		t.Fatalf("returned: %+v", m)
 	}
 	var n int
@@ -63,7 +64,7 @@ func TestListMessagesReturnsNewestFirstAndPaginates(t *testing.T) {
 	var ids26 [5]string
 	for i := range ids26 {
 		id := ids.NewULID()
-		if _, err := r.InsertMessageTx(context.Background(), id, chID, uid, "m", time.Now()); err != nil {
+		if _, err := r.InsertMessageTx(context.Background(), id, chID, uid, fakeEnvelope(), time.Now()); err != nil {
 			t.Fatalf("Insert[%d]: %v", i, err)
 		}
 		ids26[i] = id
@@ -99,7 +100,7 @@ func TestListMessagesCapsLimit(t *testing.T) {
 	chID := mustChannel(t, r, "general")
 	uid := mustUser(t, r)
 	for i := 0; i < 5; i++ {
-		_, _ = r.InsertMessageTx(context.Background(), ids.NewULID(), chID, uid, "m", time.Now())
+		_, _ = r.InsertMessageTx(context.Background(), ids.NewULID(), chID, uid, fakeEnvelope(), time.Now())
 	}
 	got, err := r.ListMessages(context.Background(), chID, "", 9999)
 	if err != nil {
