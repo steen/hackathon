@@ -1,4 +1,5 @@
 import type * as React from "react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,6 +10,8 @@ const logoutMock = vi.fn();
 const loginMock = vi.fn();
 const registerMock = vi.fn();
 const writeTokenMock = vi.fn();
+const writeIdentitySeedMock = vi.fn();
+const clearIdentitySeedMock = vi.fn();
 
 let storedToken: string | null = null;
 
@@ -25,6 +28,54 @@ vi.mock("../api.js", () => ({
     writeTokenMock(t);
   },
 }));
+
+vi.mock("../lib/identityStore.js", () => ({
+  writeIdentitySeed: async (userId: string, seed: Uint8Array): Promise<void> => {
+    await writeIdentitySeedMock(userId, seed);
+  },
+  clearIdentitySeed: async (): Promise<void> => {
+    await clearIdentitySeedMock();
+  },
+}));
+
+// Stub the identity-derivation surface so the test does not pay an
+// Argon2id round (~250ms) and does not require libsodium-wrappers-sumo
+// to be initialized under jsdom. The canary's behavior depends only on
+// the b64-encoded sign_pubkey comparison, so a fixed local pubkey
+// stand-in is enough to drive both the "skip" and the eventual
+// (already-covered-by-Login.tsx unit tests in a sibling file) "throw"
+// branches.
+vi.mock("@hackathon/api-client", async () => {
+  const actual = await vi.importActual<Record<string, unknown>>("@hackathon/api-client");
+  const stubBoxPub = new Uint8Array(32).fill(1);
+  const stubSignPub = new Uint8Array(32).fill(2);
+  const stubBoxPriv = new Uint8Array(32).fill(3);
+  const stubSignPriv = new Uint8Array(64).fill(4);
+  const stubRootSeed = new Uint8Array(32).fill(5);
+  return {
+    ...actual,
+    ready: (): Promise<void> => Promise.resolve(),
+    deriveIdentity: (): Promise<{
+      rootSeed: Uint8Array;
+      boxSeed: Uint8Array;
+      signSeed: Uint8Array;
+      boxPub: Uint8Array;
+      boxPriv: Uint8Array;
+      signPub: Uint8Array;
+      signPriv: Uint8Array;
+    }> =>
+      Promise.resolve({
+        rootSeed: stubRootSeed,
+        boxSeed: new Uint8Array(32),
+        signSeed: new Uint8Array(32),
+        boxPub: stubBoxPub,
+        boxPriv: stubBoxPriv,
+        signPub: stubSignPub,
+        signPriv: stubSignPriv,
+      }),
+    b64: (raw: Uint8Array): string => `b64:${String(raw[0] ?? 0)}:${String(raw.length)}`,
+  };
+});
 
 import { AuthProvider, useAuth } from "./AuthContext.js";
 import { ErrorBanner } from "../components/ErrorBanner.js";
@@ -77,6 +128,8 @@ afterEach(() => {
   loginMock.mockReset();
   registerMock.mockReset();
   writeTokenMock.mockReset();
+  writeIdentitySeedMock.mockReset();
+  clearIdentitySeedMock.mockReset();
   storedToken = null;
   consoleErrorSpy.mockRestore();
 });
@@ -324,5 +377,96 @@ describe("test_web_auth_successful_register_clears_prior_error", () => {
     expect(screen.getByTestId("user")).toHaveTextContent("bob");
     expect(registerMock).toHaveBeenCalledWith("alice", "pw", "invite-code-placeholder", undefined);
     expect(writeTokenMock).toHaveBeenLastCalledWith("fresh-jwt-token-placeholder");
+  });
+});
+
+// PassphraseProbe drives the canary path: it calls `login()` with a
+// non-empty `identityPassphrase` so the AuthContext.tsx:90-105 block
+// runs (skip when remote sign_pubkey is empty/absent; throw
+// WrongPassphraseError when it disagrees with the locally-derived one).
+function PassphraseProbe({ passphrase }: { passphrase: string }): React.JSX.Element {
+  const { token, user, error, login } = useAuth();
+  const [thrown, setThrown] = useState<string | null>(null);
+  return (
+    <div>
+      <span data-testid="token">{token ?? "none"}</span>
+      <span data-testid="user">{user?.username ?? "none"}</span>
+      <span data-testid="error">{error ?? "none"}</span>
+      <span data-testid="thrown">{thrown ?? "none"}</span>
+      <button
+        type="button"
+        onClick={() => {
+          void (async (): Promise<void> => {
+            try {
+              await login("alice", "pw", passphrase);
+            } catch (err) {
+              setThrown(err instanceof Error ? err.name : "non-error-throw");
+            }
+          })();
+        }}
+      >
+        sign-in-with-passphrase
+      </button>
+    </div>
+  );
+}
+
+describe("test_web_auth_canary_skips_when_remote_sign_pubkey_is_empty", () => {
+  it("does not throw WrongPassphraseError and still persists the seed when sign_pubkey is absent", async () => {
+    // Legacy / pre-Phase-10 user: server returns the JWT but the
+    // user row has no identity pubkeys yet. The canary must skip so
+    // the user can still sign in; writeIdentitySeed must still run so
+    // the next /me wave can register-the-keys.
+    loginMock.mockResolvedValue({
+      token: "fresh-jwt-token-placeholder",
+      user: { id: "U-legacy", username: "alice" },
+      // sign_pubkey absent on purpose.
+    });
+    writeIdentitySeedMock.mockResolvedValue(undefined);
+
+    render(
+      <AuthProvider>
+        <PassphraseProbe passphrase="passphrase-twelve-or-more" />
+      </AuthProvider>,
+    );
+
+    const u = userEvent.setup();
+    await u.click(screen.getByRole("button", { name: /sign-in-with-passphrase/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("token")).toHaveTextContent("fresh-jwt-token-placeholder");
+    });
+    expect(screen.getByTestId("user")).toHaveTextContent("alice");
+    expect(screen.getByTestId("thrown")).toHaveTextContent("none");
+    expect(writeIdentitySeedMock).toHaveBeenCalledTimes(1);
+    expect(writeIdentitySeedMock).toHaveBeenCalledWith("U-legacy", expect.any(Uint8Array));
+    // Server-side logout must NOT have been triggered — that path is
+    // exclusive to the wrong-passphrase branch.
+    expect(logoutMock).not.toHaveBeenCalled();
+    expect(writeTokenMock).toHaveBeenLastCalledWith("fresh-jwt-token-placeholder");
+  });
+
+  it("also skips when sign_pubkey is explicitly the empty string", async () => {
+    loginMock.mockResolvedValue({
+      token: "fresh-jwt-token-placeholder",
+      user: { id: "U-legacy", username: "alice", sign_pubkey: "" },
+    });
+    writeIdentitySeedMock.mockResolvedValue(undefined);
+
+    render(
+      <AuthProvider>
+        <PassphraseProbe passphrase="passphrase-twelve-or-more" />
+      </AuthProvider>,
+    );
+
+    const u = userEvent.setup();
+    await u.click(screen.getByRole("button", { name: /sign-in-with-passphrase/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("token")).toHaveTextContent("fresh-jwt-token-placeholder");
+    });
+    expect(screen.getByTestId("thrown")).toHaveTextContent("none");
+    expect(writeIdentitySeedMock).toHaveBeenCalledTimes(1);
+    expect(logoutMock).not.toHaveBeenCalled();
   });
 });
