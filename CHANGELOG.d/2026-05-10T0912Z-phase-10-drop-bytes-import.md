@@ -1,0 +1,1 @@
+- chore(tests): drop unused `bytes` import + `var _ = bytes.Equal` paper-cover from `tests/e2e/phase-10/channel-membership/channel_membership_test.go`. The pre-rewrite `bytes.Repeat` callers were removed in #982; the import has been carried since.

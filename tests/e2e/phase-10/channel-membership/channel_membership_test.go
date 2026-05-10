@@ -11,7 +11,6 @@
 package channel_membership_e2e_test
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/sha512"
 	"encoding/base64"
@@ -600,7 +599,3 @@ func codeOrEmpty(e *testsupport.EnvelopeError) string {
 	}
 	return e.Code
 }
-
-// silence unused-import warnings if any path is removed in
-// follow-on edits.
-var _ = bytes.Equal
