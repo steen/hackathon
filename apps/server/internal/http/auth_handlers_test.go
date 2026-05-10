@@ -14,6 +14,7 @@ import (
 
 	"hackathon/apps/server/internal/auth"
 	appdb "hackathon/apps/server/internal/db"
+	"hackathon/apps/server/internal/repo"
 	"hackathon/migrations"
 )
 
@@ -45,8 +46,13 @@ func newFixtureWithInvite(t *testing.T, inviteCode string) *fixture {
 		t.Fatalf("ApplyFS: %v", err)
 	}
 	tickets := auth.NewTicketStore()
+	r, err := repo.New(sqlDB)
+	if err != nil {
+		t.Fatalf("repo.New: %v", err)
+	}
 	h := NewAuthHandlers(AuthDeps{
 		DB:         sqlDB,
+		Repo:       r,
 		Tickets:    tickets,
 		SigningKey: []byte("test-signing-key-must-be-long-enough"),
 		InviteCode: inviteCode,
