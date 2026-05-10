@@ -64,6 +64,21 @@ func TestCreateChannelRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+// CreateChannel — duplicate id surfaces ErrChannelIDTaken so the
+// non-Tx legacy path matches CreateChannelTx parity rather than letting
+// the channels.id PRIMARY KEY trip fall through as a raw driver 500.
+func TestCreateChannelRejectsDuplicateID(t *testing.T) {
+	r, _ := newRepo(t)
+	id := ids.NewULID()
+	if _, err := r.CreateChannel(context.Background(), id, "first", false, time.Now()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	_, err := r.CreateChannel(context.Background(), id, "second", false, time.Now())
+	if !errors.Is(err, repo.ErrChannelIDTaken) {
+		t.Fatalf("err: got %v want ErrChannelIDTaken", err)
+	}
+}
+
 // CreateChannelTx — duplicate name surfaces ErrChannelNameTaken so the
 // http handler can map to 409 without sniffing driver error prose.
 func TestCreateChannelTxRejectsDuplicateName(t *testing.T) {
