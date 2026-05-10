@@ -52,8 +52,15 @@ type dmMessagesListResponse struct {
 }
 
 // createDMRequest is the wire body for POST /api/dms.
+//
+// RootKeyWraps is the optional Phase-10 atomic-create payload (§7 +
+// L6 + L12): exactly two entries on the 201 (newly-created) path,
+// each carrying a per-recipient wrap of the conversation root key;
+// the 200 (idempotent re-call) path MUST omit the field — server
+// returns 409 `wraps_already_set` if supplied.
 type createDMRequest struct {
-	PeerUserID string `json:"peer_user_id"`
+	PeerUserID   string      `json:"peer_user_id"`
+	RootKeyWraps []WrapEntry `json:"root_key_wraps,omitempty"`
 }
 
 // sendDMRequest is the wire body for POST /api/dms/{id}/messages.
@@ -72,9 +79,28 @@ type markReadRequest struct {
 // responds 201 on create / 200 on existing per L18; the client surfaces
 // the same Conversation either way. Self-DM and unknown-peer rejections
 // surface as *APIError; branch via IsCode at the call site.
+//
+// This call omits root_key_wraps; server falls through to the legacy
+// create path (no wraps inserted). Use CreateDMWithWraps for the
+// Phase-10 atomic-create shape.
 func (c *Client) CreateDM(ctx context.Context, peerUserID string) (*Conversation, error) {
 	var out Conversation
 	if err := c.do(ctx, http.MethodPost, "/api/dms", createDMRequest{PeerUserID: peerUserID}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateDMWithWraps is the §7 + L6 + L7 atomic-create variant:
+// supplies both per-recipient wraps in the same request so the
+// conversation row + both dm_conversation_keys rows land in one
+// transaction. wraps must contain exactly 2 entries
+// (recipient_user_id ∈ {self, peer}). On the 200 idempotent re-call
+// path the server returns 409 `wraps_already_set` (DMs never rotate).
+func (c *Client) CreateDMWithWraps(ctx context.Context, peerUserID string, wraps []WrapEntry) (*Conversation, error) {
+	var out Conversation
+	body := createDMRequest{PeerUserID: peerUserID, RootKeyWraps: wraps}
+	if err := c.do(ctx, http.MethodPost, "/api/dms", body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
