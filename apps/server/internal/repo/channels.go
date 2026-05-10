@@ -39,11 +39,11 @@ type Channel struct {
 // the UNIQUE constraint on channels.name trips. Callers map this to 409.
 var ErrChannelNameTaken = errors.New("repo: channel name already taken")
 
-// ErrChannelIDTaken is returned by CreateChannelTx when the channels.id
-// PRIMARY KEY constraint trips. The §10 atomic-bootstrap path lets the
-// caller pick the ULID before signing the membership block, so a
-// duplicate id is a caller-visible 409 ("pick a fresh ULID") rather
-// than an internal error.
+// ErrChannelIDTaken is returned by CreateChannel/CreateChannelTx when
+// the channels.id PRIMARY KEY constraint trips. The §10 atomic-bootstrap
+// path lets the caller pick the ULID before signing the membership
+// block, so a duplicate id is a caller-visible 409 ("pick a fresh ULID")
+// rather than an internal error.
 var ErrChannelIDTaken = errors.New("repo: channel id already taken")
 
 // ErrChannelNotFound is returned by RenameChannel when the supplied id
@@ -120,6 +120,15 @@ func (r *Repo) GetChannel(ctx context.Context, id string) (*Channel, error) {
 // (decision-log L24): the seeded #general row passes true so new-user
 // auto-add at registration time targets it; every other channel passes
 // false until the membership API exposes a creator-facing flag.
+//
+// Errors mirror CreateChannelTx so handlers can map both code paths off
+// the same sentinel pair: ErrChannelNameTaken on a channels.name UNIQUE
+// trip, ErrChannelIDTaken on a channels.id PRIMARY KEY trip. The id
+// branch is reachable in practice only when a caller supplies a
+// pre-chosen ULID (the legacy bootstrap path generates one server-side,
+// so a collision is effectively impossible) — keeping the mapping here
+// preserves parity with the Tx variant rather than letting that arm
+// surface as a raw driver 500.
 func (r *Repo) CreateChannel(ctx context.Context, id, name string, isPublic bool, now time.Time) (*Channel, error) {
 	created := now.UTC()
 	_, err := r.db.ExecContext(ctx,
@@ -129,6 +138,9 @@ func (r *Repo) CreateChannel(ctx context.Context, id, name string, isPublic bool
 	if err != nil {
 		if isChannelNameTakenErr(err) {
 			return nil, ErrChannelNameTaken
+		}
+		if isChannelIDTakenErr(err) {
+			return nil, ErrChannelIDTaken
 		}
 		return nil, err
 	}
