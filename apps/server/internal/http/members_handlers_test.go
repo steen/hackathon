@@ -1,11 +1,16 @@
 package http
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
+	stdhttp "net/http"
 	"testing"
 	"time"
 
+	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/ids"
 	"hackathon/apps/server/internal/repo"
@@ -187,6 +192,151 @@ func TestBroadcastMembersChangedFallsBackToBootstrapGenWhenNoKeys(t *testing.T) 
 	}
 	if len(frame.Data.MembersAtRotation) != 1 || frame.Data.MembersAtRotation[0].ID != alice {
 		t.Fatalf("members_at_rotation: %+v", frame.Data.MembersAtRotation)
+	}
+}
+
+// registerWithKeys POSTs /api/auth/register with real ed25519 + box
+// pubkeys. Returns the user id, JWT, and the 32-byte sign and box
+// pubkey values plus the ed25519 private key for signing §10 blocks.
+func registerWithKeys(t *testing.T, f *fixture, username, password string) (string, string, ed25519.PrivateKey, []byte, []byte) {
+	t.Helper()
+	_, signPriv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("ed25519 generate: %v", err)
+	}
+	signPub, ok := signPriv.Public().(ed25519.PublicKey)
+	if !ok {
+		t.Fatal("ed25519 public cast")
+	}
+	// Distinct 32-byte box pubkey. Each user gets a unique fill so
+	// the L30 sender-pubkey check distinguishes them.
+	boxPub := make([]byte, 32)
+	for i := range boxPub {
+		boxPub[i] = byte(i+1) ^ byte(len(username)) // simple uniqueness
+	}
+	rr := f.post(t, "/api/auth/register", map[string]string{
+		"username":    username,
+		"password":    password,
+		"invite_code": "INVITE-OK",
+		"box_pubkey":  base64.StdEncoding.EncodeToString(boxPub),
+		"sign_pubkey": base64.StdEncoding.EncodeToString(signPub),
+	}, "")
+	if rr.Code != stdhttp.StatusCreated {
+		t.Fatalf("register %q: status=%d body=%s", username, rr.Code, rr.Body.String())
+	}
+	tok := mustToken(t, rr)
+	var id string
+	if err := f.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id); err != nil {
+		t.Fatalf("lookup id for %q: %v", username, err)
+	}
+	return id, tok, signPriv, []byte(signPub), boxPub
+}
+
+// TestPrivateInviteRejectsWhenNoCreatorWrap — Phase 10 #1014: a
+// wrap-carrying invite to a private channel that has no key
+// generation on file (i.e. the creator skipped the keys-RPC bootstrap
+// path) must be rejected with a 400, not silently bridged with the
+// legacy creatorBootstrapGenID fallback. The fallback was removed
+// once #984's bootstrap-mode keys-RPC landed.
+func TestPrivateInviteRejectsWhenNoCreatorWrap(t *testing.T) {
+	cf := newChannelsFixture(t)
+	defer cf.close()
+
+	// Wire the members handler onto the fixture's mux so the request
+	// goes through RequireJWT (the channels fixture already builds the
+	// JWT middleware and registers the channels routes).
+	require := auth.RequireJWT(auth.MiddlewareConfig{
+		SigningKey:        []byte("test-signing-key-must-be-long-enough"),
+		Lookup:            cf.handlers.LookupUserInfo,
+		WriteUnauthorized: WriteUnauthorized,
+		WithUserID:        WithUserID,
+	})
+	mh := NewMembersHandlers(MembersDeps{Repo: cf.repo, Hub: cf.hub, Now: time.Now})
+	mh.Routes(cf.mux, require, nil)
+
+	caller, tok, callerPriv, callerSignPub, callerBox := registerWithKeys(t, cf.fixture, "alice-no-boot", "correct-horse-battery")
+	invitee, _, _, inviteeSign, inviteeBox := registerWithKeys(t, cf.fixture, "bob-no-boot", "correct-horse-battery")
+
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Private channel, creator membership row carries a non-empty
+	// inviter_signature so the L33 NULL-sig check accepts; no
+	// channel_keys rows exist (bootstrap was skipped).
+	ch, err := cf.repo.CreateChannel(context.Background(), ids.NewULID(), "private-no-bootstrap", false, now)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := cf.repo.InsertChannelMember(context.Background(), repo.ChannelMember{
+		ChannelID:         ch.ID,
+		UserID:            caller,
+		InviterUserID:     caller,
+		InviterSignPubkey: callerSignPub,
+		InviterSignature:  bytes.Repeat([]byte{0x42}, 64), // any valid-shape sig; not verified on read
+		InviteeBoxPubkey:  callerBox,
+		InviteeSignPubkey: callerSignPub,
+		AddedAt:           now,
+	}, false); err != nil {
+		t.Fatalf("seed creator membership: %v", err)
+	}
+
+	// Sign the §10 scope so the handler's signature verification
+	// accepts and flow reaches the MaxChannelKeyGenerationTx branch.
+	msg := auth.MembershipSignatureMessage(ch.ID, invitee, caller, callerSignPub, auth.InviteePubkeys{
+		BoxPubkey: inviteeBox, SignPubkey: inviteeSign,
+	}, now)
+	sig := ed25519.Sign(callerPriv, msg)
+
+	body := map[string]any{
+		"user_id": invitee,
+		"membership": map[string]any{
+			"inviter_user_id":     caller,
+			"inviter_sign_pubkey": base64.StdEncoding.EncodeToString(callerSignPub),
+			"invitee_box_pubkey":  base64.StdEncoding.EncodeToString(inviteeBox),
+			"invitee_sign_pubkey": base64.StdEncoding.EncodeToString(inviteeSign),
+			"added_at":            now.Format(time.RFC3339),
+			"inviter_signature":   base64.StdEncoding.EncodeToString(sig),
+		},
+		"root_key_wrap": map[string]any{
+			"wrapped_key":       base64.StdEncoding.EncodeToString(make([]byte, 48)),
+			"sender_box_pubkey": base64.StdEncoding.EncodeToString(callerBox),
+			"nonce":             base64.StdEncoding.EncodeToString(make([]byte, 24)),
+		},
+	}
+	rr := cf.do(t, stdhttp.MethodPost, "/api/channels/"+ch.ID+"/members", body, tok)
+
+	if rr.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("status: got %d want 400 (body=%s)", rr.Code, rr.Body.String())
+	}
+	var env Envelope
+	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v body=%s", err, rr.Body.String())
+	}
+	if env.Error == nil || env.Error.Code != CodeBadRequest {
+		t.Fatalf("error code: got %+v want %s", env.Error, CodeBadRequest)
+	}
+	// Spot-check the message names the keys-RPC remediation so
+	// clients know which endpoint to call before retrying.
+	if !bytes.Contains(rr.Body.Bytes(), []byte("/api/channels/")) {
+		t.Fatalf("error message should reference the keys-RPC path; body=%s", rr.Body.String())
+	}
+
+	// L7 invariant: the rejection must NOT have written a partial
+	// channel_members + channel_keys pair. Verify both tables stay
+	// at the seed state (1 member, 0 keys).
+	var memberCount, keyCount int
+	if err := cf.repo.DB().QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM channel_members WHERE channel_id = ?`, ch.ID).Scan(&memberCount); err != nil {
+		t.Fatalf("count members: %v", err)
+	}
+	if memberCount != 1 {
+		t.Fatalf("channel_members count after rejection: got %d want 1 (creator only)", memberCount)
+	}
+	if err := cf.repo.DB().QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM channel_keys WHERE channel_id = ?`, ch.ID).Scan(&keyCount); err != nil {
+		t.Fatalf("count keys: %v", err)
+	}
+	if keyCount != 0 {
+		t.Fatalf("channel_keys count after rejection: got %d want 0", keyCount)
 	}
 }
 

@@ -307,14 +307,16 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	if !hasGen {
-		// Channel was created via the legacy wraps-omitted bootstrap
-		// path (membership-only, no creator wrap). Treat the first
-		// wrap-carrying invite as the implicit gen 1; subsequent
-		// invites stay at gen 1 because rotation only fires on
-		// member removal (L16). #984's keys-RPC will tighten this
-		// when the bootstrap mode lands; this fallback keeps L7
-		// recoverable for channels created before the wrap loop.
-		currentGen = creatorBootstrapGenID
+		// Per #1014: with #984's bootstrap-mode keys-RPC merged, a
+		// private channel with no wraps is no longer reachable via
+		// any correct flow. The creator's wrap is inserted by
+		// POST /api/channels/{id}/keys before any invite can run,
+		// so a wrap-carrying invite landing here means the caller
+		// skipped bootstrap. Reject as caller error rather than
+		// silently bridging with creatorBootstrapGenID.
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+			"channel has no key generation; creator must POST /api/channels/{id}/keys before inviting")
+		return
 	}
 	if err := h.deps.Repo.InsertChannelMemberTx(r.Context(), tx, row, channelIsPublic); err != nil {
 		switch {

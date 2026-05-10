@@ -168,6 +168,31 @@ func dummyWrap(senderBoxPub []byte) map[string]any {
 	}
 }
 
+// bootstrapKeys posts /api/channels/{id}/keys with the gen=1
+// wrap-to-self body so the wrap-carrying invite path's
+// MaxChannelKeyGenerationTx returns hasGen=true. #984's keys-RPC
+// handles the validation; this helper just wires the request shape
+// the way every fresh private channel is expected to bootstrap
+// before its first invite.
+func bootstrapKeys(t *testing.T, httpURL, bearer, channelID string, creator fixtureUser) {
+	t.Helper()
+	body := map[string]any{
+		"generation_id": 1,
+		"wraps": []map[string]any{
+			{
+				"recipient_user_id": creator.UserID,
+				"wrapped_key":       stdEnc.EncodeToString(bytesRepeat(0x77, 48)),
+				"sender_box_pubkey": stdEnc.EncodeToString(creator.BoxPub),
+				"nonce":             stdEnc.EncodeToString(bytesRepeat(0x55, 24)),
+			},
+		},
+	}
+	status, _, raw := testsupport.PostJSON(t, httpURL, "/api/channels/"+channelID+"/keys", bearer, body)
+	if status != http.StatusCreated {
+		t.Fatalf("bootstrap keys: status %d body=%s want 201", status, raw)
+	}
+}
+
 // createPublicChannel posts /api/channels with is_public=true and
 // returns the channel id. Public channels accept the legacy bare body
 // (no membership / wraps) so the auto-fill path keeps working.
@@ -305,6 +330,13 @@ func TestRegistrationAutoJoinsGeneral(t *testing.T) {
 // root_key_wrap. Server validates the signature, the L30 sender
 // pubkey ownership, and the L39 byte-lengths, then atomically
 // inserts (channel_members, channel_keys) per L7.
+//
+// Per #1014: a wrap-carrying invite to a private channel with no
+// key generation on file is now rejected (the legacy
+// creatorBootstrapGenID fallback in members_handlers.go was removed
+// once #984's bootstrap-mode keys-RPC merged). The flow MUST call
+// POST /api/channels/{id}/keys with generation_id=1 to insert the
+// creator's wrap before issuing the invite.
 func TestPrivateChannelInviteFlow(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
 	alice := registerFixture(t, srv, "alice", 0xCC, 0xAB)
@@ -319,6 +351,11 @@ func TestPrivateChannelInviteFlow(t *testing.T) {
 			t.Fatalf("L25 violation: bob sees private channel %q before invite", chID)
 		}
 	}
+
+	// #1014: bootstrap the channel's gen=1 wrap-to-self before the
+	// wrap-carrying invite. Without this, MaxChannelKeyGenerationTx
+	// returns hasGen=false and the invite handler now responds 400.
+	bootstrapKeys(t, srv.HTTPURL, alice.Token, chID, alice)
 
 	added := time.Now().UTC().Truncate(time.Second)
 	signPriv := ed25519.NewKeyFromSeed(alice.SignSeed)
