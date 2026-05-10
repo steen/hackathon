@@ -4,13 +4,16 @@
 // #general immutability (L8), is_public auto-add at registration (§9 +
 // R1.2), and the L25 listing filter that hides non-member channels.
 //
-// Out of scope (covered elsewhere): key-wrap on invite (#982 / #984),
-// inviter-signature crypto verify (#984 — this PR validates byte-shape
-// only).
+// REWRITTEN by #982 in lockstep with the wrap-carrying invite contract:
+// private-channel invites now require BOTH the §10-signed
+// MembershipBlock AND a root_key_wrap. Public-channel auto-fill
+// (NULL signature, no wrap) is preserved unchanged.
 package channel_membership_e2e_test
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -18,38 +21,189 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/curve25519"
+
 	"hackathon/tests/e2e/internal/testsupport"
 )
 
-var stdEnc = base64.StdEncoding
+// membershipSignatureScopePrefix mirrors
+// apps/server/internal/auth/membership_verify.go's domain-separation
+// tag. The internal package can't be imported from tests/e2e, so the
+// constant + signing helpers are duplicated here. Drift fails the
+// e2e signature tests below — the canonical source is the server
+// constant; this is a copy that must move when the server moves.
+const membershipSignatureScopePrefix = "snakd-mship-v1:"
 
-func registerUser(t *testing.T, srv *testsupport.Server, prefix string) (userID, token string) {
-	t.Helper()
-	name := prefix + "-" + testsupport.RandomSecret(t, 4)
-	pw := testsupport.RandomSecret(t, 12)
-	return testsupport.Register(t, srv.HTTPURL, srv.InviteCode, name, pw)
+// membershipSignatureMessage is a verbatim copy of
+// auth.MembershipSignatureMessage. Kept in lockstep with the server
+// — the e2e tests in this file fail loudly if it drifts.
+func membershipSignatureMessage(
+	channelID, userID, inviterUserID string,
+	inviterSignPubkey []byte,
+	inviteeBoxPubkey, inviteeSignPubkey []byte,
+	addedAt time.Time,
+) []byte {
+	stamp := addedAt.UTC().Format(time.RFC3339)
+	sep := []byte("|")
+	out := make([]byte, 0, 256)
+	out = append(out, []byte(membershipSignatureScopePrefix)...)
+	out = append(out, []byte(channelID)...)
+	out = append(out, sep...)
+	out = append(out, []byte(userID)...)
+	out = append(out, sep...)
+	out = append(out, []byte(inviterUserID)...)
+	out = append(out, sep...)
+	out = append(out, inviterSignPubkey...)
+	out = append(out, sep...)
+	out = append(out, inviteeBoxPubkey...)
+	out = append(out, sep...)
+	out = append(out, inviteeSignPubkey...)
+	out = append(out, sep...)
+	out = append(out, []byte(stamp)...)
+	return out
 }
 
-// createChannel posts /api/channels with the given is_public toggle and
-// returns the channel id. The caller's bearer becomes the only initial
-// member (§10 self-bootstrap carve-out).
-func createChannel(t *testing.T, httpURL, bearer, name string, isPublic bool) string {
+// boxSeedKeypair mirrors auth.BoxSeedKeypair (libsodium semantics).
+func boxSeedKeypair(seed []byte) ([32]byte, [32]byte) {
+	if len(seed) != 32 {
+		panic("boxSeedKeypair: seed must be 32 bytes")
+	}
+	h := sha512.Sum512(seed)
+	var priv [32]byte
+	copy(priv[:], h[:32])
+	priv[0] &= 248
+	priv[31] &= 127
+	priv[31] |= 64
+	pubBytes, err := curve25519.X25519(priv[:], curve25519.Basepoint)
+	if err != nil {
+		panic("boxSeedKeypair: " + err.Error())
+	}
+	var pub [32]byte
+	copy(pub[:], pubBytes)
+	return pub, priv
+}
+
+var stdEnc = base64.StdEncoding
+
+// registerUserWithIdentity registers a fresh user, derives a Phase-10
+// identity from their passphrase, and uploads the pubkeys via the
+// register payload's box_pubkey/sign_pubkey extras. The returned
+// identity is what test bodies sign membership blocks with.
+type fixtureUser struct {
+	UserID   string
+	Token    string
+	BoxPub   []byte
+	BoxPriv  []byte
+	SignPub  ed25519.PublicKey
+	SignSeed []byte
+}
+
+func registerFixture(t *testing.T, srv *testsupport.Server, prefix string) fixtureUser {
 	t.Helper()
-	body := map[string]any{"name": name, "is_public": isPublic}
+	name := prefix + "-" + testsupport.RandomSecret(t, 4)
+	pw := "test-passphrase-" + testsupport.RandomSecret(t, 8)
+	signSeed := bytesRepeat(0xCC, 32)
+	signPriv := ed25519.NewKeyFromSeed(signSeed)
+	signPub, ok := signPriv.Public().(ed25519.PublicKey)
+	if !ok {
+		t.Fatal("ed25519: NewKeyFromSeed did not return a PublicKey")
+	}
+	boxSeed := bytesRepeat(0xAB, 32)
+	boxPub, boxPriv := boxSeedKeypair(boxSeed)
+	uid, tok := testsupport.Register(t, srv.HTTPURL, srv.InviteCode, name, pw, testsupport.RegisterOptions{
+		ExtraFields: map[string]any{
+			"box_pubkey":  stdEnc.EncodeToString(boxPub[:]),
+			"sign_pubkey": stdEnc.EncodeToString(signPub),
+		},
+	})
+	return fixtureUser{
+		UserID:   uid,
+		Token:    tok,
+		BoxPub:   boxPub[:],
+		BoxPriv:  boxPriv[:],
+		SignPub:  signPub,
+		SignSeed: signSeed,
+	}
+}
+
+// bytesRepeat returns a length-n buffer where every byte == b. Used
+// for deterministic per-fixture identities; tests that need uniqueness
+// pass distinct b values.
+func bytesRepeat(b byte, n int) []byte {
+	out := make([]byte, n)
+	for i := range out {
+		out[i] = b
+	}
+	return out
+}
+
+// signMembership produces a §10-scope inviter_signature over the
+// (channel, invitee, inviter) tuple. Mirror of auth.MembershipSignatureMessage.
+func signMembership(
+	t *testing.T,
+	signPriv ed25519.PrivateKey,
+	channelID, inviteeUserID, inviterUserID string,
+	inviterSignPub, inviteeBoxPub, inviteeSignPub []byte,
+	addedAt time.Time,
+) []byte {
+	t.Helper()
+	msg := membershipSignatureMessage(
+		channelID, inviteeUserID, inviterUserID,
+		inviterSignPub,
+		inviteeBoxPub, inviteeSignPub,
+		addedAt,
+	)
+	return ed25519.Sign(signPriv, msg)
+}
+
+// dummyWrap returns a syntactically-valid (48/24/32-byte) WrapEntry
+// owned by sender. Wrap content is opaque to the server in this PR;
+// the L30/L39 checks pass on the byte-shape and pubkey ownership.
+func dummyWrap(senderBoxPub []byte) map[string]any {
+	wrapped := bytesRepeat(0x77, 48)
+	nonce := bytesRepeat(0x55, 24)
+	return map[string]any{
+		"wrapped_key":       stdEnc.EncodeToString(wrapped),
+		"sender_box_pubkey": stdEnc.EncodeToString(senderBoxPub),
+		"nonce":             stdEnc.EncodeToString(nonce),
+	}
+}
+
+// createPublicChannel posts /api/channels with is_public=true and
+// returns the channel id. Public channels accept the legacy bare body
+// (no membership / wraps) so the auto-fill path keeps working.
+func createPublicChannel(t *testing.T, httpURL, bearer, name string) string {
+	t.Helper()
+	body := map[string]any{"name": name, "is_public": true}
 	status, env, raw := testsupport.PostJSON(t, httpURL, "/api/channels", bearer, body)
 	if status != http.StatusCreated {
 		t.Fatalf("POST /api/channels: status %d body %s", status, raw)
 	}
 	var ch struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		IsPublic *bool  `json:"is_public"`
+		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(*env.Data, &ch); err != nil {
 		t.Fatalf("decode channel: %v body=%s", err, raw)
 	}
-	if ch.IsPublic == nil || *ch.IsPublic != isPublic {
-		t.Fatalf("is_public on response: got %v want %v (body=%s)", ch.IsPublic, isPublic, raw)
+	return ch.ID
+}
+
+// createPrivateChannel posts /api/channels with the legacy private-bare
+// shape. The current Phase-10 server tolerates this (membership-only
+// row with NULL signature; lazy-wrap fills wraps later) so existing
+// harnesses keep round-tripping.
+func createPrivateChannel(t *testing.T, httpURL, bearer, name string) string {
+	t.Helper()
+	body := map[string]any{"name": name, "is_public": false}
+	status, env, raw := testsupport.PostJSON(t, httpURL, "/api/channels", bearer, body)
+	if status != http.StatusCreated {
+		t.Fatalf("POST /api/channels: status %d body %s", status, raw)
+	}
+	var ch struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(*env.Data, &ch); err != nil {
+		t.Fatalf("decode channel: %v body=%s", err, raw)
 	}
 	return ch.ID
 }
@@ -80,9 +234,7 @@ func listChannelIDs(t *testing.T, httpURL, bearer string) []string {
 	}
 	var data struct {
 		Channels []struct {
-			ID       string `json:"id"`
-			Name     string `json:"name"`
-			IsPublic *bool  `json:"is_public"`
+			ID string `json:"id"`
 		} `json:"channels"`
 	}
 	if err := json.Unmarshal(*env.Data, &data); err != nil {
@@ -95,8 +247,6 @@ func listChannelIDs(t *testing.T, httpURL, bearer string) []string {
 	return out
 }
 
-// deleteJSON issues a DELETE — testsupport does not export one yet so
-// keep the helper local. Returns status + raw body.
 func deleteJSON(t *testing.T, httpURL, path, bearer string) (int, []byte) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodDelete, httpURL+path, nil) //nolint:noctx
@@ -116,7 +266,6 @@ func deleteJSON(t *testing.T, httpURL, path, bearer string) (int, []byte) {
 	return resp.StatusCode, raw
 }
 
-// getJSON wraps GET with a body returned for easy inspection.
 func getJSON(t *testing.T, httpURL, path, bearer string) (int, testsupport.Envelope, []byte) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, httpURL+path, nil) //nolint:noctx
@@ -145,66 +294,56 @@ func getJSON(t *testing.T, httpURL, path, bearer string) (int, testsupport.Envel
 // GET /api/channels.
 func TestRegistrationAutoJoinsGeneral(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, tok := registerUser(t, srv, "alice")
-	ids := listChannelIDs(t, srv.HTTPURL, tok)
+	alice := registerFixture(t, srv, "alice")
+	ids := listChannelIDs(t, srv.HTTPURL, alice.Token)
 	if len(ids) != 1 {
 		t.Fatalf("listing on fresh registration: got %d channels want 1 (#general); ids=%v", len(ids), ids)
 	}
 }
 
-// TestPrivateChannelInviteFlow — POST /api/channels with is_public=false
-// makes the creator the sole member. A second user does NOT see the
-// channel until invited; after invite, both see it.
+// TestPrivateChannelInviteFlow — REWRITTEN per #982 AC: the invite
+// body now carries both a §10-signed membership block AND a
+// root_key_wrap. Server validates the signature, the L30 sender
+// pubkey ownership, and the L39 byte-lengths, then atomically
+// inserts (channel_members, channel_keys) per L7.
 func TestPrivateChannelInviteFlow(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, aliceTok := registerUser(t, srv, "alice")
-	bobID, bobTok := registerUser(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
 
-	chID := createChannel(t, srv.HTTPURL, aliceTok, "secret-"+testsupport.RandomSecret(t, 4), false)
+	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "secret-"+testsupport.RandomSecret(t, 4))
 
 	// Bob is not a member yet — listing must show only #general.
-	bobIDs := listChannelIDs(t, srv.HTTPURL, bobTok)
+	bobIDs := listChannelIDs(t, srv.HTTPURL, bob.Token)
 	for _, id := range bobIDs {
 		if id == chID {
 			t.Fatalf("L25 violation: bob sees private channel %q before invite", chID)
 		}
 	}
 
-	// Alice invites bob with a well-shaped membership block. The
-	// signature is a 64-byte placeholder — the wrap loop in #984 will
-	// verify it; this PR validates byte-shape only.
-	body := map[string]any{
-		"user_id": bobID,
-		"membership": map[string]any{
-			"inviter_user_id":     "", // re-set after we look up alice id
-			"inviter_sign_pubkey": b64Pubkey(),
-			"invitee_box_pubkey":  b64Pubkey(),
-			"invitee_sign_pubkey": b64Pubkey(),
-			"added_at":            time.Now().UTC().Format(time.RFC3339),
-			"inviter_signature":   b64Signature(),
-		},
-	}
-	// Resolve alice id via /api/auth/me.
-	status, env, raw := getJSON(t, srv.HTTPURL, "/api/auth/me", aliceTok)
-	if status != http.StatusOK {
-		t.Fatalf("GET /me: %d body %s", status, raw)
-	}
-	var me struct {
-		User struct {
-			ID string `json:"id"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal(*env.Data, &me); err != nil {
-		t.Fatalf("decode me: %v body %s", err, raw)
-	}
-	mb := body["membership"].(map[string]any)
-	mb["inviter_user_id"] = me.User.ID
+	added := time.Now().UTC().Truncate(time.Second)
+	signPriv := ed25519.NewKeyFromSeed(alice.SignSeed)
+	sig := signMembership(t, signPriv, chID, bob.UserID, alice.UserID,
+		alice.SignPub, bob.BoxPub, bob.SignPub, added)
 
-	status, _, raw = testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", aliceTok, body)
+	body := map[string]any{
+		"user_id": bob.UserID,
+		"membership": map[string]any{
+			"inviter_user_id":     alice.UserID,
+			"inviter_sign_pubkey": stdEnc.EncodeToString(alice.SignPub),
+			"invitee_box_pubkey":  stdEnc.EncodeToString(bob.BoxPub),
+			"invitee_sign_pubkey": stdEnc.EncodeToString(bob.SignPub),
+			"added_at":            added.Format(time.RFC3339),
+			"inviter_signature":   stdEnc.EncodeToString(sig),
+		},
+		"root_key_wrap": dummyWrap(alice.BoxPub),
+	}
+
+	status, _, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token, body)
 	if status != http.StatusCreated {
 		t.Fatalf("invite: status %d body %s", status, raw)
 	}
-	bobIDs = listChannelIDs(t, srv.HTTPURL, bobTok)
+	bobIDs = listChannelIDs(t, srv.HTTPURL, bob.Token)
 	sawIt := false
 	for _, id := range bobIDs {
 		if id == chID {
@@ -217,29 +356,141 @@ func TestPrivateChannelInviteFlow(t *testing.T) {
 	}
 }
 
+// TestPrivateInviteRejectsBadSignature — §10: a tampered signature
+// returns 400 invalid_membership_signature; member + wrap are NOT
+// inserted (L7 — the atomic transaction rolls back).
+func TestPrivateInviteRejectsBadSignature(t *testing.T) {
+	srv := testsupport.StartServer(t, testsupport.StartOptions{})
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+
+	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "badsig-"+testsupport.RandomSecret(t, 4))
+
+	added := time.Now().UTC().Truncate(time.Second)
+	tamperedSig := bytesRepeat(0xEE, 64) // not a real Ed25519 signature
+
+	body := map[string]any{
+		"user_id": bob.UserID,
+		"membership": map[string]any{
+			"inviter_user_id":     alice.UserID,
+			"inviter_sign_pubkey": stdEnc.EncodeToString(alice.SignPub),
+			"invitee_box_pubkey":  stdEnc.EncodeToString(bob.BoxPub),
+			"invitee_sign_pubkey": stdEnc.EncodeToString(bob.SignPub),
+			"added_at":            added.Format(time.RFC3339),
+			"inviter_signature":   stdEnc.EncodeToString(tamperedSig),
+		},
+		"root_key_wrap": dummyWrap(alice.BoxPub),
+	}
+	status, env, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token, body)
+	if status != http.StatusBadRequest {
+		t.Fatalf("bad signature invite: status %d body %s want 400", status, raw)
+	}
+	if env.Error == nil || env.Error.Code != "invalid_membership_signature" {
+		t.Fatalf("expected invalid_membership_signature; got %s body=%s", codeOrEmpty(env.Error), raw)
+	}
+}
+
+// TestPrivateInviteRejectsSenderPubkeyMismatch — L30: a wrap that
+// claims sender_box_pubkey != caller's stored box_pubkey returns 400
+// sender_pubkey_mismatch.
+func TestPrivateInviteRejectsSenderPubkeyMismatch(t *testing.T) {
+	srv := testsupport.StartServer(t, testsupport.StartOptions{})
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+
+	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "l30-"+testsupport.RandomSecret(t, 4))
+
+	added := time.Now().UTC().Truncate(time.Second)
+	signPriv := ed25519.NewKeyFromSeed(alice.SignSeed)
+	sig := signMembership(t, signPriv, chID, bob.UserID, alice.UserID,
+		alice.SignPub, bob.BoxPub, bob.SignPub, added)
+
+	otherBoxPub := bytesRepeat(0xFF, 32) // not alice's
+	body := map[string]any{
+		"user_id": bob.UserID,
+		"membership": map[string]any{
+			"inviter_user_id":     alice.UserID,
+			"inviter_sign_pubkey": stdEnc.EncodeToString(alice.SignPub),
+			"invitee_box_pubkey":  stdEnc.EncodeToString(bob.BoxPub),
+			"invitee_sign_pubkey": stdEnc.EncodeToString(bob.SignPub),
+			"added_at":            added.Format(time.RFC3339),
+			"inviter_signature":   stdEnc.EncodeToString(sig),
+		},
+		"root_key_wrap": dummyWrap(otherBoxPub),
+	}
+	status, env, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token, body)
+	if status != http.StatusBadRequest {
+		t.Fatalf("L30 invite: status %d body %s want 400", status, raw)
+	}
+	if env.Error == nil || env.Error.Code != "sender_pubkey_mismatch" {
+		t.Fatalf("expected sender_pubkey_mismatch; got %s body=%s", codeOrEmpty(env.Error), raw)
+	}
+}
+
+// TestPrivateInviteRejectsBadWrapSize — L39: a wrap with the wrong
+// byte length returns 400 wrap_size_invalid.
+func TestPrivateInviteRejectsBadWrapSize(t *testing.T) {
+	srv := testsupport.StartServer(t, testsupport.StartOptions{})
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+
+	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "l39-"+testsupport.RandomSecret(t, 4))
+
+	added := time.Now().UTC().Truncate(time.Second)
+	signPriv := ed25519.NewKeyFromSeed(alice.SignSeed)
+	sig := signMembership(t, signPriv, chID, bob.UserID, alice.UserID,
+		alice.SignPub, bob.BoxPub, bob.SignPub, added)
+
+	// 47-byte wrapped_key — one short of the 48-byte invariant.
+	shortWrap := map[string]any{
+		"wrapped_key":       stdEnc.EncodeToString(bytesRepeat(0x77, 47)),
+		"sender_box_pubkey": stdEnc.EncodeToString(alice.BoxPub),
+		"nonce":             stdEnc.EncodeToString(bytesRepeat(0x55, 24)),
+	}
+	body := map[string]any{
+		"user_id": bob.UserID,
+		"membership": map[string]any{
+			"inviter_user_id":     alice.UserID,
+			"inviter_sign_pubkey": stdEnc.EncodeToString(alice.SignPub),
+			"invitee_box_pubkey":  stdEnc.EncodeToString(bob.BoxPub),
+			"invitee_sign_pubkey": stdEnc.EncodeToString(bob.SignPub),
+			"added_at":            added.Format(time.RFC3339),
+			"inviter_signature":   stdEnc.EncodeToString(sig),
+		},
+		"root_key_wrap": shortWrap,
+	}
+	status, env, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token, body)
+	if status != http.StatusBadRequest {
+		t.Fatalf("L39 invite: status %d body %s want 400", status, raw)
+	}
+	if env.Error == nil || env.Error.Code != "wrap_size_invalid" {
+		t.Fatalf("expected wrap_size_invalid; got %s body=%s", codeOrEmpty(env.Error), raw)
+	}
+}
+
 // TestKickRemovesMember — DELETE on the membership endpoint removes
-// the row; the kicked user no longer sees the channel.
+// the row; the kicked user no longer sees the channel. Public-channel
+// auto-fill path so no membership block is needed.
 func TestKickRemovesMember(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, aliceTok := registerUser(t, srv, "alice")
-	bobID, bobTok := registerUser(t, srv, "bob")
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
 
-	chID := createChannel(t, srv.HTTPURL, aliceTok, "kick-"+testsupport.RandomSecret(t, 4), true)
+	chID := createPublicChannel(t, srv.HTTPURL, alice.Token, "kick-"+testsupport.RandomSecret(t, 4))
 
-	// Alice invites bob (public-channel — NULL signature is accepted).
-	body := map[string]any{"user_id": bobID}
-	status, _, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", aliceTok, body)
+	body := map[string]any{"user_id": bob.UserID}
+	status, _, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token, body)
 	if status != http.StatusCreated {
 		t.Fatalf("public invite: %d body %s", status, raw)
 	}
-	if !sees(listChannelIDs(t, srv.HTTPURL, bobTok), chID) {
+	if !sees(listChannelIDs(t, srv.HTTPURL, bob.Token), chID) {
 		t.Fatalf("bob should see channel after invite")
 	}
-	status, raw = deleteJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members/"+bobID, aliceTok)
+	status, raw = deleteJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members/"+bob.UserID, alice.Token)
 	if status != http.StatusNoContent {
 		t.Fatalf("kick: %d body %s", status, raw)
 	}
-	if sees(listChannelIDs(t, srv.HTTPURL, bobTok), chID) {
+	if sees(listChannelIDs(t, srv.HTTPURL, bob.Token), chID) {
 		t.Fatalf("post-kick: bob still sees channel %q", chID)
 	}
 }
@@ -247,14 +498,14 @@ func TestKickRemovesMember(t *testing.T) {
 // TestSelfLeaveSucceeds — a member can leave a non-#general channel.
 func TestSelfLeaveSucceeds(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, aliceTok := registerUser(t, srv, "alice")
-	bobID, bobTok := registerUser(t, srv, "bob")
-	chID := createChannel(t, srv.HTTPURL, aliceTok, "leave-"+testsupport.RandomSecret(t, 4), true)
-	if status, _, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", aliceTok,
-		map[string]any{"user_id": bobID}); status != http.StatusCreated {
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+	chID := createPublicChannel(t, srv.HTTPURL, alice.Token, "leave-"+testsupport.RandomSecret(t, 4))
+	if status, _, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token,
+		map[string]any{"user_id": bob.UserID}); status != http.StatusCreated {
 		t.Fatalf("invite bob: %d body %s", status, raw)
 	}
-	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members/"+bobID, bobTok)
+	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members/"+bob.UserID, bob.Token)
 	if status != http.StatusNoContent {
 		t.Fatalf("self-leave: %d body %s", status, raw)
 	}
@@ -263,14 +514,13 @@ func TestSelfLeaveSucceeds(t *testing.T) {
 // TestSelfLeaveOnGeneralIs403 — L8: #general membership is immutable.
 func TestSelfLeaveOnGeneralIs403(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	aliceID, aliceTok := registerUser(t, srv, "alice")
-	// Resolve #general id via the listing.
-	ids := listChannelIDs(t, srv.HTTPURL, aliceTok)
+	alice := registerFixture(t, srv, "alice")
+	ids := listChannelIDs(t, srv.HTTPURL, alice.Token)
 	if len(ids) != 1 {
 		t.Fatalf("expected #general only on fresh listing; got %v", ids)
 	}
 	generalID := ids[0]
-	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+generalID+"/members/"+aliceID, aliceTok)
+	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+generalID+"/members/"+alice.UserID, alice.Token)
 	if status != http.StatusForbidden {
 		t.Fatalf("self-leave on #general: status %d body %s want 403", status, raw)
 	}
@@ -279,11 +529,11 @@ func TestSelfLeaveOnGeneralIs403(t *testing.T) {
 // TestKickOnGeneralIs403 — L8: also rejects kick attempts on #general.
 func TestKickOnGeneralIs403(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, aliceTok := registerUser(t, srv, "alice")
-	bobID, _ := registerUser(t, srv, "bob")
-	ids := listChannelIDs(t, srv.HTTPURL, aliceTok)
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+	ids := listChannelIDs(t, srv.HTTPURL, alice.Token)
 	generalID := ids[0]
-	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+generalID+"/members/"+bobID, aliceTok)
+	status, raw := deleteJSON(t, srv.HTTPURL, "/api/channels/"+generalID+"/members/"+bob.UserID, alice.Token)
 	if status != http.StatusForbidden {
 		t.Fatalf("kick on #general: status %d body %s want 403", status, raw)
 	}
@@ -292,16 +542,15 @@ func TestKickOnGeneralIs403(t *testing.T) {
 // TestListMembersRequiresMembership — non-members get 403.
 func TestListMembersRequiresMembership(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, aliceTok := registerUser(t, srv, "alice")
-	_, bobTok := registerUser(t, srv, "bob")
-	chID := createChannel(t, srv.HTTPURL, aliceTok, "private-"+testsupport.RandomSecret(t, 4), false)
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "private-"+testsupport.RandomSecret(t, 4))
 
-	status, _, _ := getJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", bobTok)
+	status, _, _ := getJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", bob.Token)
 	if status != http.StatusForbidden {
 		t.Fatalf("non-member GET /members: status %d want 403", status)
 	}
-	// Alice (member) gets 200.
-	status, env, raw := getJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", aliceTok)
+	status, env, raw := getJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token)
 	if status != http.StatusOK {
 		t.Fatalf("member GET /members: %d body %s", status, raw)
 	}
@@ -316,17 +565,20 @@ func TestListMembersRequiresMembership(t *testing.T) {
 	}
 }
 
-// TestPrivateChannelInviteWithoutMembershipRejected — L33 enforcement:
-// inserting a NULL-signature row on a private channel returns 400.
-func TestPrivateChannelInviteWithoutMembershipRejected(t *testing.T) {
+// TestPrivateChannelInviteWithoutWrapRejected — REWRITTEN per #982 AC.
+// Posting a private-channel invite without root_key_wrap returns 400
+// (was: TestPrivateChannelInviteWithoutMembershipRejected; the "no
+// membership" path is now also a 400 but the ROOT-cause expectation
+// flips — clients must supply both blocks).
+func TestPrivateChannelInviteWithoutWrapRejected(t *testing.T) {
 	srv := testsupport.StartServer(t, testsupport.StartOptions{})
-	_, aliceTok := registerUser(t, srv, "alice")
-	bobID, _ := registerUser(t, srv, "bob")
-	chID := createChannel(t, srv.HTTPURL, aliceTok, "l33-"+testsupport.RandomSecret(t, 4), false)
-	status, env, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", aliceTok,
-		map[string]any{"user_id": bobID})
+	alice := registerFixture(t, srv, "alice")
+	bob := registerFixture(t, srv, "bob")
+	chID := createPrivateChannel(t, srv.HTTPURL, alice.Token, "nowrap-"+testsupport.RandomSecret(t, 4))
+	status, env, raw := testsupport.PostJSON(t, srv.HTTPURL, "/api/channels/"+chID+"/members", alice.Token,
+		map[string]any{"user_id": bob.UserID})
 	if status != http.StatusBadRequest {
-		t.Fatalf("invite without membership block on private channel: status %d body %s want 400", status, raw)
+		t.Fatalf("invite without wrap on private channel: status %d body %s want 400", status, raw)
 	}
 	if env.Error == nil || env.Error.Code == "" {
 		t.Fatalf("expected error envelope; got %s", raw)
@@ -342,19 +594,13 @@ func sees(ids []string, target string) bool {
 	return false
 }
 
-func b64Pubkey() string {
-	// 32 raw bytes base64-encoded — equivalent to "AA"*32 in StdEncoding.
-	b := bytes.Repeat([]byte{0x01}, 32)
-	return base64Encode(b)
+func codeOrEmpty(e *testsupport.EnvelopeError) string {
+	if e == nil {
+		return ""
+	}
+	return e.Code
 }
 
-func b64Signature() string {
-	// 64 raw bytes base64-encoded — placeholder; this PR validates byte-
-	// length only, the signature crypto verify lands with #984.
-	b := bytes.Repeat([]byte{0x02}, 64)
-	return base64Encode(b)
-}
-
-func base64Encode(b []byte) string {
-	return stdEnc.EncodeToString(b)
-}
+// silence unused-import warnings if any path is removed in
+// follow-on edits.
+var _ = bytes.Equal

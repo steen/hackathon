@@ -9,6 +9,7 @@ import (
 	stdhttp "net/http"
 	"time"
 
+	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/hub"
 	"hackathon/apps/server/internal/ids"
 	"hackathon/apps/server/internal/repo"
@@ -108,15 +109,20 @@ func (h *MembersHandlers) ListMembers(w stdhttp.ResponseWriter, r *stdhttp.Reque
 }
 
 // inviteRequest is the body for POST /api/channels/{id}/members. The
-// optional `membership` block is the §10 inviter-signature payload
-// pinned at invite time (handlers in #984 will verify the signature).
-// This PR validates byte-length only so the row is well-shaped; the
-// full crypto verify lands when the lazy-wrap loop ships. Strict-decode
-// per L1 — a typo in the client surfaces as 400 rather than a silent
-// bypass.
+// `membership` block carries the §10 inviter-signature payload; the
+// `root_key_wrap` is the singleton WrapEntry for the invitee
+// (recipient_user_id is implicit — the URL pins it). Strict-decoded
+// per L1 (DisallowUnknownFields).
+//
+// Public-channel exception: when membership AND root_key_wrap are both
+// omitted on a channel with is_public=TRUE, the server-auto-fill path
+// runs (NULL signature, no wrap row inserted; lazy-wrap-on-online
+// supplies the wrap later). Private channels require both blocks and
+// reject with 400.
 type inviteRequest struct {
-	UserID     string                 `json:"user_id"`
-	Membership *inviteMembershipBlock `json:"membership,omitempty"`
+	UserID      string                 `json:"user_id"`
+	Membership  *inviteMembershipBlock `json:"membership,omitempty"`
+	RootKeyWrap *wrapEntryWire         `json:"root_key_wrap,omitempty"`
 }
 
 type inviteMembershipBlock struct {
@@ -129,15 +135,25 @@ type inviteMembershipBlock struct {
 }
 
 // Invite handles POST /api/channels/{id}/members. Inserts a
-// channel_members row when the caller is a current member of the
-// channel. The invitee must exist (404 otherwise). For private
-// channels (is_public = FALSE), the request body must carry a
-// well-shaped `membership` block — L33 enforces NOT NULL signature at
-// the repo layer; this handler validates byte-lengths so the failure
-// surfaces as 400 rather than an opaque constraint string.
+// `channel_members` row when the caller is a current member; for
+// private channels the body must carry a §10-signed membership block
+// AND a `root_key_wrap` (atomic invariant L7 — member ⇔ wrap). Public
+// channels accept the bare `{user_id}` shape and run the
+// server-auto-fill path (NULL signature, no wrap; lazy-wrap-on-online
+// fills the wrap later).
 //
-// Key-wrap is OUT OF SCOPE for this PR (#982 / #984). Once the wrap
-// loop lands, the caller will also POST a wrap row in the same tx.
+// On a private-channel invite this handler:
+//
+//  1. Verifies caller is a member of the channel (403 otherwise).
+//  2. Verifies invitee exists (404 otherwise).
+//  3. Decodes the membership block (caller-supplied byte shape +
+//     L39 byte-length checks on every pubkey + signature).
+//  4. Validates the §10 cross-references (inviter_user_id == caller;
+//     inviter_sign_pubkey == users.sign_pubkey WHERE id = caller;
+//     invitee_*_pubkey == users.*_pubkey WHERE id = invitee).
+//  5. Verifies the inviter_signature under the §10 scope.
+//  6. Decodes + L30/L39-validates the root_key_wrap.
+//  7. Inserts member + wrap rows in ONE transaction (L7).
 func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
@@ -180,7 +196,7 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusForbidden, CodeForbidden, "not a member of this channel")
 		return
 	}
-	inviteeExists, _, _, err := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), req.UserID)
+	inviteeExists, inviteeBox, inviteeSign, err := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), req.UserID)
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load invitee")
 		return
@@ -190,48 +206,119 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		return
 	}
 	channelIsPublic := channel.IsPublic != nil && *channel.IsPublic
-	row, derr := buildMembershipRow(channelID, req, caller, channelIsPublic, h.deps.Now())
-	if derr != nil {
-		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, derr.Error())
-		return
-	}
-	// Public-channel server-auto-fill: when the caller omits the
-	// `membership` block (only allowed for is_public=TRUE) we pin the
-	// row's pubkeys against what the users table currently holds. The
-	// schema requires NOT NULL on every pubkey blob, so empty input
-	// would trip the constraint and surface as 500. The pubkey
-	// columns may be empty for legacy NULL-pubkey rows (decision-log
-	// L26); we substitute a 32-byte zero placeholder in that case so
-	// the structural insert succeeds. The wrap loop in #984 gates
-	// wrap computation on the user's actual pubkeys (looked up at
-	// wrap time), not on what's in this row, so the placeholder is a
-	// shape satisfaction, not a key claim.
-	if req.Membership == nil && channelIsPublic {
-		_, callerBox, callerSign, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), caller)
+	now := h.deps.Now()
+
+	// Public-channel auto-fill path: the body omits both blocks. The
+	// repo NULL-sig carve-out (L33) accepts; no wrap is inserted, the
+	// L7 invariant is restored when lazy-wrap-on-online fills the wrap
+	// later (#984). Private channels reject this shape.
+	if req.Membership == nil && req.RootKeyWrap == nil {
+		if !channelIsPublic {
+			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+				"membership block + root_key_wrap are required for private channels")
+			return
+		}
+		_, callerBoxPub, callerSignPub, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), caller)
 		if perr != nil {
 			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load caller pubkeys")
 			return
 		}
-		_, inviteeBox, inviteeSign, ierr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), req.UserID)
-		if ierr != nil {
-			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load invitee pubkeys")
+		row := repo.ChannelMember{
+			ChannelID:         channelID,
+			UserID:            req.UserID,
+			InviterUserID:     caller,
+			InviterSignPubkey: zeroFillPubkey(callerSignPub),
+			InviteeBoxPubkey:  zeroFillPubkey(inviteeBox),
+			InviteeSignPubkey: zeroFillPubkey(inviteeSign),
+			AddedAt:           now,
+		}
+		_ = callerBoxPub
+		if err := h.deps.Repo.InsertChannelMember(r.Context(), row, true); err != nil {
+			if errors.Is(err, repo.ErrChannelMemberAlreadyExists) {
+				WriteError(w, stdhttp.StatusConflict, CodeConflict, "user is already a member of channel")
+				return
+			}
+			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not insert membership")
 			return
 		}
-		if len(callerSign) == 0 {
-			callerSign = make([]byte, 32)
-		}
-		if len(inviteeBox) == 0 {
-			inviteeBox = make([]byte, 32)
-		}
-		if len(inviteeSign) == 0 {
-			inviteeSign = make([]byte, 32)
-		}
-		_ = callerBox
-		row.InviterSignPubkey = callerSign
-		row.InviteeBoxPubkey = inviteeBox
-		row.InviteeSignPubkey = inviteeSign
+		h.broadcastMembersChanged(channelID)
+		WriteOK(w, stdhttp.StatusCreated, encodeMember(row, ""))
+		return
 	}
-	if err := h.deps.Repo.InsertChannelMember(r.Context(), row, channelIsPublic); err != nil {
+
+	// Private (or signed-public) path: both blocks are required.
+	if req.Membership == nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+			"membership block is required when root_key_wrap is provided")
+		return
+	}
+	if req.RootKeyWrap == nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+			"root_key_wrap is required when membership block is provided")
+		return
+	}
+	row, sigBytes, addedAt, derr := buildInviteMembershipRow(
+		channelID, req.UserID, caller, inviteeBox, inviteeSign, req.Membership, now,
+	)
+	if derr != nil {
+		WriteError(w, stdhttp.StatusBadRequest, derr.Code, derr.Msg)
+		return
+	}
+	// Caller's stored sign_pubkey must match the membership pin.
+	_, callerBoxPub, callerSignPub, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), caller)
+	if perr != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load caller pubkeys")
+		return
+	}
+	if !bytesEqualConstantTime(callerSignPub, row.InviterSignPubkey) {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+			"membership.inviter_sign_pubkey does not match caller's stored sign_pubkey")
+		return
+	}
+	if err := auth.VerifyMembershipSignature(
+		row.InviterSignPubkey, sigBytes,
+		channelID, caller, req.UserID,
+		auth.InviteePubkeys{BoxPubkey: row.InviteeBoxPubkey, SignPubkey: row.InviteeSignPubkey},
+		addedAt,
+	); err != nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeInvalidMembershipSignature,
+			"membership.inviter_signature does not verify (§10 scope)")
+		return
+	}
+	wrap, werr := decodeWrapEntry(*req.RootKeyWrap)
+	if werr != nil {
+		WriteError(w, stdhttp.StatusBadRequest, werr.Code, werr.Msg)
+		return
+	}
+	if !bytesEqualConstantTime(callerBoxPub, wrap.SenderBoxPubkey) {
+		WriteError(w, stdhttp.StatusBadRequest, CodeSenderPubkeyMismatch,
+			"root_key_wrap.sender_box_pubkey does not match caller's box_pubkey (L30)")
+		return
+	}
+
+	tx, err := h.deps.Repo.DB().BeginTx(r.Context(), nil)
+	if err != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not begin transaction")
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	currentGen, hasGen, err := h.deps.Repo.MaxChannelKeyGenerationTx(r.Context(), tx, channelID)
+	if err != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not resolve generation")
+		return
+	}
+	if !hasGen {
+		// Channel was created via the legacy wraps-omitted bootstrap
+		// path (membership-only, no creator wrap). Treat the first
+		// wrap-carrying invite as the implicit gen 1; subsequent
+		// invites stay at gen 1 because rotation only fires on
+		// member removal (L16). #984's keys-RPC will tighten this
+		// when the bootstrap mode lands; this fallback keeps L7
+		// recoverable for channels created before the wrap loop.
+		currentGen = creatorBootstrapGenID
+	}
+	if err := h.deps.Repo.InsertChannelMemberTx(r.Context(), tx, row, channelIsPublic); err != nil {
 		switch {
 		case errors.Is(err, repo.ErrPrivateChannelNullSignature):
 			WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
@@ -243,8 +330,42 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		}
 		return
 	}
+	if err := h.deps.Repo.InsertChannelKeyTx(r.Context(), tx, repo.ChannelKey{
+		ChannelID:       channelID,
+		GenerationID:    currentGen,
+		MemberUserID:    req.UserID,
+		WrappedKey:      wrap.WrappedKey,
+		SenderBoxPubkey: wrap.SenderBoxPubkey,
+		Nonce:           wrap.Nonce,
+		CreatedAt:       now,
+	}); err != nil {
+		if errors.Is(err, repo.ErrChannelKeyAlreadyExists) {
+			WriteError(w, stdhttp.StatusConflict, CodeConflict, "wrap already exists for invitee at current generation")
+			return
+		}
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not insert wrap")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not commit transaction")
+		return
+	}
 	h.broadcastMembersChanged(channelID)
 	WriteOK(w, stdhttp.StatusCreated, encodeMember(row, ""))
+}
+
+// zeroFillPubkey returns p when it is 32 bytes; otherwise a 32-byte
+// zero buffer. The schema requires NOT NULL on the pubkey columns;
+// pre-Phase-10 rows may have NULL/empty pubkeys (decision-log L26)
+// and substituting a zero buffer keeps the constraint satisfied for
+// the public-channel auto-fill path. The wrap loop in #984 looks up
+// pubkeys live (not from this row) so the placeholder is structural,
+// not a key claim.
+func zeroFillPubkey(p []byte) []byte {
+	if len(p) == pubkeyByteLen {
+		return p
+	}
+	return make([]byte, pubkeyByteLen)
 }
 
 // Kick handles DELETE /api/channels/{id}/members/{user_id}. The caller
@@ -357,63 +478,72 @@ func (h *MembersHandlers) broadcastMembersChanged(channelID string) {
 	h.deps.Hub.BroadcastAll(frame)
 }
 
-// buildMembershipRow validates the request body and returns a fully-
-// shaped repo.ChannelMember. For public channels we accept a
-// nil/empty `membership` block (server self-attests to its own NULL-
-// signature carve-out); for private channels every field must be
-// present and the byte-lengths must match the §10 wire shape.
-func buildMembershipRow(
-	channelID string, req inviteRequest, caller string,
-	channelIsPublic bool, now time.Time,
-) (repo.ChannelMember, error) {
-	row := repo.ChannelMember{
-		ChannelID:     channelID,
-		UserID:        req.UserID,
-		InviterUserID: caller,
-		AddedAt:       now,
-	}
-	if req.Membership == nil {
-		if !channelIsPublic {
-			return row, errors.New("membership block is required for private channels")
-		}
-		return row, nil
-	}
-	mb := req.Membership
+// buildInviteMembershipRow validates the §10 invite shape and returns
+// the row + the raw signature bytes + the parsed added_at. The
+// caller cross-references inviter_sign_pubkey against the live users
+// table; this helper covers everything that's safely available from
+// the request body alone (byte-length, base64 decode, invitee-pubkey
+// equality with the live users table).
+func buildInviteMembershipRow(
+	channelID, inviteeUserID, caller string,
+	inviteeStoredBox, inviteeStoredSign []byte,
+	mb *inviteMembershipBlock, now time.Time,
+) (repo.ChannelMember, []byte, time.Time, *wrapDecodeError) {
 	if mb.InviterUserID != caller {
-		return row, errors.New("membership.inviter_user_id must equal caller user id")
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{
+			Code: CodeBadRequest, Msg: "membership.inviter_user_id must equal caller user id",
+		}
 	}
 	signPub, err := decodeMembershipPubkey("inviter_sign_pubkey", mb.InviterSignPubkey)
 	if err != nil {
-		return row, err
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{Code: CodeBadRequest, Msg: err.Error()}
 	}
 	boxPub, err := decodeMembershipPubkey("invitee_box_pubkey", mb.InviteeBoxPubkey)
 	if err != nil {
-		return row, err
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{Code: CodeBadRequest, Msg: err.Error()}
 	}
 	inviteeSign, err := decodeMembershipPubkey("invitee_sign_pubkey", mb.InviteeSignPubkey)
 	if err != nil {
-		return row, err
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{Code: CodeBadRequest, Msg: err.Error()}
 	}
-	added, err := time.Parse(time.RFC3339Nano, mb.AddedAt)
-	if err != nil {
-		// fall back to RFC3339 (no fractional seconds) so well-formed
-		// integer-second timestamps from Go's default Time.Format are
-		// accepted alongside the nano form.
-		added, err = time.Parse(time.RFC3339, mb.AddedAt)
-		if err != nil {
-			return row, errors.New("membership.added_at must be RFC3339")
+	if len(inviteeStoredBox) == pubkeyByteLen && !bytesEqualConstantTime(inviteeStoredBox, boxPub) {
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{
+			Code: CodeBadRequest,
+			Msg:  "membership.invitee_box_pubkey does not match invitee's stored box_pubkey",
 		}
 	}
-	sigBytes, err := decodeMembershipSignature(mb.InviterSignature, channelIsPublic)
-	if err != nil {
-		return row, err
+	if len(inviteeStoredSign) == pubkeyByteLen && !bytesEqualConstantTime(inviteeStoredSign, inviteeSign) {
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{
+			Code: CodeBadRequest,
+			Msg:  "membership.invitee_sign_pubkey does not match invitee's stored sign_pubkey",
+		}
 	}
-	row.InviterSignPubkey = signPub
-	row.InviteeBoxPubkey = boxPub
-	row.InviteeSignPubkey = inviteeSign
-	row.InviterSignature = sigBytes
-	row.AddedAt = added
-	return row, nil
+	added, terr := parseRFC3339Either(mb.AddedAt)
+	if terr != nil {
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{Code: CodeBadRequest, Msg: terr.Error()}
+	}
+	sigBytes, sigErr := decodeMembershipSignature(mb.InviterSignature, false)
+	if sigErr != nil {
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{Code: CodeBadRequest, Msg: sigErr.Error()}
+	}
+	if len(sigBytes) == 0 {
+		return repo.ChannelMember{}, nil, time.Time{}, &wrapDecodeError{
+			Code: CodeBadRequest,
+			Msg:  "inviter_signature is required for invite",
+		}
+	}
+	_ = now
+	row := repo.ChannelMember{
+		ChannelID:         channelID,
+		UserID:            inviteeUserID,
+		InviterUserID:     caller,
+		InviterSignPubkey: signPub,
+		InviterSignature:  sigBytes,
+		InviteeBoxPubkey:  boxPub,
+		InviteeSignPubkey: inviteeSign,
+		AddedAt:           added,
+	}
+	return row, sigBytes, added, nil
 }
 
 const membershipSignatureByteLen = 64

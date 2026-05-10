@@ -2,7 +2,9 @@ package repo
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -19,25 +21,111 @@ type DMConversationKey struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-var errDMConversationKeysNotImplemented = errors.New(
-	"repo/dm_conversation_keys: methods not implemented (lands in #982)",
+// ErrDMConversationKeyAlreadyExists surfaces a duplicate wrap row on
+// the (conversation_id, member_user_id) primary key. L6 says wraps
+// are immutable post-create; this is the L12 server-side guard.
+var ErrDMConversationKeyAlreadyExists = errors.New(
+	"repo: dm_conversation_keys row already exists for (conversation_id, member_user_id)",
 )
 
-// InsertDMConversationKey lands in #982 — atomic-inline wraps in
-// the `POST /api/dms` 201 path. The `POST /api/dms` 200 idempotent
-// re-call MUST omit wraps (decision-log L6 + L12); enforcement
-// lives in the handler, not here.
-func (r *Repo) InsertDMConversationKey(_ context.Context, _ DMConversationKey) error {
-	return errDMConversationKeysNotImplemented
+// InsertDMConversationKey persists a dm_conversation_keys row. L30 +
+// L39 validation lives in the handler; this layer is pure storage.
+func (r *Repo) InsertDMConversationKey(ctx context.Context, k DMConversationKey) error {
+	if r == nil || r.db == nil {
+		return errors.New("repo.InsertDMConversationKey: nil repo or db")
+	}
+	created := k.CreatedAt.UTC()
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO dm_conversation_keys(
+		    conversation_id, member_user_id,
+		    wrapped_key, sender_box_pubkey, nonce, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		k.ConversationID, k.MemberUserID,
+		k.WrappedKey, k.SenderBoxPubkey, k.Nonce, created,
+	)
+	if err != nil && isDMConversationKeyPKViolation(err) {
+		return ErrDMConversationKeyAlreadyExists
+	}
+	return err
 }
 
-// GetDMConversationKey lands in #982 / #984 — read path for the DM
-// receiver's crypto_box_open.
-func (r *Repo) GetDMConversationKey(_ context.Context, _ string, _ string) (*DMConversationKey, error) {
-	return nil, errDMConversationKeysNotImplemented
+// InsertDMConversationKeyTx is the *sql.Tx variant for the atomic
+// 201-path of POST /api/dms (L7: conversation row + both wraps land
+// in one transaction).
+func (r *Repo) InsertDMConversationKeyTx(ctx context.Context, tx *sql.Tx, k DMConversationKey) error {
+	created := k.CreatedAt.UTC()
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO dm_conversation_keys(
+		    conversation_id, member_user_id,
+		    wrapped_key, sender_box_pubkey, nonce, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		k.ConversationID, k.MemberUserID,
+		k.WrappedKey, k.SenderBoxPubkey, k.Nonce, created,
+	)
+	if err != nil && isDMConversationKeyPKViolation(err) {
+		return ErrDMConversationKeyAlreadyExists
+	}
+	return err
 }
 
-// ListDMConversationKeys lands in #982 / #984.
-func (r *Repo) ListDMConversationKeys(_ context.Context, _ string) ([]DMConversationKey, error) {
-	return nil, errDMConversationKeysNotImplemented
+// GetDMConversationKey returns the wrap for (conversationID, memberUserID),
+// or (nil, nil) when no row exists.
+func (r *Repo) GetDMConversationKey(ctx context.Context, conversationID, memberUserID string) (*DMConversationKey, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT conversation_id, member_user_id,
+		        wrapped_key, sender_box_pubkey, nonce, created_at
+		   FROM dm_conversation_keys
+		  WHERE conversation_id = ? AND member_user_id = ?`,
+		conversationID, memberUserID,
+	)
+	var k DMConversationKey
+	if err := row.Scan(&k.ConversationID, &k.MemberUserID,
+		&k.WrappedKey, &k.SenderBoxPubkey, &k.Nonce, &k.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &k, nil
+}
+
+// ListDMConversationKeys returns every wrap row for conversationID,
+// ordered by member_user_id. Empty slice (not nil) when no wraps
+// exist.
+func (r *Repo) ListDMConversationKeys(ctx context.Context, conversationID string) ([]DMConversationKey, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT conversation_id, member_user_id,
+		        wrapped_key, sender_box_pubkey, nonce, created_at
+		   FROM dm_conversation_keys
+		  WHERE conversation_id = ?
+		  ORDER BY member_user_id ASC`,
+		conversationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]DMConversationKey, 0)
+	for rows.Next() {
+		var k DMConversationKey
+		if err := rows.Scan(&k.ConversationID, &k.MemberUserID,
+			&k.WrappedKey, &k.SenderBoxPubkey, &k.Nonce, &k.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+func isDMConversationKeyPKViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "constraint failed") {
+		return false
+	}
+	return strings.Contains(msg, "dm_conversation_keys.conversation_id") ||
+		strings.Contains(msg, "dm_conversation_keys.member_user_id") ||
+		strings.Contains(msg, "PRIMARY KEY")
 }

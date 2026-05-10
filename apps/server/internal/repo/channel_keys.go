@@ -2,7 +2,9 @@ package repo
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -24,43 +26,127 @@ type ChannelKey struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-// errChannelKeysNotImplemented is the sentinel every method returns
-// until #982 / #984 / #985 fill the read and write paths in. The
-// schema is stable as of this PR; downstream sub-issues add the
-// three-mode keys-RPC validation, lazy-fill, and rotation logic.
-var errChannelKeysNotImplemented = errors.New(
-	"repo/channel_keys: methods not implemented (lands in #982/#984/#985)",
+// ErrChannelKeyAlreadyExists surfaces a duplicate wrap row on the
+// (channel_id, generation_id, member_user_id) primary key. Atomic
+// callers map this to 409 (rotation race-loss; bootstrap re-call).
+var ErrChannelKeyAlreadyExists = errors.New(
+	"repo: channel_keys row already exists for (channel_id, generation_id, member_user_id)",
 )
 
-// InsertChannelKey lands in #982 (atomic-inline wraps on create /
-// add-member) and #984 (standalone keys RPC bootstrap + fill-in).
-func (r *Repo) InsertChannelKey(_ context.Context, _ ChannelKey) error {
-	return errChannelKeysNotImplemented
+// InsertChannelKey persists a channel_keys row. Pure storage —
+// L30 sender_box_pubkey ownership and L39 byte-length checks live
+// in the handler before this call. The handler holds the caller
+// identity; this layer cannot resolve "the caller" without the
+// http.Request context.
+func (r *Repo) InsertChannelKey(ctx context.Context, k ChannelKey) error {
+	if r == nil || r.db == nil {
+		return errors.New("repo.InsertChannelKey: nil repo or db")
+	}
+	created := k.CreatedAt.UTC()
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO channel_keys(
+		    channel_id, generation_id, member_user_id,
+		    wrapped_key, sender_box_pubkey, nonce, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		k.ChannelID, k.GenerationID, k.MemberUserID,
+		k.WrappedKey, k.SenderBoxPubkey, k.Nonce, created,
+	)
+	if err != nil && isChannelKeyPKViolation(err) {
+		return ErrChannelKeyAlreadyExists
+	}
+	return err
 }
 
-// GetChannelKey lands in #984 (lazy-wrap-on-online query path).
-func (r *Repo) GetChannelKey(_ context.Context, _ string, _ int64, _ string) (*ChannelKey, error) {
-	return nil, errChannelKeysNotImplemented
+// InsertChannelKeyTx is the *sql.Tx variant of InsertChannelKey for
+// callers composing the wrap insert with channel + member inserts in
+// one transaction (the L7 atomic-create / atomic-invite invariant).
+func (r *Repo) InsertChannelKeyTx(ctx context.Context, tx *sql.Tx, k ChannelKey) error {
+	created := k.CreatedAt.UTC()
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO channel_keys(
+		    channel_id, generation_id, member_user_id,
+		    wrapped_key, sender_box_pubkey, nonce, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		k.ChannelID, k.GenerationID, k.MemberUserID,
+		k.WrappedKey, k.SenderBoxPubkey, k.Nonce, created,
+	)
+	if err != nil && isChannelKeyPKViolation(err) {
+		return ErrChannelKeyAlreadyExists
+	}
+	return err
 }
 
-// CurrentChannelKeyGeneration returns the channel's current
-// `max(generation_id)` per decision-log §8 — the precondition the
-// three keys-RPC modes branch on. Lands in #984.
-func (r *Repo) CurrentChannelKeyGeneration(_ context.Context, _ string) (int64, bool, error) {
-	return 0, false, errChannelKeysNotImplemented
+// GetChannelKey returns the wrap for (channelID, generationID, memberUserID),
+// or (nil, nil) when no row matches.
+func (r *Repo) GetChannelKey(ctx context.Context, channelID string, generationID int64, memberUserID string) (*ChannelKey, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT channel_id, generation_id, member_user_id,
+		        wrapped_key, sender_box_pubkey, nonce, created_at
+		   FROM channel_keys
+		  WHERE channel_id = ? AND generation_id = ? AND member_user_id = ?`,
+		channelID, generationID, memberUserID,
+	)
+	var k ChannelKey
+	if err := row.Scan(&k.ChannelID, &k.GenerationID, &k.MemberUserID,
+		&k.WrappedKey, &k.SenderBoxPubkey, &k.Nonce, &k.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &k, nil
 }
 
-// ListWrapsNeeded is the server-side compute for L22's `missing`
-// list — one row per (user_id, generation_id) where channel_members
-// has a row but channel_keys does not for the channel's current
-// generation. Lands in #984.
-func (r *Repo) ListWrapsNeeded(_ context.Context, _ string) ([]ChannelKey, error) {
-	return nil, errChannelKeysNotImplemented
+// MaxChannelKeyGeneration returns (max(generation_id), found, err) for
+// channelID. found == false when no wraps exist (bootstrap state).
+// Used by the standalone keys-RPC's three-mode precondition selector
+// (decision-log §8 / specs/plans/phase-10/keys.md). This PR uses it on
+// the create-flow + add-member paths so the implicit `generation_id`
+// can be resolved server-side.
+func (r *Repo) MaxChannelKeyGeneration(ctx context.Context, channelID string) (int64, bool, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT MAX(generation_id) FROM channel_keys WHERE channel_id = ?`,
+		channelID,
+	)
+	var n sql.NullInt64
+	if err := row.Scan(&n); err != nil {
+		return 0, false, err
+	}
+	if !n.Valid {
+		return 0, false, nil
+	}
+	return n.Int64, true, nil
 }
 
-// DeleteChannelKeysForMember runs in the DELETE-member transaction
-// per specs/plans/phase-10/membership.md and removes every wrap row
-// for the leaver, across every generation. Lands in #985.
-func (r *Repo) DeleteChannelKeysForMember(_ context.Context, _ string, _ string) error {
-	return errChannelKeysNotImplemented
+// MaxChannelKeyGenerationTx is the *sql.Tx variant for atomic callers
+// that need the current generation as part of a larger transaction.
+func (r *Repo) MaxChannelKeyGenerationTx(ctx context.Context, tx *sql.Tx, channelID string) (int64, bool, error) {
+	row := tx.QueryRowContext(ctx,
+		`SELECT MAX(generation_id) FROM channel_keys WHERE channel_id = ?`,
+		channelID,
+	)
+	var n sql.NullInt64
+	if err := row.Scan(&n); err != nil {
+		return 0, false, err
+	}
+	if !n.Valid {
+		return 0, false, nil
+	}
+	return n.Int64, true, nil
+}
+
+// isChannelKeyPKViolation maps SQLite's UNIQUE/PRIMARY-KEY message for
+// channel_keys to the typed sentinel.
+func isChannelKeyPKViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "constraint failed") {
+		return false
+	}
+	return strings.Contains(msg, "channel_keys.channel_id") ||
+		strings.Contains(msg, "channel_keys.generation_id") ||
+		strings.Contains(msg, "channel_keys.member_user_id") ||
+		strings.Contains(msg, "PRIMARY KEY")
 }
