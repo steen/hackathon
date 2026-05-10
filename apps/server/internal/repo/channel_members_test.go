@@ -84,24 +84,26 @@ func TestInsertChannelMemberAcceptsNullSigOnPublic(t *testing.T) {
 }
 
 // TestInsertChannelMemberPrivateChannelSelfBootstrapCarveOut pins the
-// §10 self-bootstrap exemption that the channels Create handler relies
-// on (apps/server/internal/http/channels_handlers.go:153, which passes
-// channelIsPublic=true unconditionally for the creator-bootstrap row).
-// The carve-out is acceptable today because the only zero-member
-// private-channel state is during the create handler itself; this test
-// makes a future regression that drops it surface here, instead of
-// silently breaking the create flow.
+// §10 self-bootstrap exemption that the channels createLegacyBootstrap
+// helper in apps/server/internal/http/channels_handlers.go relies on:
+// it passes channelIsPublic=true unconditionally for the creator-
+// bootstrap row, even on a PRIVATE channel. (The wraps-included Create
+// path in the same file passes req.IsPublic instead, so the carve-out
+// only covers the legacy-bootstrap path.) The carve-out is acceptable
+// today because the only zero-member private-channel state is during
+// the create handler itself; this test makes a future regression that
+// drops it surface here, instead of silently breaking the create flow.
 //
 // The test asserts three things:
 //  1. The bootstrap row persists with NULL inviter_signature on a
 //     PRIVATE channel when the caller passes channelIsPublic=true (the
-//     handler's L153 mirror).
+//     createLegacyBootstrap mirror).
 //  2. Exactly one membership row exists for the channel after the
 //     bootstrap.
 //  3. A subsequent InsertChannelMember on the same private channel
 //     with NULL signature and channelIsPublic=false is rejected with
-//     ErrPrivateChannelNullSignature — L33 still applies to every
-//     non-bootstrap insert.
+//     ErrPrivateChannelNullSignature — the private-channel signature
+//     check still applies to every non-bootstrap insert.
 func TestInsertChannelMemberPrivateChannelSelfBootstrapCarveOut(t *testing.T) {
 	r, db := newRepo(t)
 

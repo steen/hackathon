@@ -1,0 +1,3 @@
+### Docs
+
+- `apps/server/internal/repo/channel_members_test.go`: fix stale `channels_handlers.go:153` citation in the `TestInsertChannelMemberPrivateChannelSelfBootstrapCarveOut` doc comment. The actual `InsertChannelMember(..., true)` carve-out call lives in the `createLegacyBootstrap` helper (around L358 today), not L153 — that line landed inside `decodeWrapsList` after the wraps-included Create path was added in PR #1003. Comment now cites the function name so it does not bit-rot, and clarifies that the unconditional `true` only applies to the legacy-bootstrap path; the wraps-included path passes `req.IsPublic`.
