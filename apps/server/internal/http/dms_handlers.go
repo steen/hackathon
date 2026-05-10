@@ -2,7 +2,9 @@ package http
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	stdhttp "net/http"
 	"strconv"
 	"strings"
@@ -65,8 +67,33 @@ type dmConversationView struct {
 	UnreadCount int              `json:"unread_count"`
 }
 
+// createDMRequest is the wire body for POST /api/dms (decision-log
+// §7 + L6 + L12). Strict-decoded per L1.
+//
+// 201 path (new conversation): root_key_wraps MUST contain exactly
+// 2 entries — one for self, one for the peer; each carries a
+// crypto_box wrap of the conversation root key plus the wrapper's
+// box_pubkey + nonce.
+//
+// 200 path (idempotent re-call): root_key_wraps MUST be empty. If the
+// client supplies wraps for an existing conversation, the server
+// returns 409 `wraps_already_set` per L6 (DMs never rotate; wraps
+// are immutable post-create) — L12 server-side enforcement.
+type createDMRequest struct {
+	PeerUserID   string          `json:"peer_user_id"`
+	RootKeyWraps []wrapEntryWire `json:"root_key_wraps,omitempty"`
+}
+
 // CreateOrGet handles POST /api/dms — idempotent find-or-create.
 // 201 on create, 200 on existing per decision-log L18.
+//
+// Phase-10 (decision-log §7 + L6 + L7 + L12):
+//   - 201 path: body MUST carry `root_key_wraps` with exactly 2
+//     entries (recipient_user_id ∈ {self, peer}); server validates
+//     L30 + L39 on each, then inserts the conversation row + both
+//     wrap rows in ONE transaction.
+//   - 200 path: body MUST omit `root_key_wraps`. If wraps are
+//     present, server returns 409 `wraps_already_set` per L6/L12.
 func (h *DMsHandlers) CreateOrGet(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	if r.Method != stdhttp.MethodPost {
 		WriteError(w, stdhttp.StatusMethodNotAllowed, CodeMethodNotAllow, "method not allowed")
@@ -77,9 +104,7 @@ func (h *DMsHandlers) CreateOrGet(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		WriteError(w, stdhttp.StatusUnauthorized, CodeUnauthorized, "missing user context")
 		return
 	}
-	var req struct {
-		PeerUserID string `json:"peer_user_id"`
-	}
+	var req createDMRequest
 	if err := decodeJSON(r, &req); err != nil {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
@@ -104,9 +129,103 @@ func (h *DMsHandlers) CreateOrGet(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	}
 
 	userA, userB := repo.CanonicalDMUserOrder(viewerID, peerID)
-	id := ids.NewULID()
-	conv, created, err := h.deps.Repo.FindOrCreateDMConversation(r.Context(), id, userA, userB, h.deps.Now())
+
+	// Probe whether the conversation already exists so the L6 rule
+	// fires BEFORE we mutate state. The find-or-create path inside
+	// the repo can't tell us that "wraps were supplied for an
+	// existing conversation" — it only reports created vs. existed.
+	existing, err := h.findExistingDMConversation(r.Context(), userA, userB)
 	if err != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not query conversation")
+		return
+	}
+	if existing != nil {
+		// 200 idempotent re-call. L6/L12 — wraps must be empty.
+		if len(req.RootKeyWraps) > 0 {
+			WriteError(w, stdhttp.StatusConflict, CodeWrapsAlreadySet,
+				"root_key_wraps must be omitted for an existing conversation (DMs never rotate)")
+			return
+		}
+		unread, err := h.unreadCountForViewer(r.Context(), viewerID, existing.ID)
+		if err != nil {
+			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load unread count")
+			return
+		}
+		view := dmConversationView{
+			DMConversation: *existing,
+			Peer:           *peer,
+			UnreadCount:    unread,
+		}
+		WriteOK(w, stdhttp.StatusOK, view)
+		return
+	}
+
+	// 201 path. Wraps are optional under the L26 optional-first
+	// transition rule: a body that omits root_key_wraps falls through
+	// to the legacy create path so phase-9 harnesses keep
+	// round-tripping. When supplied, the wrap-list MUST contain
+	// exactly two entries (one per participant) and the L30/L39
+	// invariants apply per entry.
+	id := ids.NewULID()
+	now := h.deps.Now()
+	if len(req.RootKeyWraps) == 0 {
+		conv, _, ferr := h.deps.Repo.FindOrCreateDMConversation(r.Context(), id, userA, userB, now)
+		if ferr != nil {
+			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create conversation")
+			return
+		}
+		unread, uerr := h.unreadCountForViewer(r.Context(), viewerID, conv.ID)
+		if uerr != nil {
+			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load unread count")
+			return
+		}
+		WriteOK(w, stdhttp.StatusCreated, dmConversationView{
+			DMConversation: *conv,
+			Peer:           *peer,
+			UnreadCount:    unread,
+		})
+		return
+	}
+	if len(req.RootKeyWraps) != 2 {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest,
+			"root_key_wraps must contain exactly 2 entries on POST /api/dms (one per participant)")
+		return
+	}
+	wraps, werr := decodeDMWraps(req.RootKeyWraps, viewerID, peerID)
+	if werr != nil {
+		WriteError(w, stdhttp.StatusBadRequest, werr.Code, werr.Msg)
+		return
+	}
+	// L30 — caller's box_pubkey must match every wrap's sender claim.
+	_, callerBoxPub, _, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), viewerID)
+	if perr != nil {
+		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load caller pubkeys")
+		return
+	}
+	for _, wrap := range wraps {
+		if !bytesEqualConstantTime(callerBoxPub, wrap.SenderBoxPubkey) {
+			WriteError(w, stdhttp.StatusBadRequest, CodeSenderPubkeyMismatch,
+				"root_key_wraps entry sender_box_pubkey does not match caller's box_pubkey (L30)")
+			return
+		}
+	}
+
+	conv, err := h.createDMConversationWithWrapsTx(r.Context(), id, userA, userB, wraps, now)
+	if err != nil {
+		// FindOrCreate-style race: another tx beat us to the INSERT.
+		// Fall through to the 200 idempotent shape so the caller
+		// sees a stable contract; the wraps they posted lost the
+		// race and the L6 rule kicks in on retry.
+		if errors.Is(err, errDMConversationRace) {
+			existing, qerr := h.findExistingDMConversation(r.Context(), userA, userB)
+			if qerr != nil || existing == nil {
+				WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not query conversation")
+				return
+			}
+			WriteError(w, stdhttp.StatusConflict, CodeWrapsAlreadySet,
+				"conversation was created concurrently — re-issue without root_key_wraps")
+			return
+		}
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create conversation")
 		return
 	}
@@ -121,12 +240,139 @@ func (h *DMsHandlers) CreateOrGet(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		Peer:           *peer,
 		UnreadCount:    unread,
 	}
+	WriteOK(w, stdhttp.StatusCreated, view)
+}
 
-	status := stdhttp.StatusOK
-	if created {
-		status = stdhttp.StatusCreated
+// errDMConversationRace surfaces a race-loss against another tx that
+// created the same canonical (user_a, user_b) row between our probe
+// and our INSERT. CreateOrGet maps this to a 409 wraps_already_set.
+var errDMConversationRace = errors.New("dm conversation created concurrently")
+
+// findExistingDMConversation reads the dm_conversations row by the
+// canonical (user_a, user_b) pair, returning (nil, nil) when no row
+// exists. Used for the L6/L12 probe + race-loss recovery.
+func (h *DMsHandlers) findExistingDMConversation(ctx context.Context, userA, userB string) (*repo.DMConversation, error) {
+	row := h.deps.Repo.DB().QueryRowContext(ctx,
+		`SELECT id, user_a_id, user_b_id, last_message_id, last_message_at, created_at
+		   FROM dm_conversations
+		  WHERE user_a_id = ? AND user_b_id = ?`,
+		userA, userB,
+	)
+	var c repo.DMConversation
+	if err := row.Scan(&c.ID, &c.UserAID, &c.UserBID, &c.LastMessageID, &c.LastMessageAt, &c.CreatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	WriteOK(w, status, view)
+	return &c, nil
+}
+
+// createDMConversationWithWrapsTx atomically inserts the conversation
+// row and both wrap rows. Returns errDMConversationRace when the
+// INSERT loses to another concurrent create on the canonical
+// (user_a, user_b) pair (UNIQUE constraint on the table — see
+// migrations/0004_dms.sql). The dm_conversations table uses INSERT OR
+// IGNORE in repo.FindOrCreateDMConversation; here we use plain INSERT
+// so the constraint failure surfaces as a race-loss we can map.
+func (h *DMsHandlers) createDMConversationWithWrapsTx(
+	ctx context.Context, id, userA, userB string, wraps []decodedWrap, now time.Time,
+) (*repo.DMConversation, error) {
+	created := now.UTC()
+	tx, err := h.deps.Repo.DB().BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO dm_conversations
+		   (id, user_a_id, user_b_id, last_message_id, last_message_at, created_at)
+		   VALUES (?, ?, ?, NULL, NULL, ?)`,
+		id, userA, userB, created,
+	)
+	if err != nil {
+		return nil, err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rowsAffected != 1 {
+		// Another tx won the race — the (user_a, user_b) row already
+		// exists. Map to errDMConversationRace so the caller falls
+		// through to the L6 idempotent path.
+		return nil, errDMConversationRace
+	}
+	row := tx.QueryRowContext(ctx,
+		`SELECT id, user_a_id, user_b_id, last_message_id, last_message_at, created_at
+		   FROM dm_conversations
+		  WHERE id = ?`,
+		id,
+	)
+	var c repo.DMConversation
+	if err := row.Scan(&c.ID, &c.UserAID, &c.UserBID, &c.LastMessageID, &c.LastMessageAt, &c.CreatedAt); err != nil {
+		return nil, err
+	}
+	for _, wrap := range wraps {
+		if err := h.deps.Repo.InsertDMConversationKeyTx(ctx, tx, repo.DMConversationKey{
+			ConversationID:  id,
+			MemberUserID:    wrap.RecipientUserID,
+			WrappedKey:      wrap.WrappedKey,
+			SenderBoxPubkey: wrap.SenderBoxPubkey,
+			Nonce:           wrap.Nonce,
+			CreatedAt:       now,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
+// decodeDMWraps validates the 2-entry wrap-list shape required on the
+// POST /api/dms 201 path. Both recipient_user_ids must be present and
+// must form the set {viewerID, peerID} exactly. Returns the decoded
+// wraps in the same order they appeared in the request body.
+func decodeDMWraps(in []wrapEntryWire, viewerID, peerID string) ([]decodedWrap, *wrapDecodeError) {
+	if len(in) != 2 {
+		return nil, &wrapDecodeError{Code: CodeBadRequest,
+			Msg: "root_key_wraps must contain exactly 2 entries"}
+	}
+	out := make([]decodedWrap, 0, 2)
+	seen := make(map[string]struct{}, 2)
+	for i, w := range in {
+		rid := w.RecipientUserID
+		if rid == "" {
+			return nil, &wrapDecodeError{Code: CodeBadRequest,
+				Msg: "root_key_wraps[" + strconv.Itoa(i) + "].recipient_user_id is required"}
+		}
+		if rid != viewerID && rid != peerID {
+			return nil, &wrapDecodeError{Code: CodeBadRequest,
+				Msg: "root_key_wraps[" + strconv.Itoa(i) + "].recipient_user_id must be one of {self, peer}"}
+		}
+		if _, dup := seen[rid]; dup {
+			return nil, &wrapDecodeError{Code: CodeBadRequest,
+				Msg: "root_key_wraps duplicate recipient_user_id"}
+		}
+		seen[rid] = struct{}{}
+		decoded, werr := decodeWrapEntry(w)
+		if werr != nil {
+			return nil, werr
+		}
+		out = append(out, decoded)
+	}
+	if _, hasViewer := seen[viewerID]; !hasViewer {
+		return nil, &wrapDecodeError{Code: CodeBadRequest,
+			Msg: "root_key_wraps must include the caller as a recipient"}
+	}
+	if _, hasPeer := seen[peerID]; !hasPeer {
+		return nil, &wrapDecodeError{Code: CodeBadRequest,
+			Msg: "root_key_wraps must include the peer as a recipient"}
+	}
+	return out, nil
 }
 
 // List handles GET /api/dms — viewer's conversations, hiding empty ones.

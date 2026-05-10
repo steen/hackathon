@@ -9,6 +9,7 @@ import type {
   Message,
   User,
   WSTicket,
+  WrapEntry,
 } from "./types.js";
 
 export type FetchLike = typeof fetch;
@@ -77,10 +78,28 @@ export class HttpClient {
     return data.channels;
   }
 
-  async createChannel(name: string, options: { isPublic?: boolean } = {}): Promise<Channel> {
-    const body: { name: string; is_public?: boolean } = { name };
+  async createChannel(
+    name: string,
+    options: {
+      isPublic?: boolean;
+      membership?: MembershipBlock;
+      rootKeyWraps?: WrapEntry[];
+    } = {},
+  ): Promise<Channel> {
+    const body: {
+      name: string;
+      is_public?: boolean;
+      membership?: MembershipBlock;
+      root_key_wraps?: WrapEntry[];
+    } = { name };
     if (options.isPublic !== undefined) {
       body.is_public = options.isPublic;
+    }
+    if (options.membership) {
+      body.membership = options.membership;
+    }
+    if (options.rootKeyWraps && options.rootKeyWraps.length > 0) {
+      body.root_key_wraps = options.rootKeyWraps;
     }
     return this.request<Channel>("POST", "/api/channels", body);
   }
@@ -95,13 +114,34 @@ export class HttpClient {
     channelId: string,
     userId: string,
     membership?: MembershipBlock,
+    rootKeyWrap?: WrapEntry,
   ): Promise<ChannelMember> {
     const path = `/api/channels/${encodeURIComponent(channelId)}/members`;
-    const body: { user_id: string; membership?: MembershipBlock } = { user_id: userId };
+    const body: {
+      user_id: string;
+      membership?: MembershipBlock;
+      root_key_wrap?: WrapEntry;
+    } = { user_id: userId };
     if (membership) {
       body.membership = membership;
     }
+    if (rootKeyWrap) {
+      body.root_key_wrap = rootKeyWrap;
+    }
     return this.request<ChannelMember>("POST", path, body);
+  }
+
+  async createDM(
+    peerUserId: string,
+    options: { rootKeyWraps?: WrapEntry[] } = {},
+  ): Promise<unknown> {
+    const body: { peer_user_id: string; root_key_wraps?: WrapEntry[] } = {
+      peer_user_id: peerUserId,
+    };
+    if (options.rootKeyWraps && options.rootKeyWraps.length > 0) {
+      body.root_key_wraps = options.rootKeyWraps;
+    }
+    return this.request<unknown>("POST", "/api/dms", body);
   }
 
   async kickChannelMember(channelId: string, userId: string): Promise<void> {
