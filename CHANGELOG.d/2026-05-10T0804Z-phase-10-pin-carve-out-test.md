@@ -1,0 +1,3 @@
+### Tests
+
+- `apps/server/internal/repo`: pin the §10 self-bootstrap carve-out at the repo layer. `TestInsertChannelMemberPrivateChannelSelfBootstrapCarveOut` asserts that the creator-bootstrap row for a private channel persists with NULL `inviter_signature` (the path the create handler uses today via `channelIsPublic=true`), that exactly one membership row exists after, and that any subsequent `InsertChannelMember(..., false)` on the same private channel with a NULL signature is still rejected with `ErrPrivateChannelNullSignature` (L33 still applies). A future regression that drops the carve-out now fails this test instead of silently breaking channel creation.
