@@ -2,9 +2,10 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	stdhttp "net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"hackathon/apps/server/internal/hub"
@@ -12,8 +13,32 @@ import (
 	"hackathon/apps/server/internal/repo"
 )
 
-// MaxMessageBodyBytes is the hard cap from PRD §9 (4 KiB).
+// MaxMessageBodyBytes is the historical 4 KiB plaintext-body cap from
+// PRD §9. Phase-10 enforces it client-side BEFORE encryption (decision-
+// log L17 — server cannot inspect plaintext); the server-visible
+// ciphertext layer carries an independent ceiling.
 const MaxMessageBodyBytes = 4 * 1024
+
+// MaxCiphertextBytes caps the ciphertext payload of an inbound encrypted
+// envelope. The 4 KiB plaintext cap (MaxMessageBodyBytes) plus a little
+// headroom for secretbox MAC + future expansion gives 16 KiB; the
+// existing REST 16 KiB request-body cap from PRD §9 enforces the outer
+// shape independently. Decision-log L17 ("body cap").
+const MaxCiphertextBytes = 16 * 1024
+
+// CipherSuiteNaclbox is the only suite supported in v1 (decision-log
+// §3 + L17). Inbound envelopes whose cipher_suite differs are rejected
+// with 400 + CodeBadRequest at the handler boundary.
+const CipherSuiteNaclbox uint8 = 0x01
+
+// Envelope structural-byte counts for the L17 + L21 + L39 length
+// validation. Exported so cross-package tests can assert against the
+// same constants.
+const (
+	EnvelopeNonceBytes            = 24
+	EnvelopeSenderSignPubkeyBytes = 32
+	EnvelopeSignatureBytes        = 64
+)
 
 // WSEventMessage is the outbound WS frame type for a new message.
 // Mirrors PRD §10's `{"type": "message", "data": <Message>}` shape so
@@ -122,23 +147,18 @@ func (h *MessagesHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		return
 	}
 	var req struct {
-		Body string `json:"body"`
+		Envelope repo.MessageEnvelope `json:"envelope"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
 	}
-	body := strings.TrimSpace(req.Body)
-	if body == "" {
-		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "message body must not be empty")
-		return
-	}
-	if len(body) > MaxMessageBodyBytes {
-		WriteMessageTooLarge(w)
+	if err := validateInboundEnvelope(req.Envelope); err != nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
 	id := ids.NewULID()
-	msg, err := h.deps.Repo.InsertMessageTx(r.Context(), id, channelID, uid, body, h.deps.Now())
+	msg, err := h.deps.Repo.InsertMessageTx(r.Context(), id, channelID, uid, req.Envelope, h.deps.Now())
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not insert message")
 		return
@@ -152,6 +172,51 @@ func (h *MessagesHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 		}
 	}
 	WriteOK(w, stdhttp.StatusCreated, msg)
+}
+
+// errEnvelopeInvalid is returned by validateInboundEnvelope when the
+// envelope fails L17 / L21 / L39 structural validation. The message
+// surfaces in the 400 response.
+var errEnvelopeInvalid = errors.New("envelope is invalid")
+
+// validateInboundEnvelope runs the L17 + L21 + L39 structural checks the
+// server can do without a key (the server cannot decrypt — receivers
+// verify signature + secretbox client-side). Each branch returns a
+// caller-facing message that is safe to surface in the error envelope.
+//
+// Reject reasons:
+//   - cipher_suite != 0x01 (L17 downgrade defense — only naclbox-v1 in v1)
+//   - nonce length != 24 (L17 + L21 — XSalsa20 nonce is 24 raw bytes)
+//   - sender_sign_pubkey length != 32 (L39 — Ed25519 pubkey is 32 bytes)
+//   - signature length != 64 (L39 — Ed25519 signature is 64 bytes)
+//   - ciphertext empty or > MaxCiphertextBytes (L17 body cap)
+//   - client_created_at zero (must be set; clients stamp before signing)
+//
+// L17 also forbids any plaintext-fallback frame; that's enforced by the
+// handler's strict-decoded request shape — `body` is no longer a field.
+func validateInboundEnvelope(env repo.MessageEnvelope) error {
+	if env.CipherSuite != CipherSuiteNaclbox {
+		return fmt.Errorf("%w: cipher_suite must be %d (naclbox-v1)", errEnvelopeInvalid, CipherSuiteNaclbox)
+	}
+	if len(env.Nonce) != EnvelopeNonceBytes {
+		return fmt.Errorf("%w: nonce must be %d bytes", errEnvelopeInvalid, EnvelopeNonceBytes)
+	}
+	if len(env.SenderSignPubkey) != EnvelopeSenderSignPubkeyBytes {
+		return fmt.Errorf("%w: sender_sign_pubkey must be %d bytes", errEnvelopeInvalid, EnvelopeSenderSignPubkeyBytes)
+	}
+	if len(env.Signature) != EnvelopeSignatureBytes {
+		return fmt.Errorf("%w: signature must be %d bytes", errEnvelopeInvalid, EnvelopeSignatureBytes)
+	}
+	if len(env.Ciphertext) == 0 {
+		return fmt.Errorf("%w: ciphertext must not be empty", errEnvelopeInvalid)
+	}
+	if len(env.Ciphertext) > MaxCiphertextBytes {
+		return fmt.Errorf("%w: ciphertext exceeds %d-byte cap", errEnvelopeInvalid, MaxCiphertextBytes)
+	}
+	if env.ClientCreatedAt.IsZero() {
+		return fmt.Errorf("%w: client_created_at must be set", errEnvelopeInvalid)
+	}
+	return nil
 }
 
 // validULID is a cheap shape check (Crockford base32, 26 chars). Lowercase

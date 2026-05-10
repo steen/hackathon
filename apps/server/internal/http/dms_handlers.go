@@ -411,24 +411,19 @@ func (h *DMsHandlers) SendMessage(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	}
 
 	var req struct {
-		Body string `json:"body"`
+		Envelope repo.MessageEnvelope `json:"envelope"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "invalid JSON body")
 		return
 	}
-	body := strings.TrimSpace(req.Body)
-	if body == "" {
-		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, "message body must not be empty")
-		return
-	}
-	if len(body) > MaxMessageBodyBytes {
-		WriteMessageTooLarge(w)
+	if err := validateInboundEnvelope(req.Envelope); err != nil {
+		WriteError(w, stdhttp.StatusBadRequest, CodeBadRequest, err.Error())
 		return
 	}
 
 	id := ids.NewULID()
-	dmMsg, updatedConv, err := h.deps.Repo.InsertDMMessageTx(r.Context(), id, conv.ID, viewerID, body, h.deps.Now())
+	dmMsg, updatedConv, err := h.deps.Repo.InsertDMMessageTx(r.Context(), id, conv.ID, viewerID, req.Envelope, h.deps.Now())
 	if err != nil {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not insert message")
 		return

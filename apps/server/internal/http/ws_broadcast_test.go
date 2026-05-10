@@ -55,8 +55,12 @@ func TestWSSubscriberReceivesBroadcastMessage(t *testing.T) {
 	}
 
 	postURL := srv.URL + "/api/channels/" + chID + "/messages"
+	envBody, err := json.Marshal(map[string]any{"envelope": fakeEnvelopeWire(time.Now())})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
 	req, err := stdhttp.NewRequestWithContext(ctx, stdhttp.MethodPost, postURL,
-		strings.NewReader(`{"body":"live"}`))
+		strings.NewReader(string(envBody)))
 	if err != nil {
 		t.Fatalf("new req: %v", err)
 	}
@@ -82,7 +86,10 @@ func TestWSSubscriberReceivesBroadcastMessage(t *testing.T) {
 	if err := json.Unmarshal(data, &frame); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, string(data))
 	}
-	if frame.Type != WSEventMessage || frame.Data.Body != "live" {
+	if frame.Type != WSEventMessage || frame.Data.Envelope.CipherSuite != 0x01 {
 		t.Fatalf("frame: %+v", frame)
+	}
+	if string(frame.Data.Envelope.Ciphertext) != "ciphertext" {
+		t.Fatalf("ciphertext round-trip mismatch: %q", string(frame.Data.Envelope.Ciphertext))
 	}
 }

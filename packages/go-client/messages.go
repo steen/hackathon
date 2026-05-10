@@ -68,19 +68,17 @@ type MembershipBlock struct {
 	InviterSignature  *string `json:"inviter_signature"`
 }
 
-// Message mirrors the server-side repo.Message JSON shape (PRD §10).
-//
-// Envelope is the Phase-10 encrypted-message envelope (L21). Pointer for
-// optional under the L26 optional-first rule; #983 narrows it to
-// non-optional once every consumer of `.body` is migrated to
-// decrypt-from-envelope (Wave 5 / E).
+// Message mirrors the server-side repo.Message JSON shape (decision-log
+// L21). Envelope is the Phase-10 encrypted-message wire shape — required
+// post-#983, the cutover that drops the plaintext `body` field
+// (decision-log L26). Receivers decrypt before display; senders encrypt
+// before calling PostMessage.
 type Message struct {
-	ID           ULID             `json:"id"`
-	ChannelID    ULID             `json:"channel_id"`
-	SenderUserID ULID             `json:"sender_user_id"`
-	Body         string           `json:"body"`
-	CreatedAt    time.Time        `json:"created_at"`
-	Envelope     *MessageEnvelope `json:"envelope,omitempty"`
+	ID           ULID            `json:"id"`
+	ChannelID    ULID            `json:"channel_id"`
+	SenderUserID ULID            `json:"sender_user_id"`
+	Envelope     MessageEnvelope `json:"envelope"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 // messagesListResponse is the envelope payload for
@@ -97,14 +95,11 @@ type ListMessagesOptions struct {
 	Limit  int
 }
 
-// PostMessageOptions carries the body — and any future tunables — for
-// PostMessage. It exists so PostMessage matches the package-wide
-// `ctx, requiredPositional..., opts struct` shape used by ListMessages
-// and Watch; new fields can land here without another breaking signature
-// change. The JSON tag pins the wire field name so renaming the Go
-// field never breaks the server contract.
+// PostMessageOptions carries the encrypted envelope for PostMessage.
+// Decision-log L21 + L26 — the wire body is `{envelope: {...}}`; there is
+// no plaintext-body fallback after the #983 cutover.
 type PostMessageOptions struct {
-	Body string `json:"body"`
+	Envelope MessageEnvelope `json:"envelope"`
 }
 
 // ListMessages returns up to opts.Limit messages from channelID, newest

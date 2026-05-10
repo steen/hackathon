@@ -23,21 +23,18 @@ type Conversation struct {
 	LastMessageID *ULID      `json:"last_message_id"`
 }
 
-// DMMessage mirrors the dm_messages row. Immutable on the wire (L9 — no
-// edit/delete in v1).
-//
-// Envelope is the Phase-10 encrypted-message envelope (L21); shape is
-// identical to Message.Envelope but the signature scope binds
-// conversation_id (snakd-msg-v1:dm: prefix per L21) for cross-protocol
-// confusion resistance. Pointer for optional under the L26
-// optional-first rule; #983 narrows it.
+// DMMessage mirrors the dm_messages row. Immutable on the wire (decision-
+// log L9 — no edit/delete in v1). Envelope is the Phase-10 encrypted-
+// message envelope; the signature scope binds conversation_id under the
+// snakd-msg-v1:dm: prefix (CRYPTO-3) so a DM ciphertext cannot be
+// replayed as a channel message and vice versa. Required post-#983
+// (decision-log L26).
 type DMMessage struct {
-	ID             ULID             `json:"id"`
-	ConversationID ULID             `json:"conversation_id"`
-	SenderUserID   ULID             `json:"sender_user_id"`
-	Body           string           `json:"body"`
-	CreatedAt      time.Time        `json:"created_at"`
-	Envelope       *MessageEnvelope `json:"envelope,omitempty"`
+	ID             ULID            `json:"id"`
+	ConversationID ULID            `json:"conversation_id"`
+	SenderUserID   ULID            `json:"sender_user_id"`
+	Envelope       MessageEnvelope `json:"envelope"`
+	CreatedAt      time.Time       `json:"created_at"`
 }
 
 // dmsListResponse is the envelope payload for GET /api/dms.
@@ -64,8 +61,10 @@ type createDMRequest struct {
 }
 
 // sendDMRequest is the wire body for POST /api/dms/{id}/messages.
+// Decision-log L21 + L26 — Phase-10 cutover replaced plaintext body
+// with the encrypted envelope.
 type sendDMRequest struct {
-	Body string `json:"body"`
+	Envelope MessageEnvelope `json:"envelope"`
 }
 
 // markReadRequest is the wire body for POST /api/dms/{id}/read and
@@ -117,14 +116,17 @@ func (c *Client) ListDMs(ctx context.Context) ([]Conversation, error) {
 	return out.Conversations, nil
 }
 
-// SendDMMessage creates a message in the conversation and returns the
-// persisted row. The server fans the same record out to both
-// participants' user:<viewer> WS topics. 404 surfaces on
-// non-participation (L8 — no membership leak).
-func (c *Client) SendDMMessage(ctx context.Context, conversationID, body string) (*DMMessage, error) {
+// SendDMMessage creates an encrypted DM in the conversation and returns
+// the persisted row. The caller must supply a structurally-valid
+// MessageEnvelope (cipher_suite=0x01, 24-byte nonce, 32-byte
+// sender_sign_pubkey, 64-byte signature, non-empty ciphertext, signed
+// under the snakd-msg-v1:dm: scope). The server fans the same record
+// out to both participants' user:<viewer> WS topics. 404 on non-
+// participation (decision-log L8 — no membership leak).
+func (c *Client) SendDMMessage(ctx context.Context, conversationID string, env MessageEnvelope) (*DMMessage, error) {
 	path := fmt.Sprintf("/api/dms/%s/messages", url.PathEscape(conversationID))
 	var out DMMessage
-	if err := c.do(ctx, http.MethodPost, path, sendDMRequest{Body: body}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path, sendDMRequest{Envelope: env}, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
