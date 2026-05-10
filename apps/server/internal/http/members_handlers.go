@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	stdhttp "net/http"
 	"time"
@@ -240,7 +239,7 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not insert membership")
 			return
 		}
-		h.broadcastMembersChanged(channelID)
+		h.broadcastMembersChanged(r.Context(), channelID)
 		WriteOK(w, stdhttp.StatusCreated, encodeMember(row, ""))
 		return
 	}
@@ -349,7 +348,7 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not commit transaction")
 		return
 	}
-	h.broadcastMembersChanged(channelID)
+	h.broadcastMembersChanged(r.Context(), channelID)
 	WriteOK(w, stdhttp.StatusCreated, encodeMember(row, ""))
 }
 
@@ -429,7 +428,7 @@ func (h *MembersHandlers) Kick(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 		WriteError(w, stdhttp.StatusNotFound, CodeNotFound, "membership not found")
 		return
 	}
-	h.broadcastMembersChanged(channelID)
+	h.broadcastMembersChanged(r.Context(), channelID)
 	w.WriteHeader(stdhttp.StatusNoContent)
 }
 
@@ -456,22 +455,39 @@ func (h *MembersHandlers) Routes(
 // broadcastMembersChanged emits the L9 {type:"channel",
 // data:{kind:"members_changed", channel_id, current_generation_id,
 // members_at_rotation}} frame on every successful invite + kick.
-// current_generation_id is hardcoded to 1 in this PR; #984 wires it to
-// the actual channel_keys generation. Hub may be nil in tests.
-func (h *MembersHandlers) broadcastMembersChanged(channelID string) {
+// current_generation_id is read live from MAX(channel_keys.generation_id);
+// when the channel has no wraps yet (legacy bootstrap path) we fall back
+// to creatorBootstrapGenID so the wire never exposes a zero generation.
+// members_at_rotation is the current channel_members set joined to
+// users.username — same projection runRotation builds in
+// channel_keys_handlers.go. Hub may be nil in tests; lookup errors fan
+// out an empty members_at_rotation rather than dropping the frame
+// entirely so subscribers still see the cache-bust signal.
+func (h *MembersHandlers) broadcastMembersChanged(ctx context.Context, channelID string) {
 	if h.deps.Hub == nil {
 		return
 	}
-	frame, err := json.Marshal(map[string]interface{}{
-		"type": WSEventChannel,
-		"data": map[string]interface{}{
-			"kind":                  "members_changed",
-			"channel_id":            channelID,
-			"current_generation_id": 1,
-			"members_at_rotation":   []interface{}{},
-		},
-	})
-	if err != nil {
+	gen, hasGen, err := h.deps.Repo.MaxChannelKeyGeneration(ctx, channelID)
+	if err != nil || !hasGen {
+		gen = creatorBootstrapGenID
+	}
+	atRotation := []MembersChangedUser{}
+	if members, mErr := h.deps.Repo.ListChannelMembers(ctx, channelID); mErr == nil {
+		ids := make([]string, 0, len(members))
+		for _, m := range members {
+			ids = append(ids, m.UserID)
+		}
+		usernames, uErr := lookupUsernamesByIDs(ctx, h.deps.Repo.DB(), ids)
+		if uErr != nil {
+			usernames = map[string]string{}
+		}
+		atRotation = make([]MembersChangedUser, 0, len(members))
+		for _, m := range members {
+			atRotation = append(atRotation, MembersChangedUser{ID: m.UserID, Username: usernames[m.UserID]})
+		}
+	}
+	frame := membersChangedFrame(channelID, gen, atRotation)
+	if frame == nil {
 		return
 	}
 	h.deps.Hub.BroadcastAll(frame)
