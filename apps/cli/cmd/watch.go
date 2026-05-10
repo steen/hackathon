@@ -40,8 +40,14 @@ func Watch(ctx context.Context, env *Env, args []string) error {
 		return wrapNotLoggedIn("watch", err)
 	}
 
+	// L14 lazy-wrap-on-online tracker — shared across reconnects so the
+	// L31 60s debounce holds for a flapping network. Wrap-fetch failure
+	// is non-fatal; the watch loop continues regardless.
+	tracker := newLazyWrapTracker()
+
 	backoff := initialWatchBackoff
 	for {
+		_ = triggerLazyWrapForChannel(ctx, env, client, tracker, channel, time.Now())
 		streamErr := streamOnce(ctx, env, client, channel)
 		if ctx.Err() != nil {
 			// Context cancellation is treated as a clean exit; the

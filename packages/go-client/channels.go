@@ -260,3 +260,79 @@ func (c *Client) MarkChannelRead(ctx context.Context, channelID, messageID strin
 	path := fmt.Sprintf("/api/channels/%s/read", url.PathEscape(channelID))
 	return c.do(ctx, http.MethodPost, path, markReadRequest{MessageID: messageID}, nil)
 }
+
+// WrapsNeededRow mirrors one entry in the L22 GET
+// /api/channels/{id}/members/wraps-needed response. Membership carries
+// the pinned-at-invite-time pubkeys + signature for the §10 verifier;
+// the convenience Username / BoxPubkey / SignPubkey fields reflect the
+// invitee's CURRENT users-row values so the caller can compute a wrap
+// without a second /api/users round-trip.
+type WrapsNeededRow struct {
+	UserID       string          `json:"user_id"`
+	GenerationID int64           `json:"generation_id"`
+	Membership   MembershipBlock `json:"membership"`
+	Username     string          `json:"username,omitempty"`
+	BoxPubkey    string          `json:"box_pubkey,omitempty"`
+	SignPubkey   string          `json:"sign_pubkey,omitempty"`
+	AddedAt      time.Time       `json:"added_at"`
+}
+
+// WrapsNeededResponse is the body of GET
+// /api/channels/{id}/members/wraps-needed. IsPublic is server-resolved
+// from channels.is_public per L38 — the verifier reads it directly,
+// no dependency on the channel-listing cache. Missing is empty when
+// every current channel_members row has a current-generation
+// channel_keys row.
+type WrapsNeededResponse struct {
+	ChannelID string           `json:"channel_id"`
+	IsPublic  bool             `json:"is_public"`
+	Missing   []WrapsNeededRow `json:"missing"`
+}
+
+// PostChannelKeysBody is the wire body for POST /api/channels/{id}/keys.
+// The shape is identical across bootstrap | fill-in | rotation per
+// specs/plans/phase-10/keys.md — only the precondition the server
+// picks differs.
+type PostChannelKeysBody struct {
+	GenerationID int64       `json:"generation_id"`
+	Wraps        []WrapEntry `json:"wraps"`
+}
+
+// PostChannelKeysResponse mirrors the success body of the keys-RPC.
+// Mode lets callers confirm which precondition the server selected
+// (they may have raced another caller into bootstrap or rotation).
+type PostChannelKeysResponse struct {
+	Mode         string `json:"mode"`
+	GenerationID int64  `json:"generation_id"`
+	Inserted     int    `json:"inserted"`
+	Recipient    string `json:"recipient,omitempty"`
+}
+
+// WrapsNeeded fetches the L22 lazy-wrap input for channelID. Caller
+// MUST be a current member of the channel (server returns 403 with
+// IsCode "forbidden" otherwise). Per L31, callers should debounce to
+// once per WS-connection lifetime + a 60s flap floor.
+func (c *Client) WrapsNeeded(ctx context.Context, channelID string) (*WrapsNeededResponse, error) {
+	path := fmt.Sprintf("/api/channels/%s/members/wraps-needed", url.PathEscape(channelID))
+	var out WrapsNeededResponse
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// PostChannelKeys posts a keys-RPC body to channelID. The server picks
+// the mode based on body.GenerationID's relationship to the channel's
+// current max(channel_keys.generation_id) per
+// specs/plans/phase-10/keys.md. Surfaces 400 invalid_generation when
+// no mode matches, 409 conflict on a race-loss.
+func (c *Client) PostChannelKeys(
+	ctx context.Context, channelID string, body PostChannelKeysBody,
+) (*PostChannelKeysResponse, error) {
+	path := fmt.Sprintf("/api/channels/%s/keys", url.PathEscape(channelID))
+	var out PostChannelKeysResponse
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
