@@ -1,0 +1,3 @@
+### Tests
+
+- Phase 10 (#1010): extend `tests/e2e/phase-2/go-client-package/surface_test.go` with a §10 self-bootstrap round-trip on `POST /api/channels` (`channel_id`, `membership`, `root_key_wraps`). The drift assertion decodes the server's 201 response into `goclient.Channel` to pin the `{id, name, is_public, created_at}` wire shape, and `client.ListChannels` confirms the §10-bootstrapped row is indistinguishable from a legacy-bootstrap row to the existing listing surface. Reflection-asserts that `*goclient.Client` exposes `CreateChannelBootstrap`. The helper-driven round-trip is skipped with a reference to #1023 (the goclient `createChannelRequest` lacks `channel_id`, so the helper cannot yet succeed against the §10 path).
