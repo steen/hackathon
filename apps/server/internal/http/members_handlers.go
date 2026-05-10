@@ -218,7 +218,7 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 				"membership block + root_key_wrap are required for private channels")
 			return
 		}
-		_, callerBoxPub, callerSignPub, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), caller)
+		_, _, callerSignPub, perr := lookupUserPubkeys(r.Context(), h.deps.Repo.DB(), caller)
 		if perr != nil {
 			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not load caller pubkeys")
 			return
@@ -232,7 +232,6 @@ func (h *MembersHandlers) Invite(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			InviteeSignPubkey: zeroFillPubkey(inviteeSign),
 			AddedAt:           now,
 		}
-		_ = callerBoxPub
 		if err := h.deps.Repo.InsertChannelMember(r.Context(), row, true); err != nil {
 			if errors.Is(err, repo.ErrChannelMemberAlreadyExists) {
 				WriteError(w, stdhttp.StatusConflict, CodeConflict, "user is already a member of channel")
