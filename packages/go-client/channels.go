@@ -44,10 +44,19 @@ type channelsListResponse struct {
 // IsPublic is the Phase-10 public-channel flag (decision-log §9 + L24).
 // Pointer + omitempty so older clients that don't pass the field send
 // `{"name": "..."}`, which the server treats as private-by-default.
+//
+// Membership + RootKeyWraps land with #982: the §10 self-bootstrap
+// signature plus the creator's wrap-to-self. Server returns 400 when
+// either is missing on POST /api/channels.
 type createChannelRequest struct {
-	Name     string `json:"name"`
-	IsPublic *bool  `json:"is_public,omitempty"`
+	Name         string              `json:"name"`
+	IsPublic     *bool               `json:"is_public,omitempty"`
+	Membership   *MembershipBlockReq `json:"membership,omitempty"`
+	RootKeyWraps []WrapEntry         `json:"root_key_wraps,omitempty"`
 }
+
+// WrapEntry is defined in packages/go-client/messages.go (decision-log
+// L5). Reused here for createChannelRequest + inviteRequest.
 
 // MembershipBlockReq mirrors the §10 inviter-signed channel-membership
 // payload carried on POST /api/channels/{id}/members. The server-side
@@ -66,10 +75,13 @@ type MembershipBlockReq struct {
 
 // inviteRequest is the wire body for POST /api/channels/{id}/members.
 // The server validates the membership block when present; for public
-// channels callers may omit it (the server-auto-add carve-out).
+// channels callers may omit BOTH membership and root_key_wrap (the
+// server-auto-add carve-out, no wrap inserted — lazy-wrap-on-online
+// supplies it later). Private channels require both.
 type inviteRequest struct {
-	UserID     string              `json:"user_id"`
-	Membership *MembershipBlockReq `json:"membership,omitempty"`
+	UserID      string              `json:"user_id"`
+	Membership  *MembershipBlockReq `json:"membership,omitempty"`
+	RootKeyWrap *WrapEntry          `json:"root_key_wrap,omitempty"`
 }
 
 // ChannelMember mirrors the JSON shape of one row in
@@ -119,9 +131,48 @@ func (c *Client) CreateChannel(ctx context.Context, name string) (*Channel, erro
 // server validates the name shape (lowercase letters, digits, hyphens;
 // 1-40 chars) and returns 409 conflict when the name is already taken
 // — callers can branch on `IsCode(err, "conflict")`.
+//
+// This call omits `membership` and `root_key_wraps`; the server falls
+// through to the legacy bootstrap path (creator membership row with
+// NULL signature, no wrap row). Use CreateChannelBootstrap when you
+// need the §10 self-signed atomic-create shape (#982 / #984).
 func (c *Client) CreateChannelOpts(ctx context.Context, name string, isPublic bool) (*Channel, error) {
 	flag := isPublic
 	body := createChannelRequest{Name: name, IsPublic: &flag}
+	var out Channel
+	if err := c.do(ctx, http.MethodPost, "/api/channels", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CreateChannelBootstrapOpts bundles the §10 self-signed
+// MembershipBlock + the creator's wrap-to-self for the atomic-create
+// path (decision-log §7 + §10). Both blocks are required by the
+// server; pass them together so a half-bootstrapped state is
+// impossible.
+type CreateChannelBootstrapOpts struct {
+	IsPublic     bool
+	Membership   MembershipBlockReq
+	RootKeyWraps []WrapEntry
+}
+
+// CreateChannelBootstrap is the §10 atomic-create variant of
+// CreateChannel: server validates the membership signature, the L30
+// sender pubkey ownership, the L39 wrap byte-lengths, then inserts
+// channel + creator-membership + creator-wrap atomically. Returns
+// 400 `invalid_membership_signature` / `sender_pubkey_mismatch` /
+// `wrap_size_invalid` on the named failures; 409 `conflict` on a
+// duplicate channel name.
+func (c *Client) CreateChannelBootstrap(ctx context.Context, name string, opts CreateChannelBootstrapOpts) (*Channel, error) {
+	flag := opts.IsPublic
+	mb := opts.Membership
+	body := createChannelRequest{
+		Name:         name,
+		IsPublic:     &flag,
+		Membership:   &mb,
+		RootKeyWraps: opts.RootKeyWraps,
+	}
 	var out Channel
 	if err := c.do(ctx, http.MethodPost, "/api/channels", body, &out); err != nil {
 		return nil, err
@@ -141,15 +192,35 @@ func (c *Client) ListChannelMembers(ctx context.Context, channelID string) ([]Ch
 }
 
 // InviteChannelMember adds invitee to channelID. The caller must be a
-// current member of the channel. The server validates the membership
-// block byte-shape; the full inviter-signature crypto verify lands
-// with the wrap loop (#984). Pass nil for the membership argument when
-// inviting to a public channel — the server auto-fills the row.
+// current member of the channel.
+//
+// Pass nil for membership AND nil for rootKeyWrap to invite to a
+// public channel — the server runs the auto-fill path (NULL signature,
+// no wrap; lazy-wrap-on-online supplies the wrap later).
+//
+// Pass both for a private-channel invite — the server validates the
+// §10 inviter-signature, the L30 sender pubkey ownership, and the L39
+// wrap byte-lengths, then inserts member + wrap atomically.
 func (c *Client) InviteChannelMember(
-	ctx context.Context, channelID, inviteeUserID string, membership *MembershipBlockReq,
+	ctx context.Context, channelID, inviteeUserID string,
+	membership *MembershipBlockReq,
+) (*ChannelMember, error) {
+	return c.InviteChannelMemberWithWrap(ctx, channelID, inviteeUserID, membership, nil)
+}
+
+// InviteChannelMemberWithWrap is the wrap-carrying variant of
+// InviteChannelMember. Required for private-channel invites under the
+// §10 + L7 atomic-invite invariant.
+func (c *Client) InviteChannelMemberWithWrap(
+	ctx context.Context, channelID, inviteeUserID string,
+	membership *MembershipBlockReq, rootKeyWrap *WrapEntry,
 ) (*ChannelMember, error) {
 	path := fmt.Sprintf("/api/channels/%s/members", url.PathEscape(channelID))
-	body := inviteRequest{UserID: inviteeUserID, Membership: membership}
+	body := inviteRequest{
+		UserID:      inviteeUserID,
+		Membership:  membership,
+		RootKeyWrap: rootKeyWrap,
+	}
 	var out ChannelMember
 	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
 		return nil, err
