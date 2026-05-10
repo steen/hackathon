@@ -249,6 +249,52 @@ export type Event =
   | ReadEvent
   | UnknownEvent;
 
+// WrapsNeededRow is one entry in the GET /api/channels/{id}/members/wraps-needed
+// response per e2e decision-log L22. `membership` carries the
+// pinned-at-invite-time pubkeys + signature for §10 verification; the
+// convenience `username` / `box_pubkey` / `sign_pubkey` fields reflect
+// the invitee's CURRENT users-row values so the verifier can compute
+// the wrap without a second /api/users call.
+export interface WrapsNeededRow {
+  user_id: string;
+  generation_id: number;
+  membership: MembershipBlock;
+  username?: string;
+  box_pubkey?: string;
+  sign_pubkey?: string;
+  added_at: string;
+}
+
+// WrapsNeededResponse is the body of GET /api/channels/{id}/members/wraps-needed.
+// `is_public` is server-resolved from channels.is_public per L38 — the
+// verifier reads it directly, no dependency on the channel-listing
+// cache. `missing` is empty when every current channel_members row
+// has a current-generation channel_keys row (steady state).
+export interface WrapsNeededResponse {
+  channel_id: string;
+  is_public: boolean;
+  missing: WrapsNeededRow[];
+}
+
+// PostChannelKeysBody is the wire body for POST /api/channels/{id}/keys.
+// The shape is identical across the three modes (bootstrap | fill-in |
+// rotation) per specs/plans/phase-10/keys.md — only the precondition
+// the server picks differs.
+export interface PostChannelKeysBody {
+  generation_id: number;
+  wraps: WrapEntry[];
+}
+
+// PostChannelKeysResponse mirrors the success body of the keys-RPC.
+// `mode` lets clients confirm which precondition the server picked
+// (they may have raced another caller into bootstrap or rotation).
+export interface PostChannelKeysResponse {
+  mode: "bootstrap" | "fill-in" | "rotation";
+  generation_id: number;
+  inserted: number;
+  recipient?: string;
+}
+
 export interface ErrorBody {
   code: string;
   message: string;

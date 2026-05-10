@@ -135,6 +135,116 @@ func (r *Repo) MaxChannelKeyGenerationTx(ctx context.Context, tx *sql.Tx, channe
 	return n.Int64, true, nil
 }
 
+// ChannelKeyMode discriminates the precondition that the standalone
+// keys-RPC (`POST /api/channels/{id}/keys`) selects based on
+// generation_id's relationship to MaxChannelKeyGeneration. The body
+// shape is identical across modes per specs/plans/phase-10/keys.md
+// "Three modes" — only the precondition differs. Server returns
+// 400 invalid_generation when the supplied generation matches no mode.
+type ChannelKeyMode int
+
+const (
+	// ChannelKeyModeInvalid signals "no mode matches" — handler maps
+	// to 400 invalid_generation.
+	ChannelKeyModeInvalid ChannelKeyMode = iota
+	// ChannelKeyModeBootstrap — first wrap for a channel; the caller
+	// supplies generation_id == 1 with one wrap-to-self entry.
+	ChannelKeyModeBootstrap
+	// ChannelKeyModeFillIn — caller supplies generation_id ==
+	// MaxGen; wrap-list adds missing wraps for the current generation
+	// (lazy-wrap-on-online L14).
+	ChannelKeyModeFillIn
+	// ChannelKeyModeRotation — caller supplies generation_id ==
+	// MaxGen + 1; wrap-list covers every current channel_members row
+	// for the new generation.
+	ChannelKeyModeRotation
+)
+
+// DetectChannelKeyMode resolves the keys-RPC mode from the supplied
+// generation_id and the current MaxChannelKeyGeneration for the
+// channel. Pure decision: validation of wrap-list shape lives in the
+// handler.
+//
+// Bootstrap fires when no wraps exist yet (hasMax == false) AND the
+// caller passed generation_id == 1. CONTR-2 covers the race where
+// two users register before either bootstraps — first POST wins, the
+// second sees hasMax == true and falls through to fill-in (specs/
+// plans/phase-10/keys.md "Bootstrap mode").
+func DetectChannelKeyMode(generationID int64, maxGen int64, hasMax bool) ChannelKeyMode {
+	if !hasMax {
+		if generationID == 1 {
+			return ChannelKeyModeBootstrap
+		}
+		return ChannelKeyModeInvalid
+	}
+	switch generationID {
+	case maxGen:
+		return ChannelKeyModeFillIn
+	case maxGen + 1:
+		return ChannelKeyModeRotation
+	default:
+		return ChannelKeyModeInvalid
+	}
+}
+
+// MissingWrapMember describes one (member_user_id, generation_id) pair
+// for which channel_members has a row but channel_keys does not — the
+// wraps-needed response shape per L22. The handler joins this with
+// channel_members to build the MembershipBlock per row.
+type MissingWrapMember struct {
+	UserID       string
+	GenerationID int64
+}
+
+// ListMissingWrapsForCurrentGeneration returns one entry per current
+// channel_members row that has no matching channel_keys row at the
+// channel's current generation (= MaxChannelKeyGeneration). Returns
+// (nil, 0, false, nil) when no wraps exist yet for the channel — the
+// caller treats that as "bootstrap not yet fired; nothing to fill".
+//
+// Implementation uses a LEFT JOIN so missing-wrap rows surface as
+// channel_keys.member_user_id IS NULL; the join's generation_id pin
+// excludes wraps left over from prior generations after a rotation.
+func (r *Repo) ListMissingWrapsForCurrentGeneration(
+	ctx context.Context, channelID string,
+) ([]MissingWrapMember, int64, bool, error) {
+	currentGen, hasGen, err := r.MaxChannelKeyGeneration(ctx, channelID)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if !hasGen {
+		return nil, 0, false, nil
+	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT cm.user_id
+		   FROM channel_members cm
+		   LEFT JOIN channel_keys ck
+		     ON ck.channel_id = cm.channel_id
+		    AND ck.member_user_id = cm.user_id
+		    AND ck.generation_id = ?
+		  WHERE cm.channel_id = ?
+		    AND ck.member_user_id IS NULL
+		  ORDER BY cm.added_at ASC, cm.user_id ASC`,
+		currentGen, channelID,
+	)
+	if err != nil {
+		return nil, currentGen, true, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]MissingWrapMember, 0)
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, currentGen, true, err
+		}
+		out = append(out, MissingWrapMember{UserID: uid, GenerationID: currentGen})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, currentGen, true, err
+	}
+	return out, currentGen, true, nil
+}
+
 // isChannelKeyPKViolation maps SQLite's UNIQUE/PRIMARY-KEY message for
 // channel_keys to the typed sentinel.
 func isChannelKeyPKViolation(err error) bool {

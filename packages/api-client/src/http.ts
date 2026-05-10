@@ -7,9 +7,12 @@ import type {
   ListMessagesOptions,
   MembershipBlock,
   Message,
+  PostChannelKeysBody,
+  PostChannelKeysResponse,
   User,
   WSTicket,
   WrapEntry,
+  WrapsNeededResponse,
 } from "./types.js";
 
 export type FetchLike = typeof fetch;
@@ -169,6 +172,31 @@ export class HttpClient {
   async postMessage(channelId: string, body: string): Promise<Message> {
     const path = `/api/channels/${encodeURIComponent(channelId)}/messages`;
     return this.request<Message>("POST", path, { body });
+  }
+
+  // Phase-10 keys-RPC: GET /api/channels/{id}/members/wraps-needed.
+  // Returns the L22 shape (channel_id, is_public, missing[]); callers
+  // run the verifier-side flow before computing wraps and posting them
+  // via postChannelKeys. Server requires the caller to be a current
+  // member (403 otherwise). Per L31 the client should call this once
+  // per WS-connection lifetime.
+  async wrapsNeeded(channelId: string): Promise<WrapsNeededResponse> {
+    const path = `/api/channels/${encodeURIComponent(channelId)}/members/wraps-needed`;
+    return this.request<WrapsNeededResponse>("GET", path);
+  }
+
+  // Phase-10 keys-RPC: POST /api/channels/{id}/keys. The body shape is
+  // identical across bootstrap | fill-in | rotation per
+  // specs/plans/phase-10/keys.md — server picks the mode by comparing
+  // generation_id to the channel's current max(channel_keys.generation_id).
+  // Surfaces 400 invalid_generation when no mode matches; 409 conflict
+  // on a race-loss (someone else inserted the same row).
+  async postChannelKeys(
+    channelId: string,
+    body: PostChannelKeysBody,
+  ): Promise<PostChannelKeysResponse> {
+    const path = `/api/channels/${encodeURIComponent(channelId)}/keys`;
+    return this.request<PostChannelKeysResponse>("POST", path, body);
   }
 
   // Public so callers can hit endpoints not (yet) wrapped with a typed
