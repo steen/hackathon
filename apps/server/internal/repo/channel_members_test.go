@@ -83,6 +83,91 @@ func TestInsertChannelMemberAcceptsNullSigOnPublic(t *testing.T) {
 	}
 }
 
+// TestInsertChannelMemberPrivateChannelSelfBootstrapCarveOut pins the
+// §10 self-bootstrap exemption that the channels Create handler relies
+// on (apps/server/internal/http/channels_handlers.go:153, which passes
+// channelIsPublic=true unconditionally for the creator-bootstrap row).
+// The carve-out is acceptable today because the only zero-member
+// private-channel state is during the create handler itself; this test
+// makes a future regression that drops it surface here, instead of
+// silently breaking the create flow.
+//
+// The test asserts three things:
+//  1. The bootstrap row persists with NULL inviter_signature on a
+//     PRIVATE channel when the caller passes channelIsPublic=true (the
+//     handler's L153 mirror).
+//  2. Exactly one membership row exists for the channel after the
+//     bootstrap.
+//  3. A subsequent InsertChannelMember on the same private channel
+//     with NULL signature and channelIsPublic=false is rejected with
+//     ErrPrivateChannelNullSignature — L33 still applies to every
+//     non-bootstrap insert.
+func TestInsertChannelMemberPrivateChannelSelfBootstrapCarveOut(t *testing.T) {
+	r, db := newRepo(t)
+
+	ch, err := r.CreateChannel(context.Background(), ids.NewULID(), "private-ch", false, time.Now())
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	creator := mkUser(t, r, "creator")
+
+	bootstrap := repo.ChannelMember{
+		ChannelID:         ch.ID,
+		UserID:            creator,
+		InviterUserID:     creator,
+		InviterSignPubkey: bytesOfLen(32),
+		InviterSignature:  nil,
+		InviteeBoxPubkey:  bytesOfLen(32),
+		InviteeSignPubkey: bytesOfLen(32),
+		AddedAt:           time.Now(),
+	}
+	// The handler passes channelIsPublic=true for the creator-bootstrap
+	// row even when the channel is private — the §10 self-bootstrap
+	// carve-out. Mirror that here.
+	if err := r.InsertChannelMember(context.Background(), bootstrap, true); err != nil {
+		t.Fatalf("bootstrap insert: got %v want nil", err)
+	}
+
+	var rowCount int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM channel_members WHERE channel_id = ?`, ch.ID,
+	).Scan(&rowCount); err != nil {
+		t.Fatalf("count rows: %v", err)
+	}
+	if rowCount != 1 {
+		t.Fatalf("rows for channel: got %d want 1", rowCount)
+	}
+
+	var sig []byte
+	if err := db.QueryRow(
+		`SELECT inviter_signature FROM channel_members WHERE channel_id = ? AND user_id = ?`,
+		ch.ID, creator,
+	).Scan(&sig); err != nil {
+		t.Fatalf("scan signature: %v", err)
+	}
+	if sig != nil {
+		t.Fatalf("inviter_signature: got %x want NULL (§10 carve-out)", sig)
+	}
+
+	// Now confirm L33 still bites: any FURTHER insert on the same
+	// private channel with channelIsPublic=false + NULL signature
+	// must be rejected. The bootstrap window is single-shot.
+	invitee := mkUser(t, r, "invitee")
+	second := repo.ChannelMember{
+		ChannelID:         ch.ID,
+		UserID:            invitee,
+		InviterUserID:     creator,
+		InviterSignPubkey: bytesOfLen(32),
+		InviterSignature:  nil,
+		InviteeBoxPubkey:  bytesOfLen(32),
+		InviteeSignPubkey: bytesOfLen(32),
+		AddedAt:           time.Now(),
+	}
+	if err := r.InsertChannelMember(context.Background(), second, false); !errors.Is(err, repo.ErrPrivateChannelNullSignature) {
+		t.Fatalf("second insert err: got %v want ErrPrivateChannelNullSignature", err)
+	}
+}
+
 func bytesOfLen(n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
