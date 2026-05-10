@@ -267,20 +267,15 @@ func (h *ChannelsHandlers) Create(w stdhttp.ResponseWriter, r *stdhttp.Request) 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := tx.ExecContext(r.Context(),
-		`INSERT INTO channels(id, name, is_public, created_at) VALUES (?, ?, ?, ?)`,
-		id, name, req.IsPublic, now.UTC(),
-	); err != nil {
-		if isChannelNameTakenSQLite(err) {
+	if _, err := h.deps.Repo.CreateChannelTx(r.Context(), tx, id, name, req.IsPublic, now); err != nil {
+		switch {
+		case errors.Is(err, repo.ErrChannelNameTaken):
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "channel name already taken")
-			return
-		}
-		if strings.Contains(err.Error(), "UNIQUE constraint failed") &&
-			strings.Contains(err.Error(), "channels.id") {
+		case errors.Is(err, repo.ErrChannelIDTaken):
 			WriteError(w, stdhttp.StatusConflict, CodeConflict, "channel id already taken (pick a fresh ULID)")
-			return
+		default:
+			WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create channel")
 		}
-		WriteError(w, stdhttp.StatusInternalServerError, CodeInternal, "could not create channel")
 		return
 	}
 	if err := h.deps.Repo.InsertChannelMemberTx(r.Context(), tx, row, req.IsPublic); err != nil {
@@ -510,20 +505,6 @@ func bytesEqualConstantTime(a, b []byte) bool {
 		diff |= a[i] ^ b[i]
 	}
 	return diff == 0
-}
-
-// isChannelNameTakenSQLite mirrors the package-private sniff in
-// repo/channels.go. We can't import the unexported function and the
-// repo's CreateChannel doesn't expose a Tx variant; the inline INSERT
-// inside the L7 transaction is the path that keeps the channel,
-// member, and wrap rows atomic.
-func isChannelNameTakenSQLite(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "UNIQUE constraint failed") &&
-		strings.Contains(msg, "channels.name")
 }
 
 // Rename handles PATCH /api/channels/{id}. Must be wrapped in

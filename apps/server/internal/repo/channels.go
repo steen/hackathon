@@ -35,9 +35,16 @@ type Channel struct {
 	IsPublic *bool `json:"is_public,omitempty"`
 }
 
-// ErrChannelNameTaken is returned by CreateChannel when the UNIQUE
-// constraint on channels.name trips. Callers map this to a 409.
+// ErrChannelNameTaken is returned by CreateChannel/CreateChannelTx when
+// the UNIQUE constraint on channels.name trips. Callers map this to 409.
 var ErrChannelNameTaken = errors.New("repo: channel name already taken")
+
+// ErrChannelIDTaken is returned by CreateChannelTx when the channels.id
+// PRIMARY KEY constraint trips. The §10 atomic-bootstrap path lets the
+// caller pick the ULID before signing the membership block, so a
+// duplicate id is a caller-visible 409 ("pick a fresh ULID") rather
+// than an internal error.
+var ErrChannelIDTaken = errors.New("repo: channel id already taken")
 
 // ErrChannelNotFound is returned by RenameChannel when the supplied id
 // does not match any row. Callers map this to a 404.
@@ -122,6 +129,34 @@ func (r *Repo) CreateChannel(ctx context.Context, id, name string, isPublic bool
 	if err != nil {
 		if isChannelNameTakenErr(err) {
 			return nil, ErrChannelNameTaken
+		}
+		return nil, err
+	}
+	v := isPublic
+	return &Channel{ID: id, Name: name, CreatedAt: created, IsPublic: &v}, nil
+}
+
+// CreateChannelTx is the *sql.Tx variant of CreateChannel for callers
+// composing the channel insert with member + wrap inserts in one
+// transaction (the L7 atomic-create invariant). Returns:
+//   - ErrChannelNameTaken when channels.name UNIQUE trips (handler → 409).
+//   - ErrChannelIDTaken when channels.id PRIMARY KEY trips (handler → 409).
+//
+// Returning typed sentinels keeps the http handler off driver-specific
+// error prose; the Tx variant exists so the http handler does not have
+// to inline the INSERT just to compose with the wrap insert.
+func (r *Repo) CreateChannelTx(ctx context.Context, tx *sql.Tx, id, name string, isPublic bool, now time.Time) (*Channel, error) {
+	created := now.UTC()
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO channels(id, name, is_public, created_at) VALUES (?, ?, ?, ?)`,
+		id, name, isPublic, created,
+	)
+	if err != nil {
+		if isChannelNameTakenErr(err) {
+			return nil, ErrChannelNameTaken
+		}
+		if isChannelIDTakenErr(err) {
+			return nil, ErrChannelIDTaken
 		}
 		return nil, err
 	}
@@ -269,4 +304,17 @@ func isChannelNameTakenErr(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE constraint failed") &&
 		strings.Contains(msg, "channels.name")
+}
+
+// isChannelIDTakenErr maps SQLite's UNIQUE-constraint message for the
+// channels.id PRIMARY KEY to ErrChannelIDTaken. Same string-match
+// shape as isChannelNameTakenErr — kept private so the typed sentinel
+// is the only signal that crosses the package boundary.
+func isChannelIDTakenErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint failed") &&
+		strings.Contains(msg, "channels.id")
 }

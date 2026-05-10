@@ -64,6 +64,75 @@ func TestCreateChannelRejectsDuplicateName(t *testing.T) {
 	}
 }
 
+// CreateChannelTx — duplicate name surfaces ErrChannelNameTaken so the
+// http handler can map to 409 without sniffing driver error prose.
+func TestCreateChannelTxRejectsDuplicateName(t *testing.T) {
+	r, db := newRepo(t)
+	if _, err := r.CreateChannel(context.Background(), ids.NewULID(), "dup", false, time.Now()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = r.CreateChannelTx(context.Background(), tx, ids.NewULID(), "dup", false, time.Now())
+	if !errors.Is(err, repo.ErrChannelNameTaken) {
+		t.Fatalf("err: got %v want ErrChannelNameTaken", err)
+	}
+}
+
+// CreateChannelTx — duplicate id surfaces ErrChannelIDTaken so the §10
+// atomic-bootstrap path can return 409 ("pick a fresh ULID") rather
+// than 500 when a caller signs against an id another caller already
+// claimed.
+func TestCreateChannelTxRejectsDuplicateID(t *testing.T) {
+	r, db := newRepo(t)
+	id := ids.NewULID()
+	if _, err := r.CreateChannel(context.Background(), id, "first", false, time.Now()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = r.CreateChannelTx(context.Background(), tx, id, "second", false, time.Now())
+	if !errors.Is(err, repo.ErrChannelIDTaken) {
+		t.Fatalf("err: got %v want ErrChannelIDTaken", err)
+	}
+}
+
+// CreateChannelTx — happy path persists the row only after Commit.
+func TestCreateChannelTxPersistsOnCommit(t *testing.T) {
+	r, db := newRepo(t)
+	id := ids.NewULID()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	ch, err := r.CreateChannelTx(context.Background(), tx, id, "tx-create", true, time.Now())
+	if err != nil {
+		t.Fatalf("CreateChannelTx: %v", err)
+	}
+	if ch.ID != id || ch.Name != "tx-create" {
+		t.Fatalf("returned: %+v", ch)
+	}
+	if ch.IsPublic == nil || !*ch.IsPublic {
+		t.Fatalf("is_public: got %v want true", ch.IsPublic)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM channels WHERE id = ?`, id).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("rows: got %d want 1", n)
+	}
+}
+
 // US-3 — ListChannels returns rows ordered chronologically by id.
 func TestListChannelsReturnsSeededChannels(t *testing.T) {
 	r, _ := newRepo(t)
