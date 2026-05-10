@@ -9,15 +9,32 @@ import (
 	"time"
 
 	"hackathon/apps/server/internal/auth"
+	"hackathon/apps/server/internal/repo"
 )
 
 // authStore is a SQL helper used by the auth handlers. Lives in this
 // package (not in internal/repo) because the parent feature owns repo
 // and froze its surface; concrete accessors land with the feature
 // that needs them per the repo package doc.
-type authStore struct{ db *sql.DB }
+//
+// repo is optional: only CreateUser's auto-join loop needs it (to call
+// repo.InsertChannelMemberTx so the L33 NULL-signature guard is single-
+// sourced). NewRateLimitAuditSink in middleware_ratelimit.go keeps the
+// db-only constructor for the audit-sink path that never touches
+// channel_members.
+type authStore struct {
+	db   *sql.DB
+	repo *repo.Repo
+}
 
 func newAuthStore(db *sql.DB) *authStore { return &authStore{db: db} }
+
+// newAuthStoreWithRepo wires both the *sql.DB and the *repo.Repo. The
+// auth handlers use this constructor so CreateUser can call
+// repo.InsertChannelMemberTx instead of inlining its own INSERT.
+func newAuthStoreWithRepo(db *sql.DB, r *repo.Repo) *authStore {
+	return &authStore{db: db, repo: r}
+}
 
 // ErrUsernameTaken is returned by CreateUser when the UNIQUE constraint
 // on users.username trips so the handler can return a 409 envelope
@@ -89,6 +106,9 @@ func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash s
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	if len(publicIDs) > 0 && s.repo == nil {
+		return errors.New("auth_store: CreateUser auto-join requires *repo.Repo; use newAuthStoreWithRepo")
+	}
 	for _, channelID := range publicIDs {
 		// L33 public-channel carve-out: inviter_signature is NULL,
 		// inviter_user_id = user_id (self-invite — see decision-log
@@ -107,15 +127,18 @@ func (s *authStore) CreateUser(ctx context.Context, id, username, passwordHash s
 		if len(signPin) == 0 {
 			signPin = make([]byte, 32)
 		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO channel_members(
-			    channel_id, user_id, inviter_user_id,
-			    inviter_sign_pubkey, inviter_signature,
-			    invitee_box_pubkey, invitee_sign_pubkey,
-			    added_at)
-			 VALUES (?, ?, ?, ?, NULL, ?, ?, ?)`,
-			channelID, id, id, signPin, boxPin, signPin, created,
-		); err != nil {
+		// channelIsPublic = true: the SELECT above filtered on
+		// is_public = TRUE, so the L33 NULL-signature guard inside
+		// repo.InsertChannelMemberTx accepts the self-invite row.
+		if err := s.repo.InsertChannelMemberTx(ctx, tx, repo.ChannelMember{
+			ChannelID:         channelID,
+			UserID:            id,
+			InviterUserID:     id,
+			InviterSignPubkey: signPin,
+			InviteeBoxPubkey:  boxPin,
+			InviteeSignPubkey: signPin,
+			AddedAt:           created,
+		}, true); err != nil {
 			return err
 		}
 	}

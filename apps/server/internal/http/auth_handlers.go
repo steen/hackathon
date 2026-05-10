@@ -17,6 +17,7 @@ import (
 	"hackathon/apps/server/internal/auth"
 	"hackathon/apps/server/internal/ids"
 	"hackathon/apps/server/internal/ratelimit"
+	"hackathon/apps/server/internal/repo"
 )
 
 // pubkeyByteLen is the raw byte length of a Phase-10 identity pubkey
@@ -52,7 +53,12 @@ var usernameRe = regexp.MustCompile(`^[a-z0-9_-]{3,32}$`)
 // struct so AuthHandlers stays a thin constructor and main can build
 // it incrementally.
 type AuthDeps struct {
-	DB         *sql.DB
+	DB *sql.DB
+	// Repo is the data-access façade. CreateUser's auto-join loop
+	// calls repo.InsertChannelMemberTx so the L33 NULL-signature guard
+	// stays single-sourced (#1003). Optional in tests that do not
+	// exercise registration; required in production wiring.
+	Repo       *repo.Repo
 	Tickets    *auth.TicketStore
 	SigningKey []byte
 	InviteCode string
@@ -83,7 +89,7 @@ func NewAuthHandlers(deps AuthDeps) *AuthHandlers {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	return &AuthHandlers{deps: deps, store: newAuthStore(deps.DB)}
+	return &AuthHandlers{deps: deps, store: newAuthStoreWithRepo(deps.DB, deps.Repo)}
 }
 
 // AuditSink returns the audit-log sink the rate-limit middleware can
