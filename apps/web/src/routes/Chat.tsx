@@ -204,8 +204,27 @@ export function Chat(): React.JSX.Element {
   // listMessages fetch settles. Otherwise the connecting → connected window
   // (state is `messages === []`, `error === null`) flashes the hint for the
   // duration of the fetch on every channel switch.
+  //
+  // useMessages's setHistoryLoading(true) lands in a useEffect that fires
+  // post-commit, so the render where activeChannel first flips to a real
+  // id has historyLoading=false and an empty messages array — all four
+  // gate conditions hold for one frame. Track the channel we've seen the
+  // hook acknowledge (via either historyLoading=true or a non-empty
+  // messages array) and suppress the hint until that catches up. Adjusts
+  // state during render per
+  // https://react.dev/reference/react/useState#storing-information-from-previous-renders.
+  const [acknowledgedChannel, setAcknowledgedChannel] = useState<string | null>(null);
+  if (
+    activeChannel !== null &&
+    acknowledgedChannel !== activeChannel &&
+    (messagesState.historyLoading || messagesState.messages.length > 0)
+  ) {
+    setAcknowledgedChannel(activeChannel);
+  }
+  const historySettledForActive = activeChannel !== null && acknowledgedChannel === activeChannel;
   const showEmptyChannelHint =
     activeChannel !== null &&
+    historySettledForActive &&
     !messagesState.historyLoading &&
     messagesState.error === null &&
     messagesState.messages.length === 0;

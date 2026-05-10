@@ -1943,9 +1943,9 @@ describe("test_web_chat_does_not_flash_empty_channel_hint_before_history_resolve
     listChannelsMock.mockResolvedValue([
       { id: "C1", name: "general", created_at: "2026-01-01T00:00:00Z" },
     ]);
-    // Hold listMessages open until after we have asserted that the hint
-    // is absent. The state at this point — connecting WS, empty messages,
-    // null error — is the exact race the historyLoading gate covers.
+    // Hold listMessages open across the in-flight window. The state we
+    // care about — activeChannel set, historyLoading=true, no rows, no
+    // error — is the exact gate showEmptyChannelHint must respect.
     let resolveHistory: ((rows: unknown[]) => void) | undefined;
     listMessagesMock.mockImplementation(
       () =>
@@ -1956,18 +1956,45 @@ describe("test_web_chat_does_not_flash_empty_channel_hint_before_history_resolve
     wsTicketMock.mockResolvedValue({ ticket: "t1", expires_at: "2026-01-01T01:00:00Z" });
     httpRequestMock.mockResolvedValue({ users: [] });
 
+    // A single-frame queryByTestId snapshot races React's commit ordering
+    // (activeChannel commits before useMessages's setHistoryLoading(true)
+    // re-render lands). Track the hint via MutationObserver across the
+    // whole in-flight window so the assertion reflects the invariant
+    // "the hint never appears while listMessages is pending", not just
+    // one DOM frame.
+    let hintEverPresent = false;
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('[data-testid="empty-state-channel-hint"]') !== null) {
+        hintEverPresent = true;
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
     render(
       <AuthProvider>
         <Chat />
       </AuthProvider>,
     );
 
-    // The channel heading reflecting the active channel is the earliest
-    // signal that activeChannel has been set; from this point onward the
-    // race window in Chat.tsx (connecting + empty messages + null error)
-    // is open until listMessages settles.
+    // Wait for activeChannel to be reflected in the heading AND for the
+    // useMessages effect to have invoked listMessages (proves the
+    // historyLoading=true commit has at least been scheduled). Both
+    // conditions hold across the entire race window the gate covers.
     await screen.findByRole("heading", { name: /^general$/ });
+    await waitFor(() => {
+      expect(listMessagesMock).toHaveBeenCalledWith("C1", expect.anything());
+    });
+    // Yield several microtasks + a macrotask so any scheduled re-renders
+    // commit before we evaluate the in-flight snapshot. If a flash were
+    // possible, this gives it room to manifest.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    // Snapshot AND observer-history must both agree the hint is absent.
     expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
+    expect(hintEverPresent).toBe(false);
 
     await act(async () => {
       resolveHistory?.([
@@ -1981,12 +2008,16 @@ describe("test_web_chat_does_not_flash_empty_channel_hint_before_history_resolve
       ]);
       await Promise.resolve();
     });
+    observer.disconnect();
 
     // Once history lands with rows, the hint stays absent (messages>0)
     // and at least one article renders.
     const articles = await screen.findAllByRole("article");
     expect(articles.length).toBeGreaterThan(0);
     expect(screen.queryByTestId("empty-state-channel-hint")).toBeNull();
+    // The observer also never recorded an appearance across the whole
+    // pre-resolve window.
+    expect(hintEverPresent).toBe(false);
   });
 });
 
