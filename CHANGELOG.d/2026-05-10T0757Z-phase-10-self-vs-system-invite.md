@@ -1,0 +1,3 @@
+### Documentation
+
+- **Phase 10 — `#general` auto-add convention pinned**: the public-channel carve-out at registration is **self-invite** (`inviter_user_id = new_user.id`), not system-invite (sentinel user row). Decision rationale lives in `specs/plans/phase-10/membership.md` under "#general (the seeded baseline) → Decision — self-invite (not system-invite)"; convention pinned by `tests/e2e/phase-10/registration-auto-add/registration_auto_add_test.go` which asserts `inviter_user_id == user_id` and an absent `inviter_signature` for every auto-added row. No code change — main has been on self-invite since the membership-CRUD PR; this PR documents the decision and locks it with a test so a future flip needs to update both files in the same PR.
