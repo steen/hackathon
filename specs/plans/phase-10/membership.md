@@ -210,6 +210,22 @@ The seed step (`apps/server/internal/seed/seed.go`) marks `#general` with `is_pu
 
 Until a wrap arrives, the new user can see `#general` in their channel list but cannot read messages; the UI shows "waiting for key…" (the same join-handshake state described in [keys.md](keys.md) under "Lazy-wrap-on-online"). The `{type:"channel", data:{kind:"key_received", ...}}` WS frame closes the loop when the wrap is filled in.
 
+#### Decision — self-invite (not system-invite)
+
+The auto-add row uses **self-invite** semantics: `inviter_user_id = new_user.id`. The migration's `inviter_user_id TEXT NOT NULL REFERENCES users(id)` (`migrations/0006_encryption.sql:75`) needs a real user id, but the public-channel carve-out skips the invitation handshake — there is no actual inviter. Two consistent shapes were on the table:
+
+1. **Self-invite** (chosen): the new user is recorded as their own inviter. Implemented in `apps/server/internal/http/auth_store.go:111-117` (`VALUES (channelID, id, id, ...)` — invitee and inviter columns are the same id). Inviter-signature stays NULL; L33's public-channel carve-out accepts it.
+2. **System-invite** (rejected): pre-seed a sentinel `SYSTEM` user row, set `inviter_user_id = SYSTEM_user_id`. Audit trails read more legibly ("system-added" vs "self-added"), but it costs an extra always-present user row, an FK to a logical-not-real account, and a special case in every membership consumer that has to ignore the SYSTEM row in member listings, presence, etc.
+
+Self-invite wins because:
+
+- The signature is NULL either way (public-channel carve-out), so the inviter identity is *not* a security boundary here — both shapes are equally non-forgeable to an operator (operator can always insert any row directly).
+- L33's "non-NULL signature required when `channels.is_public = FALSE`" check is the actual defense; `inviter_user_id` only has to satisfy the FK.
+- Self-invite avoids the SYSTEM-row exclusion logic everywhere members are enumerated (`GET /api/channels/{id}/members`, presence, lazy-wrap recipients).
+- The same shape generalizes to any future `is_public = TRUE` channel without a per-channel "who pre-seeded the system row?" question.
+
+The convention is pinned by `tests/e2e/phase-10/registration-auto-add/registration_auto_add_test.go`: it asserts `inviter_user_id == user_id` and an absent `inviter_signature` for every auto-added `#general` row. Any future change to system-invite (or another scheme) must update both this section and that test in the same PR.
+
 ### Generalized public channels (decision log §9 — P2)
 
 `channels.is_public BOOLEAN DEFAULT FALSE`. `#general` is the special case `is_public = TRUE`. The `POST /api/channels` body gains optional `is_public: bool` (default false). Channels created without the flag are private-by-default, matching §6.
