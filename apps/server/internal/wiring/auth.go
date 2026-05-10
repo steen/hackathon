@@ -40,6 +40,7 @@ func registerAuth(mux *http.ServeMux, deps Deps, trustedProxy bool) authBundle {
 
 	ah := httpapi.NewAuthHandlers(httpapi.AuthDeps{
 		DB:           deps.Repo.DB(),
+		Repo:         deps.Repo,
 		Tickets:      tickets,
 		SigningKey:   deps.JWTSecret,
 		InviteCode:   deps.InviteCode,

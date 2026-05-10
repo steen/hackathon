@@ -11,6 +11,7 @@ import (
 	"hackathon/apps/server/internal/auth"
 	appdb "hackathon/apps/server/internal/db"
 	"hackathon/apps/server/internal/ratelimit"
+	"hackathon/apps/server/internal/repo"
 	"hackathon/migrations"
 )
 
@@ -37,8 +38,13 @@ func newRateLimitFixture(t *testing.T, loginCfg, registerCfg ratelimit.IPLimiter
 	if userCfg != nil {
 		ul = ratelimit.NewUserLimiter(*userCfg)
 	}
+	r, err := repo.New(sqlDB)
+	if err != nil {
+		t.Fatalf("repo.New: %v", err)
+	}
 	h := NewAuthHandlers(AuthDeps{
 		DB:          sqlDB,
+		Repo:        r,
 		Tickets:     tickets,
 		SigningKey:  []byte("test-signing-key-must-be-long-enough"),
 		InviteCode:  "INVITE-OK",
